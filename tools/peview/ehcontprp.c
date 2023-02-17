@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     wj32    2020-2022
+ *     dmex    2020-2022
  *
  */
 
@@ -176,6 +176,7 @@ INT_PTR CALLBACK PvpPeEhContDlgProc(
 
             PhDeleteLayoutManager(&context->LayoutManager);
 
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
         }
         break;

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -18,28 +18,25 @@
 #include <emenu.h>
 #include <guisup.h>
 #include <mapimg.h>
+#include <mapldr.h>
 #include <hexedit.h>
 #include <prsht.h>
 #include <prpsh.h>
 #include <treenew.h>
 #include <settings.h>
 #include <symprv.h>
-#include <workqueue.h>
 
 #include <shlobj.h>
-#include <uxtheme.h>
 
 #include "..\resource.h"
 
-extern PPH_STRING PvFileName;
+EXTERN_C PPH_STRING PvFileName;
 EXTERN_C PH_MAPPED_IMAGE PvMappedImage;
 extern PIMAGE_COR20_HEADER PvImageCor20Header;
 extern PPH_SYMBOL_PROVIDER PvSymbolProvider;
 extern HICON PvImageSmallIcon;
 extern HICON PvImageLargeIcon;
 extern PH_IMAGE_VERSION_INFO PvImageVersionInfo;
-
-#define PV_SCALE_DPI(Value) PhMultiplyDivide(Value, PhGlobalDpi, 96) // phapppub
 
 FORCEINLINE PWSTR PvpGetStringOrNa(
     _In_ PPH_STRING String
@@ -151,15 +148,29 @@ VOID PvConfigTreeBorders(
     _In_ HWND WindowHandle
     );
 
+VOID PvSetListViewImageList(
+    _In_ HWND WindowHandle,
+    _In_ HWND ListViewHandle
+    );
+
+VOID PvSetTreeViewImageList(
+    _In_ HWND WindowHandle,
+    _In_ HWND TreeViewHandle
+    );
+
 // settings
 
 extern BOOLEAN PeEnableThemeSupport;
 
-VOID PeInitializeSettings(
+VOID PvInitializeSettings(
     VOID
     );
 
-VOID PeSaveSettings(
+VOID PvSaveSettings(
+    VOID
+    );
+
+VOID PvUpdateCachedSettings(
     VOID
     );
 
@@ -462,6 +473,13 @@ INT_PTR CALLBACK PvpPeClrImportsDlgProc(
     _In_ LPARAM lParam
     );
 
+INT_PTR CALLBACK PvpPeClrTablesDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
 INT_PTR CALLBACK PvpPeCgfDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -574,6 +592,13 @@ INT_PTR CALLBACK PvpPeEhContDlgProc(
     _In_ LPARAM lParam
     );
 
+INT_PTR CALLBACK PvpPeVolatileDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
 INT_PTR CALLBACK PvpPeDebugPogoDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -589,6 +614,13 @@ INT_PTR CALLBACK PvpPeDebugCrtDlgProc(
     );
 
 INT_PTR CALLBACK PvpPeHashesDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
+INT_PTR CALLBACK PvpPeVersionInfoDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
@@ -665,12 +697,31 @@ PvClrImportFlagsToString(
     );
 
 EXTERN_C
+PPH_STRING
+NTAPI
+PvGetClrImageTargetFramework(
+    VOID
+    );
+
+EXTERN_C
 HRESULT
 NTAPI
 PvGetClrImageImports(
-    _In_ PVOID ClrMetaDataDispenser,
-    _In_ PWSTR FileName,
     _Out_ PPH_LIST* ClrImportsList
+    );
+
+typedef BOOLEAN (NTAPI* PPV_CLRTABLE_FUNCTION)(
+    _In_ ULONG TableIndex,
+    _In_ ULONG TableSize,
+    _In_ ULONG TableCount,
+    _In_ PPH_STRING TableName,
+    _In_opt_ PVOID Offset,
+    _In_opt_ PVOID Context
+    );
+
+EXTERN_C HRESULT PvClrImageEnumTables(
+    _In_ PPV_CLRTABLE_FUNCTION Callback,
+    _In_ PVOID Context
     );
 
 #endif

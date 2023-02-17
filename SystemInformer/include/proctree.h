@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2009-2016
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef PH_PROCTREE_H
 #define PH_PROCTREE_H
 
@@ -107,8 +119,11 @@
 #define PHPRTLC_PARENTCONSOLEPID 94
 #define PHPRTLC_COMMITSIZE 95
 #define PHPRTLC_PRIORITYBOOST 96
+#define PHPRTLC_CPUAVERAGE 97
+#define PHPRTLC_CPUKERNEL 98
+#define PHPRTLC_CPUUSER 99
 
-#define PHPRTLC_MAXIMUM 97
+#define PHPRTLC_MAXIMUM 100
 #define PHPRTLC_IOGROUP_COUNT 9
 
 #define PHPN_WSCOUNTERS 0x1
@@ -149,8 +164,6 @@ typedef struct _PH_PROCESS_NODE
 
     PH_STRINGREF TextCache[PHPRTLC_MAXIMUM];
 
-    PH_STRINGREF DescriptionText;
-
     // If the user has selected certain columns we need extra information that isn't retrieved by
     // the process provider.
     ULONG ValidMask;
@@ -187,7 +200,7 @@ typedef struct _PH_PROCESS_NODE
     // App ID
     PPH_STRING AppIdText;
     // DPI awareness
-    ULONG DpiAwareness;
+    PH_PROCESS_DPI_AWARENESS DpiAwareness;
     // File attributes
     LARGE_INTEGER FileLastWriteTime;
     LARGE_INTEGER FileEndOfFile;
@@ -259,6 +272,9 @@ typedef struct _PH_PROCESS_NODE
     PPH_STRING ParentPidText;
     PPH_STRING ParentConsolePidText;
     PPH_STRING SharedCommitText;
+    PPH_STRING CpuAverageText;
+    PPH_STRING CpuKernelText;
+    PPH_STRING CpuUserText;
 
     // Graph buffers
     PH_GRAPH_BUFFERS CpuGraphBuffers;

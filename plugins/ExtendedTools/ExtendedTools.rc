@@ -1,5 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
+#pragma code_page(65001)
+
 #include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
@@ -12,11 +14,10 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// English (Australia) resources
+// Neutral resources
 
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENA)
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
-#pragma code_page(1252)
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEU)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -101,12 +102,12 @@ BEGIN
     RTEXT           "Static",IDC_ZWRITEBYTESDELTA_V,82,44,56,8,SS_ENDELLIPSIS
 END
 
-IDD_OPTIONS DIALOGEX 0, 0, 215, 98
+IDD_OPTIONS DIALOGEX 0, 0, 225, 121
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Options"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Changes to settings will require a restart of System Informer.",IDC_STATIC,7,6,193,8
+    LTEXT           "Changes to settings will require a restart of System Informer.",IDC_STATIC,7,6,211,8
     CONTROL         "Enable Disk and Network monitoring",IDC_ENABLEETWMONITOR,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,20,130,10
     CONTROL         "Enable GPU monitoring",IDC_ENABLEGPUMONITOR,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,46,88,10
@@ -115,6 +116,7 @@ BEGIN
     CONTROL         "Enable GPU fahrenheit temperature",IDC_ENABLEFAHRENHEITTEMP,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,59,130,10
     CONTROL         "Enable FPS monitoring",IDC_ENABLEFPSMONITOR,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,72,130,10
+    LTEXT           "Note: FPS monitoring requires either administrative privileges or the current user a member of the ""Performance Log Users"" group.",IDC_STATIC,7,91,211,23
 END
 
 IDD_WSWATCH DIALOGEX 0, 0, 325, 266
@@ -195,10 +197,10 @@ BEGIN
     LTEXT           "Receive bytes delta",IDC_STATIC,8,22,65,8
     LTEXT           "Sends delta",IDC_STATIC,8,33,39,8
     LTEXT           "Send bytes delta",IDC_STATIC,8,44,56,8
-    RTEXT           "Static",IDC_ZRECEIVESDELTA_V,84,11,54,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZRECEIVESDELTA_V,64,11,74,8,SS_ENDELLIPSIS
     RTEXT           "Static",IDC_ZRECEIVEBYTESDELTA_V,78,22,60,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZSENDSDELTA_V,84,33,54,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZSENDBYTESDELTA_V,82,44,56,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZSENDSDELTA_V,58,33,80,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZSENDBYTESDELTA_V,70,44,68,8,SS_ENDELLIPSIS
 END
 
 IDD_SYSINFO_NET DIALOGEX 0, 0, 315, 186
@@ -230,12 +232,12 @@ BEGIN
     LTEXT           "Writes",IDC_STATIC,10,44,22,8
     LTEXT           "Write bytes",IDC_STATIC,10,55,38,8
     LTEXT           "Write bytes delta",IDC_STATIC,10,66,57,8
-    RTEXT           "Static",IDC_ZREADS_V,57,11,54,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZREADBYTES_V,73,22,38,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZREADBYTESDELTA_V,73,33,38,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZWRITES_V,57,44,54,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZWRITEBYTES_V,73,55,38,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZWRITEBYTESDELTA_V,73,66,38,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZREADS_V,37,11,74,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZREADBYTES_V,52,22,59,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZREADBYTESDELTA_V,69,33,42,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZWRITES_V,38,44,73,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZWRITEBYTES_V,52,55,59,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZWRITEBYTESDELTA_V,70,66,41,8,SS_ENDELLIPSIS
     GROUPBOX        "Network I/O",IDC_STATIC,123,0,124,82
     LTEXT           "Receives",IDC_STATIC,132,11,30,8
     LTEXT           "Receive bytes",IDC_STATIC,132,23,46,8
@@ -243,12 +245,12 @@ BEGIN
     LTEXT           "Sends",IDC_STATIC,132,45,20,8
     LTEXT           "Send bytes",IDC_STATIC,132,56,37,8
     LTEXT           "Send bytes delta",IDC_STATIC,132,67,56,8
-    RTEXT           "Static",IDC_ZRECEIVES_V,184,11,54,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZRECEIVEBYTES_V,200,23,38,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZRECEIVES_V,167,11,71,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZRECEIVEBYTES_V,182,23,56,8,SS_ENDELLIPSIS
     RTEXT           "Static",IDC_ZRECEIVEBYTESDELTA_V,200,34,38,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZSENDS_V,184,45,54,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZSENDBYTES_V,200,56,38,8,SS_ENDELLIPSIS
-    RTEXT           "Static",IDC_ZSENDBYTESDELTA_V,200,67,38,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZSENDS_V,160,45,78,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZSENDBYTES_V,176,56,62,8,SS_ENDELLIPSIS
+    RTEXT           "Static",IDC_ZSENDBYTESDELTA_V,192,67,46,8,SS_ENDELLIPSIS
 END
 
 IDD_SYSINFO_GPUDETAILS DIALOGEX 0, 0, 309, 210
@@ -271,6 +273,96 @@ BEGIN
     GROUPBOX        "Time until frame rendered",IDC_GROUPFPSFRAMERENDER,7,133,355,22,0,WS_EX_TRANSPARENT
     GROUPBOX        "Time until frame displayed",IDC_GROUPFPSFRAMEDISPLAY,7,159,355,22,0,WS_EX_TRANSPARENT
     GROUPBOX        "Average display latency",IDC_GROUPFPSDISPLAYLATENCY,7,184,355,22,0,WS_EX_TRANSPARENT
+END
+
+IDD_WCT_DIALOG DIALOGEX 0, 0, 325, 180
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Wait Chain Traversal"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    CONTROL         "Windows",IDC_WCT_TREE,"PhTreeNew",WS_CLIPSIBLINGS | WS_CLIPCHILDREN | 0x2,1,1,323,161,WS_EX_CLIENTEDGE
+    DEFPUSHBUTTON   "Close",IDOK,274,164,50,14
+    PUSHBUTTON      "Refresh",IDC_REFRESH,2,164,50,14
+END
+
+IDD_REPARSEDIALOG DIALOGEX 0, 0, 325, 180
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Objects"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "Close",IDCANCEL,274,164,50,14
+    CONTROL         "",IDC_REPARSE_LIST,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,1,1,323,162
+    PUSHBUTTON      "Refresh",IDRETRY,1,164,50,14
+END
+
+IDD_PIPEDIALOG DIALOGEX 0, 0, 325, 180
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Named Pipes"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "Close",IDOK,274,164,50,14
+    CONTROL         "",IDC_PIPELIST,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,1,1,323,162
+    PUSHBUTTON      "Refresh",IDRETRY,1,164,50,14
+END
+
+IDD_FIRMWARE DIALOGEX 0, 0, 325, 180
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Firmware Table"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "Close",IDOK,274,164,50,14
+    CONTROL         "",IDC_FIRMWARE_BOOT_LIST,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,1,1,323,162
+    PUSHBUTTON      "Refresh",IDC_FIRMWARE_BOOT_REFRESH,1,164,50,14
+END
+
+IDD_FIRMWARE_EDITVAR DIALOGEX 0, 0, 441, 269
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "UEFI Variable"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    CONTROL         "",IDC_FIRMWARE_HEXEDITVAR,"PhHexEdit",WS_CLIPSIBLINGS | WS_VSCROLL | WS_TABSTOP,7,7,427,239
+    PUSHBUTTON      "Re-read",IDC_FIRMWARE_REREAD,7,248,50,14
+    PUSHBUTTON      "Write",IDC_FIRMWARE_WRITE,60,248,50,14,WS_DISABLED
+    PUSHBUTTON      "Save...",IDC_FIRMWARE_SAVE,331,248,50,14
+    PUSHBUTTON      "Close",IDOK,384,248,50,14
+    COMBOBOX        IDC_FIRMWARE_BYTESPERROW,114,249,86,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+END
+
+IDD_OBJMGR DIALOGEX 0, 0, 699, 364
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Object Manager"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    CONTROL         "",IDC_OBJMGR_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHAREIMAGELISTS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,153,2,544,360
+    CONTROL         "",IDC_OBJMGR_TREE,"SysTreeView32",TVS_HASBUTTONS | TVS_SHOWSELALWAYS | TVS_TRACKSELECT | TVS_FULLROWSELECT | WS_BORDER | WS_HSCROLL | WS_TABSTOP,2,2,148,360
+END
+
+IDD_POOL DIALOGEX 0, 0, 641, 383
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "Pool Table"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    CONTROL         "",IDC_POOLTREE,"PhTreeNew",WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP | 0xa,4,3,633,361,WS_EX_CLIENTEDGE
+    EDITTEXT        IDC_POOLSEARCH,4,366,169,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "Close",IDCANCEL,587,366,50,14
+    CONTROL         "Enable column remaining space resize",IDC_POOL_AUTOSIZE_COLUMNS,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,179,369,135,10
+END
+
+IDD_BIGPOOL DIALOGEX 0, 0, 469, 273
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Large Pool Allocations"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "Close",IDCANCEL,413,252,50,14
+    CONTROL         "",IDC_BIGPOOLLIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,7,455,243
+    PUSHBUTTON      "Refresh",IDC_REFRESH,7,252,50,14
 END
 
 
@@ -321,9 +413,9 @@ BEGIN
     IDD_OPTIONS, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 208
+        RIGHTMARGIN, 218
         TOPMARGIN, 7
-        BOTTOMMARGIN, 91
+        BOTTOMMARGIN, 114
     END
 
     IDD_WSWATCH, DIALOG
@@ -386,10 +478,143 @@ BEGIN
         TOPMARGIN, 7
         BOTTOMMARGIN, 230
     END
+
+    IDD_WCT_DIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 1
+        RIGHTMARGIN, 324
+        TOPMARGIN, 1
+    END
+
+    IDD_REPARSEDIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 1
+        RIGHTMARGIN, 324
+        TOPMARGIN, 1
+    END
+
+    IDD_PIPEDIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 1
+        RIGHTMARGIN, 324
+        TOPMARGIN, 1
+    END
+
+    IDD_FIRMWARE, DIALOG
+    BEGIN
+        LEFTMARGIN, 1
+        RIGHTMARGIN, 324
+        TOPMARGIN, 1
+    END
+
+    IDD_FIRMWARE_EDITVAR, DIALOG
+    BEGIN
+    END
+
+    IDD_OBJMGR, DIALOG
+    BEGIN
+        LEFTMARGIN, 2
+        RIGHTMARGIN, 697
+        TOPMARGIN, 2
+        BOTTOMMARGIN, 362
+    END
+
+    IDD_POOL, DIALOG
+    BEGIN
+        LEFTMARGIN, 4
+        RIGHTMARGIN, 637
+        TOPMARGIN, 3
+        BOTTOMMARGIN, 380
+    END
+
+    IDD_BIGPOOL, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 462
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 266
+    END
 END
 #endif    // APSTUDIO_INVOKED
 
-#endif    // English (Australia) resources
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_FOLDER              ICON                    "resources\\folder.ico"
+
+IDI_MUTANT              ICON                    "resources\\mutant.ico"
+
+IDI_DRIVER              ICON                    "resources\\driver.ico"
+
+IDI_SECTION             ICON                    "resources\\section.ico"
+
+IDI_LINK                ICON                    "resources\\link.ico"
+
+IDI_KEY                 ICON                    "resources\\key.ico"
+
+IDI_PORT                ICON                    "resources\\port.ico"
+
+IDI_SESSION             ICON                    "resources\\session.ico"
+
+IDI_EVENT               ICON                    "resources\\event.ico"
+
+IDI_DEVICE              ICON                    "resources\\device.ico"
+
+IDI_UNKNOWN             ICON                    "resources\\unknown.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// TXT
+//
+
+IDR_TXT_POOLTAGS        TXT                     "resources\\pooltag.txt"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 3,0,0,0
+ PRODUCTVERSION 3,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName", "System Informer"
+            VALUE "FileDescription", "System Informer"
+            VALUE "FileVersion", "3.0.0.0"
+            VALUE "InternalName", "ExtendedTools.dll"
+            VALUE "LegalCopyright", "Copyright (c) Winsider Seminars & Solutions, Inc.  All rights reserved."
+            VALUE "OriginalFilename", "ExtendedTools.dll"
+            VALUE "ProductName", "System Informer"
+            VALUE "ProductVersion", "3.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END
+
+#endif    // Neutral resources
 /////////////////////////////////////////////////////////////////////////////
 
 

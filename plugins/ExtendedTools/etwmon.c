@@ -6,12 +6,13 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2019-2022
+ *     dmex    2019-2023
  *
  */
 
 #include "exttools.h"
 #include "etwmon.h"
+#include <symprv.h>
 
 ULONG NTAPI EtpEtwBufferCallback(
     _In_ PEVENT_TRACE_LOGFILE Buffer
@@ -41,33 +42,44 @@ NTSTATUS EtpRundownEtwMonitorThreadStart(
     _In_ PVOID Parameter
     );
 
+// 3875f5e7-8f79-406c-8cb9-ee8fd8bfcfbd
 static GUID SystemInformerGuid = { 0x3875f5e7, 0x8f79, 0x406c, { 0x8c, 0xb9, 0xee, 0x8f, 0xd8, 0xbf, 0xcf, 0xbd } };
+// 9e814aad-3204-11d2-9a82-006008a86939
 static GUID SystemTraceControlGuid_I = { 0x9e814aad, 0x3204, 0x11d2, { 0x9a, 0x82, 0x00, 0x60, 0x08, 0xa8, 0x69, 0x39 } };
+// 3b9c9951-3480-4220-9377-9c8e5184f5cd
 static GUID KernelRundownGuid_I = { 0x3b9c9951, 0x3480, 0x4220, { 0x93, 0x77, 0x9c, 0x8e, 0x51, 0x84, 0xf5, 0xcd } };
+// 3d6fa8d4-fe05-11d0-9dda-00c04fd7ba7c
 static GUID DiskIoGuid_I = { 0x3d6fa8d4, 0xfe05, 0x11d0, { 0x9d, 0xda, 0x00, 0xc0, 0x4f, 0xd7, 0xba, 0x7c } };
+// 90cbdc39-4a3e-11d1-84f4-0000f80464e3
 static GUID FileIoGuid_I = { 0x90cbdc39, 0x4a3e, 0x11d1, { 0x84, 0xf4, 0x00, 0x00, 0xf8, 0x04, 0x64, 0xe3 } };
+// 9a280ac0-c8e0-11d1-84e2-00c04fb998a2
 static GUID TcpIpGuid_I = { 0x9a280ac0, 0xc8e0, 0x11d1, { 0x84, 0xe2, 0x00, 0xc0, 0x4f, 0xb9, 0x98, 0xa2 } };
+// bf3a50c5-a9c9-4988-a005-2df0b7c80f80
 static GUID UdpIpGuid_I = { 0xbf3a50c5, 0xa9c9, 0x4988, { 0xa0, 0x05, 0x2d, 0xf0, 0xb7, 0xc8, 0x0f, 0x80 } };
+// def2fe46-7bd6-4b80-bd94-f57fe20d0ce3
+static GUID StackWalkGuid_I = { 0xdef2fe46, 0x7bd6, 0x4b80, { 0xbd, 0x94, 0xf5, 0x7f, 0xe2, 0x0d, 0x0c, 0xe3 } };
 
 // ETW tracing layer
 
 BOOLEAN EtEtwEnabled = FALSE;
 ULONG EtEtwStatus = ERROR_SUCCESS;
 static UNICODE_STRING EtpSharedKernelLoggerName = RTL_CONSTANT_STRING(KERNEL_LOGGER_NAME);
-static UNICODE_STRING EtpPrivateKernelLoggerName = RTL_CONSTANT_STRING(L"SiEtwKernelSession");
+static UNICODE_STRING EtpPrivateKernelLoggerName = RTL_CONSTANT_STRING(L"SiKernelTraceSession");
 static TRACEHANDLE EtpSessionHandle = INVALID_PROCESSTRACE_HANDLE;
 static PUNICODE_STRING EtpActualKernelLoggerName = NULL;
 static PGUID EtpActualSessionGuid = NULL;
-static PEVENT_TRACE_PROPERTIES EtpTraceProperties = NULL;
+static UCHAR EtpTracePropertiesBuffer[sizeof(EVENT_TRACE_PROPERTIES) + max(sizeof(KERNEL_LOGGER_NAME), sizeof(L"SiKernelTraceSession"))];
+static PEVENT_TRACE_PROPERTIES EtpTraceProperties = (PEVENT_TRACE_PROPERTIES)EtpTracePropertiesBuffer;
 static BOOLEAN EtpEtwActive = FALSE;
 static BOOLEAN EtpStartedSession = FALSE;
 static BOOLEAN EtpEtwExiting = FALSE;
 
 // ETW rundown layer
 
-static UNICODE_STRING EtpRundownLoggerName = RTL_CONSTANT_STRING(L"SiEtwRundownSession");
+static UNICODE_STRING EtpRundownLoggerName = RTL_CONSTANT_STRING(L"SiKernelRundownSession");
 static TRACEHANDLE EtpRundownSessionHandle = INVALID_PROCESSTRACE_HANDLE;
-static PEVENT_TRACE_PROPERTIES EtpRundownTraceProperties = NULL;
+static UCHAR EtpRundownTracePropertiesBuffer[sizeof(EVENT_TRACE_PROPERTIES) + sizeof(L"SiKernelRundownSession")];
+static PEVENT_TRACE_PROPERTIES EtpRundownTraceProperties = (PEVENT_TRACE_PROPERTIES)EtpRundownTracePropertiesBuffer;
 static BOOLEAN EtpRundownActive = FALSE;
 static BOOLEAN EtpRundownEnabled = FALSE;
 
@@ -90,9 +102,10 @@ VOID EtEtwMonitorUninitialization(
     VOID
     )
 {
+    EtpEtwExiting = TRUE;
+
     if (EtEtwEnabled)
     {
-        EtpEtwExiting = TRUE;
         EtStopEtwSession();
     }
 
@@ -121,10 +134,7 @@ VOID EtStartEtwSession(
 
     bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + EtpActualKernelLoggerName->Length + sizeof(UNICODE_NULL);
 
-    if (!EtpTraceProperties)
-        EtpTraceProperties = PhAllocate(bufferSize);
-
-    memset(EtpTraceProperties, 0, sizeof(EVENT_TRACE_PROPERTIES));
+    memset(EtpTraceProperties, 0, sizeof(EtpTracePropertiesBuffer));
     EtpTraceProperties->Wnode.BufferSize = bufferSize;
     EtpTraceProperties->Wnode.Guid = *EtpActualSessionGuid;
     EtpTraceProperties->Wnode.ClientContext = 1;
@@ -161,6 +171,46 @@ VOID EtStartEtwSession(
             );
     }
 
+    // Enable stack tracing.
+    // NOTE: This only enables stack traces for SystemTraceControlGuid events while the
+    // EVENT_ENABLE_PROPERTY_STACK_TRACE flag must be used for other guids. (dmex)
+    //if (PhWindowsVersion >= WINDOWS_8 && EtEtwStatus == ERROR_SUCCESS)
+    //{
+    //    UCHAR eventBuffer[FIELD_OFFSET(EVENT_TRACE_SYSTEM_EVENT_INFORMATION, HookId) + sizeof(ULONG[1])];
+    //    PEVENT_TRACE_SYSTEM_EVENT_INFORMATION eventTraceStackTracingInfo;
+    //
+    //    memset(eventBuffer, 0, sizeof(eventBuffer));
+    //    eventTraceStackTracingInfo = (PEVENT_TRACE_SYSTEM_EVENT_INFORMATION)eventBuffer;
+    //    eventTraceStackTracingInfo->EventTraceInformationClass = EventTraceStackTracingInformation;
+    //    eventTraceStackTracingInfo->TraceHandle = EtpSessionHandle;
+    //    eventTraceStackTracingInfo->HookId[0] = PERFINFO_LOG_TYPE_FILENAME_CREATE;
+    //
+    //    EtEtwStatus = PhNtStatusToDosError(NtSetSystemInformation(
+    //        SystemPerformanceTraceInformation,
+    //        eventTraceStackTracingInfo,
+    //        sizeof(eventBuffer)
+    //        ));
+    //}
+    //
+    // Enable trace flags. (dmex)
+    //if (PhWindowsVersion >= WINDOWS_8 && EtEtwStatus == ERROR_SUCCESS)
+    //{
+    //    EVENT_TRACE_GROUPMASK_INFORMATION eventTraceGroupMaskInfo;
+    //    PERFINFO_MASK eventTraceInfoMask = PERF_DISK_IO | PERF_NETWORK | PERF_NO_SYSCONFIG;
+    //
+    //    memset(&eventTraceGroupMaskInfo, 0, sizeof(EVENT_TRACE_GROUPMASK_INFORMATION));
+    //    eventTraceGroupMaskInfo.EventTraceInformationClass = EventTraceGroupMaskInformation;
+    //    eventTraceGroupMaskInfo.TraceHandle = EtpSessionHandle;
+    //    NtQuerySystemInformation(SystemPerformanceTraceInformation, &eventTraceGroupMaskInfo, sizeof(eventTraceGroupMaskInfo), 0);
+    //    PERFINFO_OR_GROUP_WITH_GROUPMASK(eventTraceInfoMask, &eventTraceGroupMaskInfo.EventTraceGroupMasks);
+    //
+    //    EtEtwStatus = PhNtStatusToDosError(NtSetSystemInformation(
+    //        SystemPerformanceTraceInformation,
+    //        &eventTraceGroupMaskInfo,
+    //        sizeof(EVENT_TRACE_GROUPMASK_INFORMATION)
+    //        ));
+    //}
+
     if (EtEtwStatus == ERROR_SUCCESS)
     {
         EtEtwEnabled = TRUE;
@@ -179,6 +229,7 @@ VOID EtStartEtwSession(
     {
         EtpEtwActive = FALSE;
         EtpStartedSession = FALSE;
+        EtpSessionHandle = INVALID_PROCESSTRACE_HANDLE; // StartTrace set the handle 0 on failure. (dmex)
     }
 }
 
@@ -187,9 +238,7 @@ ULONG EtControlEtwSession(
     )
 {
     // If we have a session handle, we use that instead of the logger name.
-
     EtpTraceProperties->LogFileNameOffset = 0; // make sure it is 0, otherwise ControlTrace crashes
-
     return ControlTrace(
         EtpStartedSession ? EtpSessionHandle : 0,
         EtpStartedSession ? NULL : EtpActualKernelLoggerName->Buffer,
@@ -204,25 +253,6 @@ VOID EtStopEtwSession(
 {
     if (EtEtwEnabled)
         EtControlEtwSession(EVENT_TRACE_CONTROL_STOP);
-}
-
-VOID EtFlushEtwSession(
-    VOID
-    )
-{
-    if (EtpSessionHandle == INVALID_PROCESSTRACE_HANDLE)
-        return;
-
-    // Note: Using FLUSH controlcode to flush the session instead of the trace (e.g. when EtSessionHandle is NULL)
-    // causes memory/handle leaks starting with Windows 10. The ControlTraceW function will allocate a
-    // seperate trace session with GUID {3595ab5c-042a-4c8e-b942-2d059bfeb1b1} for the
-    // PrivateLoggerNotificationGuid forgetting to cleanup afterwards, creating new trace sessions and
-    // new handles during every call to ControlTraceW. Our default flush interval is 1-sec so this bug would leak
-    // an average 60 handles a second... We don't currently flush the session (only the trace)
-    // so make sure EtSessionHandle is valid before calling FLUSH. (dmex)
-
-    if (EtEtwEnabled)
-        EtControlEtwSession(EVENT_TRACE_CONTROL_FLUSH);
 }
 
 ULONG NTAPI EtpEtwBufferCallback(
@@ -241,8 +271,6 @@ VOID NTAPI EtpEtwEventCallback(
 
     if (IsEqualGUID(&EventRecord->EventHeader.ProviderId, &DiskIoGuid_I))
     {
-        // DiskIo
-
         ET_ETW_DISK_EVENT diskEvent;
 
         memset(&diskEvent, 0, sizeof(ET_ETW_DISK_EVENT));
@@ -260,7 +288,7 @@ VOID NTAPI EtpEtwEventCallback(
 
         if (diskEvent.Type != ULONG_MAX)
         {
-            DiskIo_TypeGroup1 *data = EventRecord->UserData;
+            DiskIo_TypeGroup1* data = EventRecord->UserData;
 
             if (PhWindowsVersion >= WINDOWS_8)
             {
@@ -300,8 +328,6 @@ VOID NTAPI EtpEtwEventCallback(
     }
     else if (IsEqualGUID(&EventRecord->EventHeader.ProviderId, &FileIoGuid_I))
     {
-        // FileIo
-
         ET_ETW_FILE_EVENT fileEvent;
 
         memset(&fileEvent, 0, sizeof(ET_ETW_FILE_EVENT));
@@ -309,14 +335,17 @@ VOID NTAPI EtpEtwEventCallback(
 
         switch (EventRecord->EventHeader.EventDescriptor.Opcode)
         {
-        case 0: // Name
+        case EVENT_TRACE_TYPE_FILENAME:
             fileEvent.Type = EtEtwFileNameType;
             break;
-        case 32: // FileCreate
+        case EVENT_TRACE_TYPE_FILENAME_CREATE:
             fileEvent.Type = EtEtwFileCreateType;
             break;
-        case 35: // FileDelete
+        case EVENT_TRACE_TYPE_FILENAME_DELETE:
             fileEvent.Type = EtEtwFileDeleteType;
+            break;
+        case EVENT_TRACE_TYPE_FILENAME_RUNDOWN:
+            fileEvent.Type = EtEtwFileRundownType;
             break;
         }
 
@@ -324,17 +353,41 @@ VOID NTAPI EtpEtwEventCallback(
         {
             if (PhIsExecutingInWow64())
             {
-                FileIo_Name_Wow64 *dataWow64 = EventRecord->UserData;
+                if (EventRecord->EventHeader.EventDescriptor.Version == 2)
+                {
+                    ULONG fileNameLength = (EventRecord->UserDataLength - UFIELD_OFFSET(FileIo_Name_Wow64, FileName)) - sizeof(UNICODE_NULL);
+                    FileIo_Name_Wow64* dataWow64 = EventRecord->UserData;
 
-                fileEvent.FileObject = (PVOID)dataWow64->FileObject;
-                PhInitializeStringRefLongHint(&fileEvent.FileName, dataWow64->FileName);
+                    fileEvent.FileObject = (PVOID)dataWow64->FileObject;
+                    fileEvent.FileName.Length = fileNameLength;
+                    fileEvent.FileName.Buffer = dataWow64->FileName;
+                }
+                else
+                {
+                    FileIo_Name_Wow64* dataWow64 = EventRecord->UserData;
+
+                    fileEvent.FileObject = (PVOID)dataWow64->FileObject;
+                    PhInitializeStringRefLongHint(&fileEvent.FileName, dataWow64->FileName);
+                }
             }
             else
             {
-                FileIo_Name *data = EventRecord->UserData;
+                if (EventRecord->EventHeader.EventDescriptor.Version == 2)
+                {
+                    ULONG fileNameLength = (EventRecord->UserDataLength - UFIELD_OFFSET(FileIo_Name, FileName)) - sizeof(UNICODE_NULL);
+                    FileIo_Name* data = EventRecord->UserData;
 
-                fileEvent.FileObject = (PVOID)data->FileObject;
-                PhInitializeStringRefLongHint(&fileEvent.FileName, data->FileName);
+                    fileEvent.FileObject = (PVOID)data->FileObject;
+                    fileEvent.FileName.Length = fileNameLength;
+                    fileEvent.FileName.Buffer = data->FileName;
+                }
+                else
+                {
+                    FileIo_Name* data = EventRecord->UserData;
+
+                    fileEvent.FileObject = (PVOID)data->FileObject;
+                    PhInitializeStringRefLongHint(&fileEvent.FileName, data->FileName);
+                }
             }
 
             EtDiskProcessFileEvent(&fileEvent);
@@ -345,8 +398,6 @@ VOID NTAPI EtpEtwEventCallback(
         IsEqualGUID(&EventRecord->EventHeader.ProviderId, &UdpIpGuid_I)
         )
     {
-        // TcpIp/UdpIp
-
         ET_ETW_NETWORK_EVENT networkEvent;
 
         memset(&networkEvent, 0, sizeof(ET_ETW_NETWORK_EVENT));
@@ -354,19 +405,19 @@ VOID NTAPI EtpEtwEventCallback(
 
         switch (EventRecord->EventHeader.EventDescriptor.Opcode)
         {
-        case EVENT_TRACE_TYPE_SEND: // send
+        case EVENT_TRACE_TYPE_SEND:
             networkEvent.Type = EtEtwNetworkSendType;
             networkEvent.ProtocolType = PH_IPV4_NETWORK_TYPE;
             break;
-        case EVENT_TRACE_TYPE_RECEIVE: // receive
+        case EVENT_TRACE_TYPE_RECEIVE:
             networkEvent.Type = EtEtwNetworkReceiveType;
             networkEvent.ProtocolType = PH_IPV4_NETWORK_TYPE;
             break;
-        case EVENT_TRACE_TYPE_SEND + 16: // send ipv6
+        case EVENT_TRACE_TYPE_TCPIP_SEND_IPV6:
             networkEvent.Type = EtEtwNetworkSendType;
             networkEvent.ProtocolType = PH_IPV6_NETWORK_TYPE;
             break;
-        case EVENT_TRACE_TYPE_RECEIVE + 16: // receive ipv6
+        case EVENT_TRACE_TYPE_TCPIP_RECEIVE_IPV6:
             networkEvent.Type = EtEtwNetworkReceiveType;
             networkEvent.ProtocolType = PH_IPV6_NETWORK_TYPE;
             break;
@@ -384,7 +435,7 @@ VOID NTAPI EtpEtwEventCallback(
 
             if (networkEvent.ProtocolType & PH_IPV4_NETWORK_TYPE)
             {
-                TcpIpOrUdpIp_IPV4_Header *data = EventRecord->UserData;
+                TcpIpOrUdpIp_IPV4_Header* data = EventRecord->UserData;
 
                 networkEvent.ClientId.UniqueProcess = UlongToHandle(data->PID);
                 networkEvent.TransferSize = data->size;
@@ -398,7 +449,7 @@ VOID NTAPI EtpEtwEventCallback(
             }
             else if (networkEvent.ProtocolType & PH_IPV6_NETWORK_TYPE)
             {
-                TcpIpOrUdpIp_IPV6_Header *data = EventRecord->UserData;
+                TcpIpOrUdpIp_IPV6_Header* data = EventRecord->UserData;
 
                 networkEvent.ClientId.UniqueProcess = UlongToHandle(data->PID);
                 networkEvent.TransferSize = data->size;
@@ -429,6 +480,49 @@ VOID NTAPI EtpEtwEventCallback(
             EtProcessNetworkEvent(&networkEvent);
         }
     }
+    //else if (IsEqualGUID(&EventRecord->EventHeader.ProviderId, &StackWalkGuid_I))
+    //{
+    //    ULONG stackWalkEventCount = (EventRecord->UserDataLength - UFIELD_OFFSET(ET_ETW_STACKWALK_EVENT, Stack)) / sizeof(ULONG_PTR);
+    //    PET_ETW_STACKWALK_EVENT stackWalkEvent = EventRecord->UserData;
+    //    PPH_SYMBOL_PROVIDER symbolProvider;
+    //
+    //    symbolProvider = PhCreateSymbolProvider(UlongToHandle(stackWalkEvent->StackProcess));
+    //    PhLoadSymbolProviderOptions(symbolProvider);
+    //    PhLoadModulesForProcessSymbolProvider(symbolProvider, UlongToHandle(stackWalkEvent->StackProcess));
+    //    //dprintf("Stack for process: %lu [TID: %lu]\n", stackWalkEvent->StackProcess, stackWalkEvent->StackThread);
+    //
+    //    for (ULONG i = 0; i < stackWalkEventCount; i++)
+    //    {
+    //        PPH_STRING name;
+    //
+    //        if (!stackWalkEvent->Stack[i])
+    //            break;
+    //
+    //        name = PhGetSymbolFromAddress(
+    //            symbolProvider,
+    //            (ULONG64)stackWalkEvent->Stack[i],
+    //            NULL,
+    //            NULL,
+    //            NULL,
+    //            NULL
+    //            );
+    //
+    //        //dprintf("%lu: %S\n", i, PhGetStringOrEmpty(name));
+    //        PhClearReference(&name);
+    //    }
+    //
+    //    PhDereferenceObject(symbolProvider);
+    //}
+    //else
+    //{
+    //    PPH_STRING guidString = PhFormatGuid(&EventRecord->EventHeader.ProviderId);
+    //
+    //    if (guidString)
+    //    {
+    //        dprintf("Event: %S (opcode: %lu)\n", guidString->Buffer, EventRecord->EventHeader.EventDescriptor.Opcode);
+    //        PhDereferenceObject(guidString);
+    //    }
+    //}
 }
 
 NTSTATUS EtpEtwMonitorThreadStart(
@@ -439,15 +533,15 @@ NTSTATUS EtpEtwMonitorThreadStart(
     EVENT_TRACE_LOGFILE logFile;
     TRACEHANDLE traceHandle;
 
-    PhSetThreadName(NtCurrentThread(), L"SiEtwMonitorThread");
+    PhSetThreadName(NtCurrentThread(), L"EtwMonitorThread");
 
     memset(&logFile, 0, sizeof(EVENT_TRACE_LOGFILE));
     logFile.LoggerName = EtpActualKernelLoggerName->Buffer;
-    logFile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+    logFile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
     logFile.BufferCallback = EtpEtwBufferCallback;
     logFile.EventRecordCallback = EtpEtwEventCallback;
 
-    while (TRUE)
+    while (!EtpEtwExiting)
     {
         result = ERROR_SUCCESS;
         traceHandle = OpenTrace(&logFile);
@@ -485,12 +579,29 @@ ULONG EtStartEtwRundown(
     ULONG result;
     ULONG bufferSize;
 
-    bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + EtpRundownLoggerName.Length + sizeof(WCHAR);
+    if (PhWindowsVersion >= WINDOWS_8 && EtEtwEnabled && EtpSessionHandle != INVALID_PROCESSTRACE_HANDLE)
+    {
+        // Note: Enable the filename rundown in our existing trace session
+        // without creating a seperate trace session/thread. If this returns an
+        // error then we'll fallback to creating a sepeate trace session/thread. (dmex)
+        result = EnableTraceEx2(
+            EtpSessionHandle,
+            &KernelRundownGuid_I,
+            EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+            TRACE_LEVEL_NONE,
+            KERNEL_FILE_KEYWORD_FILENAME,
+            0,
+            INFINITE,
+            NULL
+            );
 
-    if (!EtpRundownTraceProperties)
-        EtpRundownTraceProperties = PhAllocate(bufferSize);
+        if (result == ERROR_SUCCESS)
+            return result;
+    }
 
-    memset(EtpRundownTraceProperties, 0, sizeof(EVENT_TRACE_PROPERTIES));
+    bufferSize = sizeof(EVENT_TRACE_PROPERTIES) + EtpRundownLoggerName.Length + sizeof(UNICODE_NULL);
+
+    memset(EtpRundownTraceProperties, 0, sizeof(EtpRundownTracePropertiesBuffer));
     EtpRundownTraceProperties->Wnode.BufferSize = bufferSize;
     EtpRundownTraceProperties->Wnode.ClientContext = 1;
     EtpRundownTraceProperties->Wnode.Flags = WNODE_FLAG_TRACED_GUID;
@@ -512,10 +623,8 @@ ULONG EtStartEtwRundown(
     if (result == ERROR_SUCCESS)
     {
         EtpStopEtwRundownSession();
-        // ControlTrace (called from EtpStopEtwRundownSession) screws up the structure.
-        EtpRundownTraceProperties->Wnode.BufferSize = bufferSize;
+
         EtpRundownTraceProperties->LogFileNameOffset = 0;
-        EtpRundownTraceProperties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
         result = StartTrace(
             &EtpRundownSessionHandle,
             EtpRundownLoggerName.Buffer,
@@ -533,7 +642,10 @@ ULONG EtStartEtwRundown(
     }
 
     if (result != ERROR_SUCCESS)
+    {
+        EtpRundownSessionHandle = INVALID_PROCESSTRACE_HANDLE; // StartTrace set the handle 0 on failure. (dmex)
         return result;
+    }
 
     EtpRundownActive = TRUE;
     PhCreateThread2(EtpRundownEtwMonitorThreadStart, NULL);
@@ -560,13 +672,8 @@ VOID NTAPI EtpRundownEtwEventCallback(
     _In_ PEVENT_RECORD EventRecord
     )
 {
-    // TODO: Find a way to call CloseTrace when the enumeration finishes so we can
-    // stop the trace cleanly.
-
     if (IsEqualGUID(&EventRecord->EventHeader.ProviderId, &FileIoGuid_I))
     {
-        // FileIo
-
         ET_ETW_FILE_EVENT fileEvent;
 
         memset(&fileEvent, 0, sizeof(ET_ETW_FILE_EVENT));
@@ -574,7 +681,7 @@ VOID NTAPI EtpRundownEtwEventCallback(
 
         switch (EventRecord->EventHeader.EventDescriptor.Opcode)
         {
-        case 36: // FileRundown
+        case EVENT_TRACE_TYPE_FILENAME_RUNDOWN:
             fileEvent.Type = EtEtwFileRundownType;
             break;
         }
@@ -583,14 +690,14 @@ VOID NTAPI EtpRundownEtwEventCallback(
         {
             if (PhIsExecutingInWow64())
             {
-                FileIo_Name_Wow64 *dataWow64 = EventRecord->UserData;
+                FileIo_Name_Wow64* dataWow64 = EventRecord->UserData;
 
                 fileEvent.FileObject = (PVOID)dataWow64->FileObject;
                 PhInitializeStringRefLongHint(&fileEvent.FileName, dataWow64->FileName);
             }
             else
             {
-                FileIo_Name *data = EventRecord->UserData;
+                FileIo_Name* data = EventRecord->UserData;
 
                 fileEvent.FileObject = (PVOID)data->FileObject;
                 PhInitializeStringRefLongHint(&fileEvent.FileName, data->FileName);
@@ -610,7 +717,7 @@ NTSTATUS EtpRundownEtwMonitorThreadStart(
 
     memset(&logFile, 0, sizeof(EVENT_TRACE_LOGFILE));
     logFile.LoggerName = EtpRundownLoggerName.Buffer;
-    logFile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+    logFile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
     logFile.BufferCallback = EtpRundownEtwBufferCallback;
     logFile.EventRecordCallback = EtpRundownEtwEventCallback;
 
@@ -625,20 +732,15 @@ NTSTATUS EtpRundownEtwMonitorThreadStart(
         // into EtpEtwEventCallback and enable after the first IO_READ/IO_WRITE event. (dmex)
         if (!EtpRundownEnabled && EtpRundownSessionHandle != INVALID_PROCESSTRACE_HANDLE)
         {
-            ENABLE_TRACE_PARAMETERS enableParameters;
-
-            memset(&enableParameters, 0, sizeof(ENABLE_TRACE_PARAMETERS));
-            enableParameters.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
-
             EnableTraceEx2(
                 EtpRundownSessionHandle,
                 &KernelRundownGuid_I,
                 EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                 TRACE_LEVEL_NONE,
-                0x10,
+                KERNEL_FILE_KEYWORD_FILENAME,
                 0,
-                0,
-                &enableParameters
+                INFINITE,
+                NULL
                 );
 
             EtpRundownEnabled = TRUE;

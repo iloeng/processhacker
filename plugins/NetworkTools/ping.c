@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2015-2021
+ *     dmex    2015-2023
  *
  */
 
@@ -112,7 +112,7 @@ NTSTATUS NetworkPingThreadStart(
         icmpReplyBuffer = PhAllocateZero(icmpReplyLength);
 
         InterlockedIncrement(&context->PingSentCount);
-        PhQueryPerformanceCounter(&performanceCounterStart, NULL);
+        PhQueryPerformanceCounter(&performanceCounterStart);
 
         icmpReplyCount = Icmp6SendEcho2(
             icmpHandle,
@@ -129,7 +129,7 @@ NTSTATUS NetworkPingThreadStart(
             context->Timeout
             );
 
-        PhQueryPerformanceCounter(&performanceCounterEnd, NULL);
+        PhQueryPerformanceCounter(&performanceCounterEnd);
         icmp6ReplyStruct = (PICMPV6_ECHO_REPLY2)icmpReplyBuffer;
 
         if (icmpReplyCount && icmp6ReplyStruct->Status == IP_SUCCESS)
@@ -187,7 +187,7 @@ NTSTATUS NetworkPingThreadStart(
         icmpReplyBuffer = PhAllocateZero(icmpReplyLength);
 
         InterlockedIncrement(&context->PingSentCount);
-        PhQueryPerformanceCounter(&performanceCounterStart, NULL);
+        PhQueryPerformanceCounter(&performanceCounterStart);
 
         icmpReplyCount = IcmpSendEcho2Ex(
             icmpHandle,
@@ -204,7 +204,7 @@ NTSTATUS NetworkPingThreadStart(
             context->Timeout
             );
 
-        PhQueryPerformanceCounter(&performanceCounterEnd, NULL);
+        PhQueryPerformanceCounter(&performanceCounterEnd);
         icmpReplyStruct = (PICMP_ECHO_REPLY)icmpReplyBuffer;
 
         if (icmpReplyCount && icmpReplyStruct->Status == IP_SUCCESS)
@@ -240,7 +240,7 @@ NTSTATUS NetworkPingThreadStart(
         if (performanceCounterTime != 0.0f)
             icmpCurrentOverhead = (ULONG)performanceCounterTime - icmpReplyStruct->RoundTripTime;
         icmpCurrentPingMs = performanceCounterTime - (FLOAT)icmpCurrentOverhead;
-    }  
+    }
 
     if (context->PingMinMs == 0.0f || icmpCurrentPingMs < context->PingMinMs)
         context->PingMinMs = icmpCurrentPingMs;
@@ -326,6 +326,9 @@ INT_PTR CALLBACK NetworkPingWndProc(
     case WM_INITDIALOG:
         {
             PPH_LAYOUT_ITEM panelItem;
+            LONG dpiValue;
+
+            dpiValue = PhGetWindowDpi(hwndDlg);
 
             PhSetApplicationWindowIcon(hwndDlg);
 
@@ -339,7 +342,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
             context->StatusHandle = GetDlgItem(hwndDlg, IDC_MAINTEXT);
             context->MinPingScaling = PhGetIntegerSetting(SETTING_NAME_PING_MINIMUM_SCALING);
             context->Timeout = PhGetIntegerSetting(SETTING_NAME_PING_TIMEOUT);
-            context->FontHandle = PhCreateCommonFont(-15, FW_MEDIUM, context->StatusHandle);
+            context->FontHandle = PhCreateCommonFont(-15, FW_MEDIUM, context->StatusHandle, dpiValue);
             context->PingGraphHandle = CreateWindow(
                 PH_GRAPH_CLASSNAME,
                 NULL,
@@ -376,11 +379,11 @@ INT_PTR CALLBACK NetworkPingWndProc(
             if (PhGetIntegerPairSetting(SETTING_NAME_PING_WINDOW_POSITION).X != 0)
                 PhLoadWindowPlacementFromSetting(SETTING_NAME_PING_WINDOW_POSITION, SETTING_NAME_PING_WINDOW_SIZE, hwndDlg);
             else
-                PhCenterWindow(hwndDlg, PhMainWndHandle);
+                PhCenterWindow(hwndDlg, context->ParentWindowHandle);
 
-            PhSetWindowText(hwndDlg, PhaFormatString(L"Ping %s", context->IpAddressString)->Buffer);
+            PhSetWindowText(hwndDlg, PhaFormatString(L"Ping %s", context->RemoteAddressString)->Buffer);
             PhSetWindowText(context->StatusHandle, PhaFormatString(L"Pinging %s with %lu bytes of data...",
-                context->IpAddressString,
+                context->RemoteAddressString,
                 PhGetIntegerSetting(SETTING_NAME_PING_SIZE))->Buffer
                 );
 
@@ -435,7 +438,14 @@ INT_PTR CALLBACK NetworkPingWndProc(
         }
         break;
     case WM_SIZE:
-        PhLayoutManagerLayout(&context->LayoutManager);
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
+
+            context->PingGraphState.Valid = FALSE;
+            context->PingGraphState.TooltipIndex = ULONG_MAX;
+            if (context->PingGraphHandle)
+                Graph_Draw(context->PingGraphHandle);
+        }
         break;
     case WM_SIZING:
         //PhResizingMinimumSize((PRECT)lParam, wParam, 420, 250);
@@ -506,6 +516,9 @@ INT_PTR CALLBACK NetworkPingWndProc(
                 {
                     PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)header;
                     PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
+                    LONG dpiValue;
+
+                    dpiValue = PhGetWindowDpi(header->hwndFrom);
 
                     if (header->hwndFrom == context->PingGraphHandle)
                     {
@@ -530,7 +543,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
                         }
 
                         drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y;
-                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorCpuKernel"), 0);
+                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorCpuKernel"), 0, dpiValue);
                         PhGraphStateGetDrawInfo(&context->PingGraphState, getDrawInfo, context->PingHistory.Count);
 
                         if (!context->PingGraphState.Valid)
@@ -644,33 +657,101 @@ NTSTATUS NetworkPingDialogThreadStart(
 }
 
 VOID ShowPingWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PPH_NETWORK_ITEM NetworkItem
     )
 {
-    PNETWORK_PING_CONTEXT context = CreatePingContext();
+    PNETWORK_PING_CONTEXT context;
+
+    context = CreatePingContext();
+    context->ParentWindowHandle = ParentWindowHandle;
+
+    memcpy_s(
+        &context->RemoteEndpoint,
+        sizeof(context->RemoteEndpoint),
+        &NetworkItem->RemoteEndpoint,
+        sizeof(NetworkItem->RemoteEndpoint)
+        );
 
     if (NetworkItem->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
-        RtlIpv4AddressToString(&NetworkItem->RemoteEndpoint.Address.InAddr, context->IpAddressString);
-    else
-        RtlIpv6AddressToString(&NetworkItem->RemoteEndpoint.Address.In6Addr, context->IpAddressString);
+    {
+        ULONG remoteAddressStringLength = RTL_NUMBER_OF(context->RemoteAddressString);
 
-    context->RemoteEndpoint = NetworkItem->RemoteEndpoint;
+        if (NT_SUCCESS(RtlIpv4AddressToStringEx(
+            &NetworkItem->RemoteEndpoint.Address.InAddr,
+            0,
+            context->RemoteAddressString,
+            &remoteAddressStringLength
+            )))
+        {
+            context->RemoteAddressStringLength = (remoteAddressStringLength - 1) * sizeof(WCHAR);
+        }
+    }
+    else
+    {
+        ULONG remoteAddressStringLength = RTL_NUMBER_OF(context->RemoteAddressString);
+
+        if (NT_SUCCESS(RtlIpv6AddressToStringEx(
+            &NetworkItem->RemoteEndpoint.Address.In6Addr,
+            0,
+            0,
+            context->RemoteAddressString,
+            &remoteAddressStringLength
+            )))
+        {
+            context->RemoteAddressStringLength = (remoteAddressStringLength - 1) * sizeof(WCHAR);
+        }
+    }
 
     PhCreateThread2(NetworkPingDialogThreadStart, context);
 }
-    
+
 VOID ShowPingWindowFromAddress(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     )
 {
-    PNETWORK_PING_CONTEXT context = CreatePingContext();
+    PNETWORK_PING_CONTEXT context;
+
+    context = CreatePingContext();
+    context->ParentWindowHandle = ParentWindowHandle;
+
+    memcpy_s(
+        &context->RemoteEndpoint,
+        sizeof(context->RemoteEndpoint),
+        &RemoteEndpoint,
+        sizeof(RemoteEndpoint)
+        );
 
     if (RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
-        RtlIpv4AddressToString(&RemoteEndpoint.Address.InAddr, context->IpAddressString);
-    else
-        RtlIpv6AddressToString(&RemoteEndpoint.Address.In6Addr, context->IpAddressString);
+    {
+        ULONG remoteAddressStringLength = RTL_NUMBER_OF(context->RemoteAddressString);
 
-    context->RemoteEndpoint = RemoteEndpoint;
+        if (NT_SUCCESS(RtlIpv4AddressToStringEx(
+            &RemoteEndpoint.Address.InAddr,
+            0,
+            context->RemoteAddressString,
+            &remoteAddressStringLength
+            )))
+        {
+            context->RemoteAddressStringLength = (remoteAddressStringLength - 1) * sizeof(WCHAR);
+        }
+    }
+    else
+    {
+        ULONG remoteAddressStringLength = RTL_NUMBER_OF(context->RemoteAddressString);
+
+        if (NT_SUCCESS(RtlIpv6AddressToStringEx(
+            &RemoteEndpoint.Address.In6Addr,
+            0,
+            0,
+            context->RemoteAddressString,
+            &remoteAddressStringLength
+            )))
+        {
+            context->RemoteAddressStringLength = (remoteAddressStringLength - 1) * sizeof(WCHAR);
+        }
+    }
 
     PhCreateThread2(NetworkPingDialogThreadStart, context);
 }

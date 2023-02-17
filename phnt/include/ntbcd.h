@@ -50,6 +50,8 @@ GUID DECLSPEC_SELECTANY GUID_WINDOWS_SETUP_EFI = { 0x7254A080, 0x1510, 0x4E85, {
 GUID DECLSPEC_SELECTANY GUID_WINDOWS_SETUP_PCAT = { 0xCBD971BF, 0xB7B8, 0x4885, { 0x95, 0x1A, 0xFA, 0x03, 0x04, 0x4F, 0x5D, 0x71 } };
 // AE5534E0-A924-466C-B836-758539A3EE3A // {ramdiskoptions}
 GUID DECLSPEC_SELECTANY GUID_WINDOWS_SETUP_RAMDISK_OPTIONS = { 0xAE5534E0, 0xA924, 0x466C, { 0xB8, 0x36, 0x75, 0x85, 0x39, 0xA3, 0xEE, 0x3A } };
+// {7619dcc9-fafe-11d9-b411-000476eba25f}
+GUID DECLSPEC_SELECTANY GUID_WINDOWS_SETUP_BOOT_ENTRY = { 0x7619dcc9, 0xfafe, 0x11d9, {0xb4, 0x11, 0x00, 0x04, 0x76, 0xeb, 0xa2, 0x5f } };
 #else
 NTSYSAPI GUID GUID_BAD_MEMORY_GROUP; // {badmemory}
 NTSYSAPI GUID GUID_BOOT_LOADER_SETTINGS_GROUP; // {bootloadersettings}
@@ -148,6 +150,7 @@ BcdExportStore(
     _In_ UNICODE_STRING BcdFilePath
     );
 
+#if (PHNT_VERSION > PHNT_WIN11)
 NTSYSAPI
 NTSTATUS
 NTAPI
@@ -156,6 +159,7 @@ BcdExportStoreEx(
     _In_ ULONG Flags,
     _In_ UNICODE_STRING BcdFilePath
     );
+#endif
 
 NTSYSAPI
 NTSTATUS
@@ -240,34 +244,34 @@ BcdMarkAsSystemStore(
 typedef enum _BCD_OBJECT_TYPE
 {
     BCD_OBJECT_TYPE_NONE,
-    BCD_OBJECT_TYPE_APPLICATION,
-    BCD_OBJECT_TYPE_INHERITED,
-    BCD_OBJECT_TYPE_DEVICE
+    BCD_OBJECT_TYPE_APPLICATION, // 0x10000000
+    BCD_OBJECT_TYPE_INHERITED, // 0x20000000
+    BCD_OBJECT_TYPE_DEVICE, // 0x30000000
 } BCD_OBJECT_TYPE;
 
 typedef enum _BCD_APPLICATION_OBJECT_TYPE
 {
     BCD_APPLICATION_OBJECT_NONE = 0,
-    BCD_APPLICATION_OBJECT_FIRMWARE_BOOT_MANAGER = 1,
-    BCD_APPLICATION_OBJECT_WINDOWS_BOOT_MANAGER = 2,
-    BCD_APPLICATION_OBJECT_WINDOWS_BOOT_LOADER = 3,
-    BCD_APPLICATION_OBJECT_WINDOWS_RESUME_APPLICATION = 4,
-    BCD_APPLICATION_OBJECT_MEMORY_TESTER = 5,
-    BCD_APPLICATION_OBJECT_LEGACY_NTLDR = 6,
-    BCD_APPLICATION_OBJECT_LEGACY_SETUPLDR = 7,
-    BCD_APPLICATION_OBJECT_BOOT_SECTOR = 8,
-    BCD_APPLICATION_OBJECT_STARTUP_MODULE = 9,
-    BCD_APPLICATION_OBJECT_GENERIC_APPLICATION = 10,
-    BCD_APPLICATION_OBJECT_RESERVED = 0xFFFFF
+    BCD_APPLICATION_OBJECT_FIRMWARE_BOOT_MANAGER = 1, // 0x00000001
+    BCD_APPLICATION_OBJECT_WINDOWS_BOOT_MANAGER = 2, // 0x00000002
+    BCD_APPLICATION_OBJECT_WINDOWS_BOOT_LOADER = 3, // 0x00000003
+    BCD_APPLICATION_OBJECT_WINDOWS_RESUME_APPLICATION = 4, // 0x00000004
+    BCD_APPLICATION_OBJECT_MEMORY_TESTER = 5, // 0x00000005
+    BCD_APPLICATION_OBJECT_LEGACY_NTLDR = 6, // 0x00000006
+    BCD_APPLICATION_OBJECT_LEGACY_SETUPLDR = 7, // 0x00000007
+    BCD_APPLICATION_OBJECT_BOOT_SECTOR = 8, // 0x00000008
+    BCD_APPLICATION_OBJECT_STARTUP_MODULE = 9, // 0x00000009
+    BCD_APPLICATION_OBJECT_GENERIC_APPLICATION = 10, // 0x0000000a
+    BCD_APPLICATION_OBJECT_RESERVED = 0xFFFFF // 0x000fffff
 } BCD_APPLICATION_OBJECT_TYPE;
 
 typedef enum _BCD_APPLICATION_IMAGE_TYPE
 {
     BCD_APPLICATION_IMAGE_NONE,
-    BCD_APPLICATION_IMAGE_FIRMWARE_APPLICATION,
-    BCD_APPLICATION_IMAGE_BOOT_APPLICATION,
-    BCD_APPLICATION_IMAGE_LEGACY_LOADER,
-    BCD_APPLICATION_IMAGE_REALMODE_CODE
+    BCD_APPLICATION_IMAGE_FIRMWARE_APPLICATION, // 0x00100000
+    BCD_APPLICATION_IMAGE_BOOT_APPLICATION, // 0x00200000
+    BCD_APPLICATION_IMAGE_LEGACY_LOADER, // 0x00300000
+    BCD_APPLICATION_IMAGE_REALMODE_CODE, // 0x00400000
 } BCD_APPLICATION_IMAGE_TYPE;
 
 typedef enum _BCD_INHERITED_CLASS_TYPE
@@ -327,6 +331,8 @@ typedef union _BCD_OBJECT_DATATYPE
         } Device;
     };
 } BCD_OBJECT_DATATYPE, *PBCD_OBJECT_DATATYPE;
+
+//STATIC_ASSERT(sizeof(BCD_OBJECT_DATATYPE) == sizeof(ULONG));
 
 #define BCD_OBJECT_DESCRIPTION_VERSION 0x1
 
@@ -405,7 +411,7 @@ BcdCopyObject(
     _In_ HANDLE BcdObjectHandle,
     _In_ BCD_COPY_FLAGS BcdCopyFlags,
     _In_ HANDLE TargetStoreHandle,
-    _Out_ PHANDLE TargetHandleOut
+    _Out_ PHANDLE TargetObjectHandle
     );
 
 NTSYSAPI
@@ -417,7 +423,7 @@ BcdCopyObjectEx(
     _In_ BCD_COPY_FLAGS BcdCopyFlags,
     _In_ HANDLE TargetStoreHandle,
     _In_ PGUID TargetObjectId,
-    _Out_ PHANDLE TargetHandleOut
+    _Out_ PHANDLE TargetObjectHandle
     );
 
 NTSYSAPI
@@ -454,8 +460,8 @@ typedef enum _BCD_ELEMENT_DATATYPE_FORMAT
     BCD_ELEMENT_DATATYPE_FORMAT_UNKNOWN,
     BCD_ELEMENT_DATATYPE_FORMAT_DEVICE, // 0x01000000
     BCD_ELEMENT_DATATYPE_FORMAT_STRING, // 0x02000000
-    BCD_ELEMENT_DATATYPE_FORMAT_OBJECT, // 0x03000000 
-    BCD_ELEMENT_DATATYPE_FORMAT_OBJECTLIST, // 0x04000000 
+    BCD_ELEMENT_DATATYPE_FORMAT_OBJECT, // 0x03000000
+    BCD_ELEMENT_DATATYPE_FORMAT_OBJECTLIST, // 0x04000000
     BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, // 0x05000000
     BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, // 0x06000000
     BCD_ELEMENT_DATATYPE_FORMAT_INTEGERLIST, // 0x07000000
@@ -465,11 +471,11 @@ typedef enum _BCD_ELEMENT_DATATYPE_FORMAT
 typedef enum _BCD_ELEMENT_DATATYPE_CLASS
 {
     BCD_ELEMENT_DATATYPE_CLASS_NONE,
-    BCD_ELEMENT_DATATYPE_CLASS_LIBRARY,
-    BCD_ELEMENT_DATATYPE_CLASS_APPLICATION,
-    BCD_ELEMENT_DATATYPE_CLASS_DEVICE,
-    BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE,
-    BCD_ELEMENT_DATATYPE_CLASS_OEM
+    BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, // 0x10000000
+    BCD_ELEMENT_DATATYPE_CLASS_APPLICATION, // 0x20000000
+    BCD_ELEMENT_DATATYPE_CLASS_DEVICE, // 0x30000000
+    BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, // 0x40000000
+    BCD_ELEMENT_DATATYPE_CLASS_OEM // 0x50000000
 } BCD_ELEMENT_DATATYPE_CLASS;
 
 typedef enum _BCD_ELEMENT_DEVICE_TYPE
@@ -507,6 +513,8 @@ typedef union _BCD_ELEMENT_DATATYPE
         BCD_ELEMENT_DATATYPE_CLASS Class : 4;
     };
 } BCD_ELEMENT_DATATYPE, *PBCD_ELEMENT_DATATYPE;
+
+//STATIC_ASSERT(sizeof(BCD_ELEMENT_DATATYPE) == sizeof(ULONG));
 
 NTSYSAPI
 NTSTATUS
@@ -1062,12 +1070,12 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x1200001D</remarks>
     BcdLibraryString_DebuggerNetKey = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 29),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600001E</remarks>
     BcdLibraryBoolean_DebuggerNetVM = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 30),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1200001F</remarks>
     BcdLibraryString_DebuggerNetHostIpv6 = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 31),
@@ -1093,7 +1101,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x12000030</remarks>
     BcdLibraryString_LoadOptionsString = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 48),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000031</remarks>
     BcdLibraryBoolean_AttemptNonBcdStart = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 49),
@@ -1108,7 +1116,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x16000041</remarks>
     BcdLibraryBoolean_DisplayOptionsEdit = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 65),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000042</remarks>
     BcdLibraryInteger_FVEKeyRingAddress = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 66),
@@ -1128,7 +1136,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x16000045</remarks>
     BcdLibraryBoolean_BsdPreserveLog = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 69),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000046</remarks>
     BcdLibraryBoolean_GraphicsModeDisabled = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 70),
@@ -1155,7 +1163,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x1200004A</remarks>
     BcdLibraryString_FontPath = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 74),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1500004B</remarks>
     BcdLibraryInteger_SiPolicy = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 75),
@@ -1170,7 +1178,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x16000050</remarks>
     BcdLibraryBoolean_ConsoleExtendedInput = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 80),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000051</remarks>
     BcdLibraryInteger_InitialConsoleInput = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 81),
@@ -1207,7 +1215,7 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x15000065</remarks>
     BcdLibraryInteger_BootUxDisplayMessage = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 101),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000066</remarks>
     BcdLibraryInteger_BootUxDisplayMessageOverride = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 102),
@@ -1232,42 +1240,42 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x1600006A</remarks>
     BcdLibraryBoolean_BootUxFadeDisable = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 106),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600006B</remarks>
     BcdLibraryBoolean_BootUxReservePoolDebug = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 107),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600006C</remarks>
     BcdLibraryBoolean_BootUxDisable = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 108),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1500006D</remarks>
     BcdLibraryInteger_BootUxFadeFrames = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 109),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600006E</remarks>
     BcdLibraryBoolean_BootUxDumpStats = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 110),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600006F</remarks>
     BcdLibraryBoolean_BootUxShowStats = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 111),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000071</remarks>
     BcdLibraryBoolean_MultiBootSystem = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 113),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000072</remarks>
     BcdLibraryBoolean_ForceNoKeyboard = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 114),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000073</remarks>
     BcdLibraryInteger_AliasWindowsKey = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 115),
@@ -1277,12 +1285,12 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x16000074</remarks>
     BcdLibraryBoolean_BootShutdownDisabled = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 116),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000075</remarks>
     BcdLibraryInteger_PerformanceFrequency = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 117),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000076</remarks>
     BcdLibraryInteger_SecurebootRawPolicy = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 118),
@@ -1293,12 +1301,12 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x17000077</remarks>
     BcdLibraryIntegerList_AllowedInMemorySettings = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 119),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000079</remarks>
     BcdLibraryInteger_BootUxBitmapTransitionTime = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 121),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600007A</remarks>
     BcdLibraryBoolean_TwoBootImages = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 122),
@@ -1309,47 +1317,47 @@ typedef enum _BcdLibraryElementTypes
     /// <remarks>0x1600007B</remarks>
     BcdLibraryBoolean_ForceFipsCrypto = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 123),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1500007D</remarks>
     BcdLibraryInteger_BootErrorUx = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 125),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1600007E</remarks>
     BcdLibraryBoolean_AllowFlightSignatures = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 126),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x1500007F</remarks>
     BcdLibraryInteger_BootMeasurementLogFormat = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 127),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000080</remarks>
     BcdLibraryInteger_DisplayRotation = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 128),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x15000081</remarks>
     BcdLibraryInteger_LogControl = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 129),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000082</remarks>
     BcdLibraryBoolean_NoFirmwareSync = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 130),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x11000084</remarks>
     BcdLibraryDevice_WindowsSystemDevice = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_DEVICE, 132),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x16000087</remarks>
     BcdLibraryBoolean_NumLockOn = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 135),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x12000088</remarks>
     BcdLibraryString_AdditionalCiPolicy = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_LIBRARY, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 136),
@@ -1358,32 +1366,32 @@ typedef enum _BcdLibraryElementTypes
 typedef enum _BcdTemplateElementTypes
 {
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x45000001</remarks>
     BcdSetupInteger_DeviceType = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_INTEGER, 1),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x42000002</remarks>
     BcdSetupString_ApplicationRelativePath = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 2),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x42000003</remarks>
     BcdSetupString_RamdiskDeviceRelativePath = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_STRING, 3),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x46000004</remarks>
     BcdSetupBoolean_OmitOsLoaderElements = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 4),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x47000006</remarks>
     BcdSetupIntegerList_ElementsToMigrateList = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_INTEGERLIST, 6),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x46000010</remarks>
     BcdSetupBoolean_RecoveryOs = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_SETUPTEMPLATE, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 16),
@@ -1486,7 +1494,7 @@ typedef enum _BcdOSLoaderElementTypes
     /// <remarks>0x23000003</remarks>
     BcdOSLoaderObject_AssociatedResumeObject = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_APPLICATION, BCD_ELEMENT_DATATYPE_FORMAT_OBJECT, 3),
     /// <summary>
-    /// 
+    ///
     /// </summary>
     /// <remarks>0x26000004</remarks>
     BcdOSLoaderBoolean_StampDisks = MAKE_BCDE_DATA_TYPE(BCD_ELEMENT_DATATYPE_CLASS_APPLICATION, BCD_ELEMENT_DATATYPE_FORMAT_BOOLEAN, 4),

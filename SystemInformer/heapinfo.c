@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2020-2022
+ *     dmex    2020-2023
  *
  */
 
@@ -14,7 +14,6 @@
 #include <phsettings.h>
 #include <phsvccl.h>
 #include <actions.h>
-#include <appresolver.h>
 #include <emenu.h>
 #include <mainwnd.h>
 #include <procprv.h>
@@ -157,12 +156,12 @@ VOID PhShowProcessHeapsDialog(
     context->ProcessItem = PhReferenceObject(ProcessItem);
     context->IsWow64 = !!ProcessItem->IsWow64;
 
-    DialogBoxParam(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_HEAPS),
         NULL,
         PhpProcessHeapsDlgProc,
-        (LPARAM)context
+        context
         );
 }
 
@@ -423,7 +422,7 @@ VOID PhpEnumerateProcessHeaps(
     }
     else if (WindowsVersion >= WINDOWS_10)
     {
-        // Windows 10 and above require SET_LIMITED for PLM execution requests. (dmex) 
+        // Windows 10 and above require SET_LIMITED for PLM execution requests. (dmex)
         status = PhOpenProcess(
             &processHandle,
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_LIMITED_INFORMATION,
@@ -752,7 +751,7 @@ INT_PTR CALLBACK PhpProcessHeapsDlgProc(
                 DeleteFont(context->BoldFont);
                 context->BoldFont = NULL;
             }
- 
+
             if (context->DebugBuffer)
             {
                 PhFree(context->DebugBuffer);
@@ -764,7 +763,10 @@ INT_PTR CALLBACK PhpProcessHeapsDlgProc(
                 PhDereferenceObject(context->ProcessItem);
                 context->ProcessItem = NULL;
             }
-
+        }
+        break;
+    case WM_NCDESTROY:
+        {
             PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
         }
@@ -845,6 +847,8 @@ INT_PTR CALLBACK PhpProcessHeapsDlgProc(
     case WM_NOTIFY:
         {
             PhHandleListViewNotifyForCopy(lParam, context->ListViewHandle);
+
+            REFLECT_MESSAGE_DLG(hwndDlg, context->ListViewHandle, uMsg, wParam, lParam);
         }
         break;
     case WM_SIZE:
@@ -917,8 +921,6 @@ INT_PTR CALLBACK PhpProcessHeapsDlgProc(
     case WM_CTLCOLORSTATIC:
         return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
-
-    REFLECT_MESSAGE_DLG(hwndDlg, context->ListViewHandle, uMsg, wParam, lParam);
 
     return FALSE;
 }

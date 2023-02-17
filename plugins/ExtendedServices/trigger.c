@@ -780,12 +780,12 @@ VOID EsHandleEventServiceTrigger(
             Context->EditingInfo->Subtype = &Context->EditingInfo->SubtypeBuffer;
             Context->EditingInfo->Action = SERVICE_TRIGGER_ACTION_SERVICE_START;
 
-            if (DialogBoxParam(
+            if (PhDialogBox(
                 PluginInstance->DllBase,
                 MAKEINTRESOURCE(IDD_SRVTRIGGER),
                 Context->WindowHandle,
                 EspServiceTriggerDlgProc,
-                (LPARAM)Context
+                Context
                 ) == IDOK)
             {
                 PWSTR triggerString;
@@ -818,9 +818,9 @@ VOID EsHandleEventServiceTrigger(
             PES_TRIGGER_INFO info;
             ULONG index;
 
-            lvItemIndex = PhFindListViewItemByFlags(Context->TriggersLv, -1, LVNI_SELECTED);
+            lvItemIndex = PhFindListViewItemByFlags(Context->TriggersLv, INT_ERROR, LVNI_SELECTED);
 
-            if (lvItemIndex != -1 && PhGetListViewItemParam(Context->TriggersLv, lvItemIndex, (PVOID *)&info))
+            if (lvItemIndex != INT_ERROR && PhGetListViewItemParam(Context->TriggersLv, lvItemIndex, (PVOID *)&info))
             {
                 index = PhFindItemList(Context->InfoList, info);
 
@@ -828,12 +828,12 @@ VOID EsHandleEventServiceTrigger(
                 {
                     Context->EditingInfo = EspCloneTriggerInfo(info);
 
-                    if (DialogBoxParam(
+                    if (PhDialogBox(
                         PluginInstance->DllBase,
                         MAKEINTRESOURCE(IDD_SRVTRIGGER),
                         Context->WindowHandle,
                         EspServiceTriggerDlgProc,
-                        (LPARAM)Context
+                        Context
                         ) == IDOK)
                     {
                         PWSTR triggerString;
@@ -869,9 +869,9 @@ VOID EsHandleEventServiceTrigger(
             PES_TRIGGER_INFO info;
             ULONG index;
 
-            lvItemIndex = PhFindListViewItemByFlags(Context->TriggersLv, -1, LVNI_SELECTED);
+            lvItemIndex = PhFindListViewItemByFlags(Context->TriggersLv, INT_ERROR, LVNI_SELECTED);
 
-            if (lvItemIndex != -1 && PhGetListViewItemParam(Context->TriggersLv, lvItemIndex, (PVOID *)&info))
+            if (lvItemIndex != INT_ERROR && PhGetListViewItemParam(Context->TriggersLv, lvItemIndex, (PVOID *)&info))
             {
                 index = PhFindItemList(Context->InfoList, info);
 
@@ -966,7 +966,6 @@ VOID EspFixServiceTriggerControls(
             {
                 PETW_PUBLISHER_ENTRY entries;
                 ULONG numberOfEntries;
-                ULONG i;
 
                 ComboBox_AddString(subTypeComboBox, L"Custom");
 
@@ -1291,12 +1290,12 @@ INT_PTR CALLBACK EspServiceTriggerDlgProc(
                     lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
                     context->EditingValue = PhReferenceEmptyString();
 
-                    if (DialogBoxParam(
+                    if (PhDialogBox(
                         PluginInstance->DllBase,
                         MAKEINTRESOURCE(IDD_VALUE),
                         hwndDlg,
                         ValueDlgProc,
-                        (LPARAM)context
+                        context
                         ) == IDOK)
                     {
                         PES_TRIGGER_DATA data;
@@ -1328,10 +1327,10 @@ INT_PTR CALLBACK EspServiceTriggerDlgProc(
                     ULONG index;
 
                     lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
-                    lvItemIndex = PhFindListViewItemByFlags(lvHandle, -1, LVNI_SELECTED);
+                    lvItemIndex = PhFindListViewItemByFlags(lvHandle, INT_ERROR, LVNI_SELECTED);
 
                     if (
-                        lvItemIndex != -1 && PhGetListViewItemParam(lvHandle, lvItemIndex, (PVOID *)&data) &&
+                        lvItemIndex != INT_ERROR && PhGetListViewItemParam(lvHandle, lvItemIndex, (PVOID *)&data) &&
                         data->Type == SERVICE_TRIGGER_DATA_TYPE_STRING // editing binary values is not supported
                         )
                     {
@@ -1341,12 +1340,12 @@ INT_PTR CALLBACK EspServiceTriggerDlgProc(
                         {
                             context->EditingValue = EspConvertNullsToNewLines(data->String);
 
-                            if (DialogBoxParam(
+                            if (PhDialogBox(
                                 PluginInstance->DllBase,
                                 MAKEINTRESOURCE(IDD_VALUE),
                                 hwndDlg,
                                 ValueDlgProc,
-                                (LPARAM)context
+                                context
                                 ) == IDOK)
                             {
                                 PPH_STRING text;
@@ -1371,9 +1370,9 @@ INT_PTR CALLBACK EspServiceTriggerDlgProc(
                     ULONG index;
 
                     lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
-                    lvItemIndex = PhFindListViewItemByFlags(lvHandle, -1, LVNI_SELECTED);
+                    lvItemIndex = PhFindListViewItemByFlags(lvHandle, INT_ERROR, LVNI_SELECTED);
 
-                    if (lvItemIndex != -1 && PhGetListViewItemParam(lvHandle, lvItemIndex, (PVOID *)&data))
+                    if (lvItemIndex != INT_ERROR && PhGetListViewItemParam(lvHandle, lvItemIndex, (PVOID *)&data))
                     {
                         index = PhFindItemList(context->EditingInfo->DataList, data);
 

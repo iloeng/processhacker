@@ -24,7 +24,7 @@
 PPH_OBJECT_TYPE PhpProcessPropContextType = NULL;
 PPH_OBJECT_TYPE PhpProcessPropPageContextType = NULL;
 PPH_OBJECT_TYPE PhpProcessPropPageWaitContextType = NULL;
-PH_STRINGREF PhpLoadingText = PH_STRINGREF_INIT(L"Loading...");
+PH_STRINGREF PhProcessPropPageLoadingText = PH_STRINGREF_INIT(L"Loading...");
 static RECT MinimumSize = { -1, -1, -1, -1 };
 SLIST_HEADER WaitContextQueryListHead;
 
@@ -351,10 +351,16 @@ VOID PhpInitializePropSheetLayoutStage2(
     _In_ HWND hwnd
     )
 {
-    PH_RECTANGLE windowRectangle;
+    PH_RECTANGLE windowRectangle = {0};
+    RECT rect;
+    LONG dpiValue;
 
     windowRectangle.Position = PhGetIntegerPairSetting(L"ProcPropPosition");
-    windowRectangle.Size = PhGetScalableIntegerPairSetting(L"ProcPropSize", TRUE).Pair;
+
+    rect = PhRectangleToRect(windowRectangle);
+    dpiValue = PhGetMonitorDpi(&rect);
+
+    windowRectangle.Size = PhGetScalableIntegerPairSetting(L"ProcPropSize", TRUE, dpiValue).Pair;
 
     if (windowRectangle.Size.X < MinimumSize.right)
         windowRectangle.Size.X = MinimumSize.right;
@@ -501,7 +507,7 @@ VOID PhpCreateProcessPropSheetWaitContext(
         return;
     if (processItem->ProcessId == NtCurrentProcessId())
         return;
-    // On Windows 8.1 and above, processes without threads are reflected processes 
+    // On Windows 8.1 and above, processes without threads are reflected processes
     // which will not terminate if we have a handle open. (wj32)
     if (processItem->NumberOfThreads == 0)
         return;
@@ -839,7 +845,7 @@ NTSTATUS PhpProcessPropertiesThreadStart(
         PropContext->ProcessItem->IsInJob &&
         // There's no way the job page can function without KPH since it needs
         // to open a handle to the job.
-        KphIsConnected()
+        (KphLevel() >= KphLevelMed)
         )
     {
         PhAddProcessPropPage2(

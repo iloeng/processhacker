@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011
- *     dmex    2016-2018
+ *     dmex    2016-2022
  *
  */
 
@@ -68,7 +68,6 @@ HWND WepWindowsDialogHandle = NULL;
 HANDLE WepWindowsDialogThreadHandle = NULL;
 PH_EVENT WepWindowsInitializedEvent = PH_EVENT_INIT;
 PH_STRINGREF WepEmptyWindowsText = PH_STRINGREF_INIT(L"There are no windows to display.");
-#define PH_SHOWDIALOG (WM_APP + 501)
 #define WE_WM_FINDWINDOW (WM_APP + 502)
 
 NTSTATUS WepShowWindowsDialogThread(
@@ -137,7 +136,7 @@ VOID WeShowWindowsDialog(
         PhWaitForEvent(&WepWindowsInitializedEvent, NULL);
     }
 
-    PostMessage(WepWindowsDialogHandle, PH_SHOWDIALOG, 0, 0);
+    PostMessage(WepWindowsDialogHandle, WM_PH_SHOW_DIALOG, 0, 0);
 }
 
 VOID WeShowWindowsPropPage(
@@ -312,7 +311,7 @@ VOID WepAddEnumChildWindows(
     _In_opt_ HANDLE FilterThreadId
     )
 {
-    if (PhGetIntegerSetting(SETTING_NAME_WINDOW_ENUM_ALTERNATE))
+    if (PhGetIntegerSetting(SETTING_NAME_WINDOW_ENUM_ALTERNATE) && WindowHandle != HWND_MESSAGE)
     {
         WE_WINDOW_ENUM_CONTEXT enumContext;
 
@@ -330,7 +329,7 @@ VOID WepAddEnumChildWindows(
 
         // We use FindWindowEx because EnumWindows doesn't return Metro app windows.
         // Set a reasonable limit to prevent infinite loops.
-        while (i < 0x800 && (childWindow = FindWindowEx(WindowHandle, childWindow, NULL, NULL)))
+        while (i < 0x4000 && (childWindow = FindWindowEx(WindowHandle, childWindow, NULL, NULL)))
         {
             ULONG processId;
             ULONG threadId;
@@ -343,6 +342,11 @@ VOID WepAddEnumChildWindows(
                 )
             {
                 PWE_WINDOW_NODE childNode = WepAddChildWindowNode(&Context->TreeContext, ParentNode, childWindow);
+
+                if (WindowHandle == HWND_MESSAGE)
+                {
+                    childNode->WindowMessageOnly = TRUE;
+                }
 
                 if (childNode->HasChildren)
                 {
@@ -407,6 +411,14 @@ VOID WepRefreshWindows(
                 NULL
                 );
 
+            WepAddEnumChildWindows(
+                Context,
+                desktopNode,
+                HWND_MESSAGE,
+                NULL,
+                NULL
+                );
+
             desktopNode->HasChildren = TRUE;
         }
         break;
@@ -419,6 +431,14 @@ VOID WepRefreshWindows(
                 NULL,
                 Context->Selector.Thread.ThreadId
                 );
+
+            WepAddEnumChildWindows(
+                Context,
+                NULL,
+                HWND_MESSAGE,
+                NULL,
+                Context->Selector.Thread.ThreadId
+                );
         }
         break;
     case WeWindowSelectorProcess:
@@ -427,6 +447,14 @@ VOID WepRefreshWindows(
                 Context,
                 NULL,
                 GetDesktopWindow(),
+                Context->Selector.Process.ProcessId,
+                NULL
+                );
+
+            WepAddEnumChildWindows(
+                Context,
+                NULL,
+                HWND_MESSAGE,
                 Context->Selector.Process.ProcessId,
                 NULL
                 );
@@ -488,6 +516,7 @@ VOID DrawWindowBorderForTargeting(
 {
     RECT rect;
     HDC hdc;
+    LONG dpiValue;
 
     GetWindowRect(hWnd, &rect);
     hdc = GetWindowDC(hWnd);
@@ -499,7 +528,9 @@ VOID DrawWindowBorderForTargeting(
         HPEN pen;
         HBRUSH brush;
 
-        penWidth = GetSystemMetrics(SM_CXBORDER) * 3;
+        dpiValue = PhGetWindowDpi(hWnd);
+        penWidth = PhGetSystemMetrics(SM_CXBORDER, dpiValue) * 3;
+
         oldDc = SaveDC(hdc);
 
         // Get an inversion effect.
@@ -593,6 +624,36 @@ LRESULT CALLBACK WepFindWindowButtonSubclassProc(
     return CallWindowProc(oldWndProc, hwndDlg, uMsg, wParam, lParam);
 }
 
+BOOLEAN WepWindowEndTask(
+    _In_ HWND WindowHandle,
+    _In_ BOOL Force
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static BOOL (WINAPI* EndTask_I)(
+        _In_ HWND WindowHandle,
+        _In_ BOOL ShutDown,
+        _In_ BOOL Force
+        );
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        HANDLE moduleHandle;
+
+        if (moduleHandle = PhLoadLibrary(L"user32.dll"))
+        {
+            EndTask_I = PhGetProcedureAddress(moduleHandle, "EndTask", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!EndTask_I)
+        return FALSE;
+
+    return !!EndTask_I(WindowHandle, FALSE, Force);
+}
+
 INT_PTR CALLBACK WepWindowsDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -633,8 +694,6 @@ INT_PTR CALLBACK WepWindowsDlgProc(
             WeInitializeWindowTree(hwndDlg, context->TreeNewHandle, &context->TreeContext);
             TreeNew_SetEmptyText(context->TreeNewHandle, &WepEmptyWindowsText, 0);
 
-            PhRegisterDialog(hwndDlg);
-
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_SEARCHEDIT), NULL, PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_LIST), NULL, PH_ANCHOR_ALL);
@@ -657,12 +716,10 @@ INT_PTR CALLBACK WepWindowsDlgProc(
         }
         break;
     case WM_DESTROY:
-        {   
-            PhSaveWindowPlacementToSetting(SETTING_NAME_WINDOWS_WINDOW_POSITION, SETTING_NAME_WINDOWS_WINDOW_SIZE, hwndDlg);  
+        {
+            PhSaveWindowPlacementToSetting(SETTING_NAME_WINDOWS_WINDOW_POSITION, SETTING_NAME_WINDOWS_WINDOW_SIZE, hwndDlg);
 
             PhDeleteLayoutManager(&context->LayoutManager);
-
-            PhUnregisterDialog(hwndDlg);
 
             WeDeleteWindowTree(&context->TreeContext);
             WepDeleteWindowSelector(&context->Selector);
@@ -671,7 +728,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
             PostQuitMessage(0);
         }
         break;
-    case PH_SHOWDIALOG:
+    case WM_PH_SHOW_DIALOG:
         {
             if (IsMinimized(hwndDlg))
                 ShowWindow(hwndDlg, SW_RESTORE);
@@ -820,11 +877,11 @@ INT_PTR CALLBACK WepWindowsDlgProc(
                         }
 
                         selectedItem = PhShowEMenu(
-                            menu, 
-                            hwndDlg, 
+                            menu,
+                            hwndDlg,
                             PH_EMENU_SHOW_SEND_COMMAND | PH_EMENU_SHOW_LEFTRIGHT,
-                            PH_ALIGN_LEFT | PH_ALIGN_TOP, 
-                            contextMenuEvent->Location.x, 
+                            PH_ALIGN_LEFT | PH_ALIGN_TOP,
+                            contextMenuEvent->Location.x,
                             contextMenuEvent->Location.y
                             );
 
@@ -895,6 +952,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
 
                     if (selectedNode = WeGetSelectedWindowNode(&context->TreeContext))
                     {
+                        //WepWindowEndTask(selectedNode->WindowHandle, TRUE);
                         PostMessage(selectedNode->WindowHandle, WM_CLOSE, 0, 0);
                     }
                 }
@@ -1031,7 +1089,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
                     {
                         if (
                             !PhIsNullOrEmptyString(selectedNode->FileNameWin32) &&
-                            PhDoesFileExistsWin32(PhGetString(selectedNode->FileNameWin32))
+                            PhDoesFileExistWin32(PhGetString(selectedNode->FileNameWin32))
                             )
                         {
                             PhShellExecuteUserString(
@@ -1053,7 +1111,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
                     {
                         if (
                             !PhIsNullOrEmptyString(selectedNode->FileNameWin32) &&
-                            PhDoesFileExistsWin32(PhGetString(selectedNode->FileNameWin32))
+                            PhDoesFileExistWin32(PhGetString(selectedNode->FileNameWin32))
                             )
                         {
                             PhShellExecuteUserString(
@@ -1073,7 +1131,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
 
                     if (selectedNode = WeGetSelectedWindowNode(&context->TreeContext))
                     {
-                        WeShowWindowProperties(hwndDlg, selectedNode->WindowHandle);
+                        WeShowWindowProperties(hwndDlg, selectedNode->WindowHandle, !!selectedNode->WindowMessageOnly);
                     }
                 }
                 break;
@@ -1106,7 +1164,7 @@ INT_PTR CALLBACK WepWindowsDlgProc(
         break;
     case WM_SIZE:
         {
-            PhLayoutManagerLayout(&context->LayoutManager);  
+            PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
     //case WM_PARENTNOTIFY:
@@ -1544,6 +1602,7 @@ INT_PTR CALLBACK WepWindowsPageProc(
 
                     if (selectedNode = WeGetSelectedWindowNode(&context->TreeContext))
                     {
+                        //WepWindowEndTask(selectedNode->WindowHandle, TRUE);
                         PostMessage(selectedNode->WindowHandle, WM_CLOSE, 0, 0);
                     }
                 }
@@ -1649,21 +1708,21 @@ INT_PTR CALLBACK WepWindowsPageProc(
             case ID_WINDOW_GOTOTHREAD:
                 {
                     PWE_WINDOW_NODE selectedNode;
-                    PPH_PROCESS_ITEM processItem;
+                    PPH_PROCESS_ITEM selectedProcessItem;
                     PPH_PROCESS_PROPCONTEXT propContext;
 
                     if (selectedNode = WeGetSelectedWindowNode(&context->TreeContext))
                     {
-                        if (processItem = PhReferenceProcessItem(selectedNode->ClientId.UniqueProcess))
+                        if (selectedProcessItem = PhReferenceProcessItem(selectedNode->ClientId.UniqueProcess))
                         {
-                            if (propContext = PhCreateProcessPropContext(WeGetMainWindowHandle(), processItem))
+                            if (propContext = PhCreateProcessPropContext(WeGetMainWindowHandle(), selectedProcessItem))
                             {
                                 PhSetSelectThreadIdProcessPropContext(propContext, selectedNode->ClientId.UniqueThread);
                                 PhShowProcessProperties(propContext);
                                 PhDereferenceObject(propContext);
                             }
 
-                            PhDereferenceObject(processItem);
+                            PhDereferenceObject(selectedProcessItem);
                         }
                         else
                         {
@@ -1680,7 +1739,7 @@ INT_PTR CALLBACK WepWindowsPageProc(
                     {
                         if (
                             !PhIsNullOrEmptyString(selectedNode->FileNameWin32) &&
-                            PhDoesFileExistsWin32(PhGetString(selectedNode->FileNameWin32))
+                            PhDoesFileExistWin32(PhGetString(selectedNode->FileNameWin32))
                             )
                         {
                             PhShellExecuteUserString(
@@ -1702,7 +1761,7 @@ INT_PTR CALLBACK WepWindowsPageProc(
                     {
                         if (
                             !PhIsNullOrEmptyString(selectedNode->FileNameWin32) &&
-                            PhDoesFileExistsWin32(PhGetString(selectedNode->FileNameWin32))
+                            PhDoesFileExistWin32(PhGetString(selectedNode->FileNameWin32))
                             )
                         {
                             PhShellExecuteUserString(
@@ -1721,7 +1780,7 @@ INT_PTR CALLBACK WepWindowsPageProc(
                     PWE_WINDOW_NODE selectedNode;
 
                     if (selectedNode = WeGetSelectedWindowNode(&context->TreeContext))
-                        WeShowWindowProperties(hwndDlg, selectedNode->WindowHandle);
+                        WeShowWindowProperties(hwndDlg, selectedNode->WindowHandle, !!selectedNode->WindowMessageOnly);
                 }
                 break;
             case ID_WINDOW_COPY:
@@ -1752,7 +1811,7 @@ INT_PTR CALLBACK WepWindowsPageProc(
         }
         break;
     case WM_SIZE:
-        PhLayoutManagerLayout(&context->LayoutManager);  
+        PhLayoutManagerLayout(&context->LayoutManager);
         break;
     case WM_NOTIFY:
         {

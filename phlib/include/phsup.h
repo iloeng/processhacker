@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2015
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_PHSUP_H
 #define _PH_PHSUP_H
 
@@ -278,7 +290,7 @@ FORCEINLINE void *_InterlockedExchangePointer(
 
 #endif
 
-FORCEINLINE LONG_PTR _InterlockedExchangeAddPointer(
+FORCEINLINE LONG_PTR __InterlockedExchangeAddPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend,
     _In_ LONG_PTR Value
     )
@@ -289,6 +301,8 @@ FORCEINLINE LONG_PTR _InterlockedExchangeAddPointer(
     return (LONG_PTR)_InterlockedExchangeAdd((PLONG)Addend, (LONG)Value);
 #endif
 }
+
+#define _InterlockedExchangeAddPointer __InterlockedExchangeAddPointer
 
 FORCEINLINE LONG_PTR _InterlockedIncrementPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend
@@ -301,7 +315,7 @@ FORCEINLINE LONG_PTR _InterlockedIncrementPointer(
 #endif
 }
 
-FORCEINLINE LONG_PTR _InterlockedDecrementPointer(
+FORCEINLINE LONG_PTR __InterlockedDecrementPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend
     )
 {
@@ -311,6 +325,8 @@ FORCEINLINE LONG_PTR _InterlockedDecrementPointer(
     return (LONG_PTR)_InterlockedDecrement((PLONG)Addend);
 #endif
 }
+
+#define _InterlockedDecrementPointer __InterlockedDecrementPointer
 
 FORCEINLINE BOOLEAN _InterlockedBitTestAndResetPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Base,
@@ -401,6 +417,8 @@ FORCEINLINE BOOLEAN _InterlockedIncrementPositive(
 #define PH_PTR_STR_LEN 24
 #define PH_PTR_STR_LEN_1 (PH_PTR_STR_LEN + 1)
 
+#define PH_HEX_CHARS L"0123456789abcdef"
+
 FORCEINLINE VOID PhPrintInt32(
     _Out_writes_(PH_INT32_STR_LEN_1) PWSTR Destination,
     _In_ LONG Int32
@@ -435,7 +453,7 @@ FORCEINLINE VOID PhPrintUInt64(
 
 FORCEINLINE VOID PhPrintPointer(
     _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
-    _In_ PVOID Pointer
+    _In_opt_ PVOID Pointer
     )
 {
     Destination[0] = L'0';
@@ -445,6 +463,48 @@ FORCEINLINE VOID PhPrintPointer(
 #else
     _ultow((ULONG)Pointer, &Destination[2], 16);
 #endif
+}
+
+FORCEINLINE VOID PhPrintPointerPadZeros(
+    _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
+    _In_ PVOID Pointer
+    )
+{
+    ULONG_PTR ptr = (ULONG_PTR)Pointer;
+    PWSTR dest = Destination;
+
+    *dest++ = L'0';
+    *dest++ = L'x';
+
+#ifdef _WIN64
+    *dest++ = PH_HEX_CHARS[ptr >> 60];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0f00000000000000) >> 56];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00f0000000000000) >> 52];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000f000000000000) >> 48];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000f00000000000) >> 44];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000f0000000000) >> 40];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000f000000000) >> 36];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000f00000000) >> 32];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000f0000000) >> 28];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000000f000000) >> 24];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000000f00000) >> 20];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000000f0000) >> 16];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000000000f000) >> 12];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000000000f00) >> 8];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000000000f0) >> 4];
+    *dest++ = PH_HEX_CHARS[ptr & 0x000000000000000f];
+#else
+    *dest++ = PH_HEX_CHARS[ptr >> 28];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0f000000) >> 24];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00f00000) >> 20];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000f0000) >> 16];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000f000) >> 12];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000f00) >> 8];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000f0) >> 4];
+    *dest++ = PH_HEX_CHARS[ptr & 0x0000000f];
+#endif
+
+    *dest = UNICODE_NULL;
 }
 
 // Misc.
@@ -536,9 +596,9 @@ FORCEINLINE PLARGE_INTEGER PhTimeoutFromMilliseconds(
     )
 {
     if (Milliseconds == INFINITE)
-        return NULL;
-
-    Timeout->QuadPart = -(LONGLONG)UInt32x32To64(Milliseconds, PH_TIMEOUT_MS);
+        Timeout->QuadPart = MINLONGLONG;
+    else
+        Timeout->QuadPart = -(LONGLONG)UInt32x32To64(Milliseconds, PH_TIMEOUT_MS);
 
     return Timeout;
 }

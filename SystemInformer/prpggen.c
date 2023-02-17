@@ -237,6 +237,27 @@ typedef struct _PH_PROCGENERAL_CONTEXT
     HICON ProgramIcon;
 } PH_PROCGENERAL_CONTEXT, *PPH_PROCGENERAL_CONTEXT;
 
+VOID PphProcessGeneralDlgUpdateIcons(
+    _In_ HWND hwndDlg
+    )
+{
+    HICON folder;
+    HICON magnifier;
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(hwndDlg);
+
+    folder = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_FOLDER), dpiValue);
+    magnifier = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_MAGNIFIER), dpiValue);
+
+    SET_BUTTON_ICON(IDC_INSPECT, magnifier);
+    SET_BUTTON_ICON(IDC_OPENFILENAME, folder);
+    SET_BUTTON_ICON(IDC_INSPECT2, magnifier);
+    SET_BUTTON_ICON(IDC_OPENFILENAME2, folder);
+    SET_BUTTON_ICON(IDC_VIEWCOMMANDLINE, magnifier);
+    SET_BUTTON_ICON(IDC_VIEWPARENTPROCESS, magnifier);
+}
+
 INT_PTR CALLBACK PhpProcessGeneralDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -266,23 +287,13 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
             PPH_STRING curDir = NULL;
             PPH_PROCESS_ITEM parentProcess;
             CLIENT_ID clientId;
-            HICON folder;
-            HICON magnifier;
 
             context = propPageContext->Context = PhAllocateZero(sizeof(PH_PROCGENERAL_CONTEXT));
             context->WindowHandle = hwndDlg;
             context->StartedLabelHandle = GetDlgItem(hwndDlg, IDC_STARTED);
             context->Enabled = TRUE;
 
-            folder = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_FOLDER));
-            magnifier = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_MAGNIFIER));
-
-            SET_BUTTON_ICON(IDC_INSPECT, magnifier);
-            SET_BUTTON_ICON(IDC_OPENFILENAME, folder);
-            SET_BUTTON_ICON(IDC_INSPECT2, magnifier);
-            SET_BUTTON_ICON(IDC_OPENFILENAME2, folder);
-            SET_BUTTON_ICON(IDC_VIEWCOMMANDLINE, magnifier);
-            SET_BUTTON_ICON(IDC_VIEWPARENTPROCESS, magnifier);
+            PphProcessGeneralDlgUpdateIcons(hwndDlg);
 
             // File
 
@@ -312,7 +323,7 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
                 }
                 else
                 {
-                    if (!PhDoesFileExists(processItem->FileName))
+                    if (!PhDoesFileExist(&processItem->FileName->sr))
                     {
                         EnableWindow(GetDlgItem(hwndDlg, IDC_OPENFILENAME), FALSE);
                         EnableWindow(GetDlgItem(hwndDlg, IDC_INSPECT), FALSE);
@@ -490,8 +501,6 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
 
             PhSetDialogItemText(hwndDlg, IDC_PROCESSTYPETEXT, PH_AUTO_T(PH_STRING, PhGetProcessItemImageTypeText(processItem))->Buffer);
 
-            if (PhEnableThemeSupport)
-                PhInitializeWindowThemeStaticControl(GetDlgItem(hwndDlg, IDC_FILEICON));
             PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
 
             SetTimer(hwndDlg, 1, 1000, NULL);
@@ -507,6 +516,11 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
             }
 
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED_AFTERPARENT:
+        {
+            PphProcessGeneralDlgUpdateIcons(hwndDlg);
         }
         break;
     case WM_SHOWWINDOW:
@@ -679,7 +693,7 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
 
                                 status = PhCreateFile(
                                     &fileHandle,
-                                    processItem->FileName,
+                                    &processItem->FileName->sr,
                                     FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                                     FILE_ATTRIBUTE_NORMAL,
                                     FILE_SHARE_READ | FILE_SHARE_DELETE,

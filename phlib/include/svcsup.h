@@ -36,6 +36,13 @@ PhOpenService(
     );
 
 PHLIBAPI
+VOID
+NTAPI
+PhCloseServiceHandle(
+    _In_ SC_HANDLE ServiceHandle
+    );
+
+PHLIBAPI
 PVOID
 NTAPI
 PhGetServiceConfig(
@@ -146,6 +153,28 @@ PhGetThreadServiceTag(
     _In_ HANDLE ThreadHandle,
     _In_opt_ HANDLE ProcessHandle,
     _Out_ PVOID *ServiceTag
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetServiceKeyName(
+    _In_ PPH_STRINGREF ServiceName
+);
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetServiceHandleFileName(
+    _In_ SC_HANDLE ServiceHandle,
+    _In_ PPH_STRINGREF ServiceName
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetServiceFileName(
+    _In_ PPH_STRINGREF ServiceName
     );
 
 PHLIBAPI

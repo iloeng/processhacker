@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2013
- *     dmex    2015-2021
+ *     dmex    2015-2023
  *
  */
 
@@ -17,8 +17,7 @@
 #include <phapppub.h>
 #include <phappresource.h>
 #include <settings.h>
-
-#include <commonutil.h>
+#include <mapldr.h>
 
 #include "resource.h"
 #include "wndtree.h"
@@ -84,7 +83,8 @@ VOID WeShowWindowsPropPage(
 
 VOID WeShowWindowProperties(
     _In_ HWND ParentWindowHandle,
-    _In_ HWND WindowHandle
+    _In_ HWND WindowHandle,
+    _In_ BOOLEAN MessageOnlyWindow
     );
 
 HICON WepGetInternalWindowIcon(

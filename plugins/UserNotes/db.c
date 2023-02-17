@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
@@ -176,12 +176,19 @@ NTSTATUS LoadDb(
     PVOID topNode;
     PVOID currentNode;
 
-    if (!NT_SUCCESS(status = PhLoadXmlObjectFromFile(ObjectDbPath->Buffer, &topNode)))
-        return status;
-    if (!topNode)
-        return STATUS_FILE_CORRUPT_ERROR;
+    status = PhLoadXmlObjectFromFile(&ObjectDbPath->sr, &topNode);
 
-    LockDb();
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (!topNode)
+    {
+        // Delete the corrupted file. (dmex)
+        PhDeleteFileWin32(PhGetString(ObjectDbPath));
+        return STATUS_FILE_CORRUPT_ERROR;
+    }
+
+    //LockDb();
 
     for (currentNode = PhGetXmlNodeFirstChild(topNode); currentNode; currentNode = PhGetXmlNodeNextChild(currentNode))
     {
@@ -309,9 +316,16 @@ NTSTATUS LoadDb(
         PhClearReference(&boost);
     }
 
-    UnlockDb();
+    //UnlockDb();
 
     PhFreeXmlObject(topNode);
+
+    // Check if we loaded any objects (dmex)
+    if (GetNumberOfDbObjects() == 0)
+    {
+        // Delete the empty DB to improve performance (dmex)
+        PhDeleteFileWin32(PhGetString(ObjectDbPath));
+    }
 
     return STATUS_SUCCESS;
 }
@@ -359,6 +373,17 @@ NTSTATUS SaveDb(
     PVOID topNode;
     ULONG enumerationKey = 0;
     PDB_OBJECT *object;
+
+    // Skip saving the DB when there's no objects (dmex)
+    if (GetNumberOfDbObjects() == 0)
+    {
+        // Delete the empty DB to improve performance (dmex)
+        if (PhDoesFileExistWin32(PhGetString(ObjectDbPath)))
+        {
+            PhDeleteFileWin32(PhGetString(ObjectDbPath));
+        }
+        return STATUS_SUCCESS;
+    }
 
     topNode = PhCreateXmlNode(NULL, "objects");
 
@@ -420,13 +445,34 @@ NTSTATUS SaveDb(
     UnlockDb();
 
     status = PhSaveXmlObjectToFile(
-        ObjectDbPath->Buffer,
+        &ObjectDbPath->sr,
         topNode,
         NULL
         );
     PhFreeXmlObject(topNode);
 
     return status;
+}
+
+VOID EnumDb(
+    _In_ PDB_ENUM_CALLBACK Callback,
+    _In_ PVOID Context
+    )
+{
+    PH_HASHTABLE_ENUM_CONTEXT enumContext;
+    PDB_OBJECT* object;
+
+    LockDb();
+
+    PhBeginEnumHashtable(ObjectDb, &enumContext);
+
+    while (object = PhNextEnumHashtable(&enumContext))
+    {
+        if (!Callback(*object, Context))
+            break;
+    }
+
+    UnlockDb();
 }
 
 _Success_(return)
@@ -458,25 +504,37 @@ BOOLEAN FindIfeoObject(
     {
         if (CpuPriorityClass)
         {
-            if (status = ((value = PhQueryRegistryUlongEx(keyHandle, &IfeoCpuPriorityClassKeyName)) != ULONG_MAX))
+            if (status = ((value = PhQueryRegistryUlongStringRef(keyHandle, &IfeoCpuPriorityClassKeyName)) != ULONG_MAX))
             {
                 *CpuPriorityClass = value;
+            }
+            else
+            {
+                *CpuPriorityClass = ULONG_MAX;
             }
         }
 
         if (IoPriorityClass)
         {
-            if (status = ((value = PhQueryRegistryUlongEx(keyHandle, &IfeoIoPriorityClassKeyName)) != ULONG_MAX))
+            if (status = ((value = PhQueryRegistryUlongStringRef(keyHandle, &IfeoIoPriorityClassKeyName)) != ULONG_MAX))
             {
                 *IoPriorityClass = value;
+            }
+            else
+            {
+                *IoPriorityClass = ULONG_MAX;
             }
         }
 
         if (PagePriorityClass)
         {
-            if (status = ((value = PhQueryRegistryUlongEx(keyHandle, &IfeoPagePriorityClassKeyName)) != ULONG_MAX))
+            if (status = ((value = PhQueryRegistryUlongStringRef(keyHandle, &IfeoPagePriorityClassKeyName)) != ULONG_MAX))
             {
                 *PagePriorityClass = value;
+            }
+            else
+            {
+                *PagePriorityClass = ULONG_MAX;
             }
         }
 
@@ -645,9 +703,9 @@ NTSTATUS DeleteIfeoObject(
             status = PhDeleteValueKey(keyHandle, &IfeoPagePriorityClassKeyName);
         }
 
-        priorityClass = PhQueryRegistryUlongEx(keyHandle, &IfeoCpuPriorityClassKeyName);
-        ioPriorityClass = PhQueryRegistryUlongEx(keyHandle, &IfeoIoPriorityClassKeyName);
-        pagePriorityClass = PhQueryRegistryUlongEx(keyHandle, &IfeoPagePriorityClassKeyName);
+        priorityClass = PhQueryRegistryUlongStringRef(keyHandle, &IfeoCpuPriorityClassKeyName);
+        ioPriorityClass = PhQueryRegistryUlongStringRef(keyHandle, &IfeoIoPriorityClassKeyName);
+        pagePriorityClass = PhQueryRegistryUlongStringRef(keyHandle, &IfeoPagePriorityClassKeyName);
 
         if (
             priorityClass == ULONG_MAX &&

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -58,6 +58,7 @@
 #include <apiimport.h>
 #include <actions.h>
 #include <lsasup.h>
+#include <mapldr.h>
 #include <phsvc.h>
 #include <phsvccl.h>
 #include <phsettings.h>
@@ -184,12 +185,12 @@ VOID PhShowRunAsDialog(
     _In_opt_ HANDLE ProcessId
     )
 {
-    DialogBoxParam(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_RUNAS),
         PhCsForceNoParent ? NULL : ParentWindowHandle,
         PhpRunAsDlgProc,
-        (LPARAM)ProcessId
+        ProcessId
         );
 }
 
@@ -197,11 +198,12 @@ BOOLEAN PhShowRunFileDialog(
     _In_ HWND ParentWindowHandle
     )
 {
-    if (DialogBox(
+    if (PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_RUNFILEDLG),
         ParentWindowHandle,
-        PhpRunFileWndProc
+        PhpRunFileWndProc,
+        NULL
         ) == IDOK)
     {
         return TRUE;
@@ -234,7 +236,7 @@ BOOLEAN PhShowRunFileDialog(
     //            );
     //    }
     //
-    //    FreeLibrary(shell32Handle);
+    //    PhFreeLibrary(shell32Handle);
     //}
 }
 
@@ -343,7 +345,6 @@ PPH_STRING PhpGetCurrentDesktopInfo(
     VOID
     )
 {
-    static PH_STRINGREF seperator = PH_STRINGREF_INIT(L"\\"); // OBJ_NAME_PATH_SEPARATOR
     PPH_STRING desktopInfo = NULL;
     PPH_STRING winstationName = NULL;
     PPH_STRING desktopName = NULL;
@@ -353,7 +354,7 @@ PPH_STRING PhpGetCurrentDesktopInfo(
 
     if (winstationName && desktopName)
     {
-        desktopInfo = PhConcatStringRef3(&winstationName->sr, &seperator, &desktopName->sr);
+        desktopInfo = PhConcatStringRef3(&winstationName->sr, &PhNtPathSeperatorString, &desktopName->sr);
     }
 
     if (PhIsNullOrEmptyString(desktopInfo))
@@ -367,6 +368,95 @@ PPH_STRING PhpGetCurrentDesktopInfo(
         PhDereferenceObject(desktopName);
 
     return desktopInfo;
+}
+
+BOOLEAN PhIsAppExecutionAliasTarget(
+    _In_ PPH_STRING FileName
+    )
+{
+    PPH_STRING targetFileName = NULL;
+    PREPARSE_DATA_BUFFER reparseBuffer;
+    ULONG reparseLength;
+    HANDLE fileHandle;
+    IO_STATUS_BLOCK isb;
+
+    if (PhIsNullOrEmptyString(FileName))
+        return FALSE;
+
+    if (!NT_SUCCESS(PhCreateFileWin32(
+        &fileHandle,
+        PhGetString(FileName),
+        FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT
+        )))
+    {
+        return FALSE;
+    }
+
+    reparseLength = MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
+    reparseBuffer = PhAllocateZero(reparseLength);
+
+    if (NT_SUCCESS(NtFsControlFile(
+        fileHandle,
+        NULL,
+        NULL,
+        NULL,
+        &isb,
+        FSCTL_GET_REPARSE_POINT,
+        NULL,
+        0,
+        reparseBuffer,
+        reparseLength
+        )))
+    {
+        if (
+            IsReparseTagMicrosoft(reparseBuffer->ReparseTag) &&
+            reparseBuffer->ReparseTag == IO_REPARSE_TAG_APPEXECLINK
+            )
+        {
+            typedef struct _AppExecLinkReparseBuffer
+            {
+                ULONG StringCount;
+                WCHAR StringList[1];
+            } AppExecLinkReparseBuffer, *PAppExecLinkReparseBuffer;
+
+            PAppExecLinkReparseBuffer appexeclink;
+            PWSTR string;
+
+            appexeclink = (PAppExecLinkReparseBuffer)reparseBuffer->GenericReparseBuffer.DataBuffer;
+            string = (PWSTR)appexeclink->StringList;
+
+            for (ULONG i = 0; i < appexeclink->StringCount; i++)
+            {
+                if (i == 2 && PhDoesFileExistWin32(string))
+                {
+                    targetFileName = PhCreateString(string);
+                    break;
+                }
+
+                string += PhCountStringZ(string) + 1;
+            }
+        }
+    }
+
+    PhFree(reparseBuffer);
+    NtClose(fileHandle);
+
+    if (targetFileName)
+    {
+        if (PhDoesFileExistWin32(targetFileName->Buffer))
+        {
+            PhDereferenceObject(targetFileName);
+            return TRUE;
+        }
+
+        PhDereferenceObject(targetFileName);
+    }
+
+    return FALSE;
 }
 
 BOOLEAN PhpInitializeNetApi(VOID)
@@ -383,7 +473,7 @@ BOOLEAN PhpInitializeNetApi(VOID)
 
             if (!(NetUserEnum_I && NetApiBufferFree_I))
             {
-                FreeLibrary(netapiModuleHandle);
+                PhFreeLibrary(netapiModuleHandle);
                 netapiModuleHandle = NULL;
             }
         }
@@ -413,7 +503,7 @@ BOOLEAN PhpInitializeMRUList(VOID)
 
             if (!(CreateMRUList_I && AddMRUString_I && EnumMRUList_I && FreeMRUList_I))
             {
-                FreeLibrary(comctl32ModuleHandle);
+                PhFreeLibrary(comctl32ModuleHandle);
                 comctl32ModuleHandle = NULL;
             }
         }
@@ -467,7 +557,6 @@ static VOID PhpAddProgramsToComboBox(
     _In_ HWND ComboBoxHandle
     )
 {
-    static PH_STRINGREF prefixSr = PH_STRINGREF_INIT(L"\\1");
     HANDLE listHandle;
     INT listCount;
 
@@ -485,33 +574,27 @@ static VOID PhpAddProgramsToComboBox(
 
     for (INT i = 0; i < listCount; i++)
     {
-        PPH_STRING programName;
-        PH_STRINGREF nameSr;
-        PH_STRINGREF firstPart;
-        PH_STRINGREF remainingPart;
-        WCHAR entry[MAX_PATH] = L"";
+        INT returnLength;
+        WCHAR buffer[MAX_PATH] = L"";
 
-        if (!EnumMRUList_I(
+        returnLength = EnumMRUList_I(
             listHandle,
             i,
-            entry,
-            RTL_NUMBER_OF(entry)
-            ))
-        {
-            break;
-        }
+            buffer,
+            RTL_NUMBER_OF(buffer)
+            );
 
-        PhInitializeStringRefLongHint(&nameSr, entry);
-
-        if (!PhSplitStringRefAtString(&nameSr, &prefixSr, TRUE, &firstPart, &remainingPart))
-        {
-            ComboBox_AddString(ComboBoxHandle, entry);
+        if (returnLength >= RTL_NUMBER_OF(buffer))
             continue;
-        }
+        if (returnLength < sizeof(UNICODE_NULL))
+            continue;
 
-        programName = PhCreateString2(&firstPart);
-        ComboBox_AddString(ComboBoxHandle, PhGetString(programName));
-        PhDereferenceObject(programName);
+        buffer[returnLength] = UNICODE_NULL;
+
+        if (buffer[returnLength - 1] == L'1' && buffer[returnLength - 2] == L'\\')
+            buffer[returnLength - 2] = UNICODE_NULL; // trim \\1 (dmex)
+
+        ComboBox_AddString(ComboBoxHandle, buffer);
     }
 
     FreeMRUList_I(listHandle);
@@ -521,12 +604,12 @@ VOID PhpFreeProgramsComboBox(
     _In_ HWND ComboBoxHandle
     )
 {
-    ULONG total;
+    INT total;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
 
-    for (ULONG i = 0; i < total; i++)
+    for (INT i = 0; i < total; i++)
     {
         ComboBox_DeleteString(ComboBoxHandle, i);
     }
@@ -536,12 +619,12 @@ static VOID PhpFreeAccountsComboBox(
     _In_ HWND ComboBoxHandle
     )
 {
-    ULONG total;
+    INT total;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
 
-    for (ULONG i = 0; i < total; i++)
+    for (INT i = 0; i < total; i++)
     {
         ComboBox_DeleteString(ComboBoxHandle, i);
     }
@@ -617,9 +700,9 @@ static VOID PhpAddAccountsToComboBox(
                     PPH_STRING usernameString;
 
                     usernameString = PhConcatStrings(
-                        3, 
-                        userDomainName->Buffer, 
-                        L"\\", 
+                        3,
+                        userDomainName->Buffer,
+                        L"\\",
                         entry->usri0_name
                         );
 
@@ -679,8 +762,8 @@ static VOID PhpFreeSessionsComboBox(
     )
 {
     PPH_RUNAS_SESSION_ITEM entry;
-    ULONG total;
-    ULONG i;
+    INT total;
+    INT i;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
@@ -859,8 +942,8 @@ static VOID PhpFreeDesktopsComboBox(
     )
 {
     PPH_RUNAS_DESKTOP_ITEM entry;
-    ULONG total;
-    ULONG i;
+    INT total;
+    INT i;
 
     if ((total = ComboBox_GetCount(ComboBoxHandle)) == CB_ERR)
         return;
@@ -895,7 +978,7 @@ static VOID PhpAddDesktopsToComboBox(
     for (i = 0; i < callback.DesktopList->Count; i++)
     {
         INT itemIndex = ComboBox_AddString(
-            ComboBoxHandle, 
+            ComboBoxHandle,
             PhGetString(callback.DesktopList->Items[i])
             );
 
@@ -1056,8 +1139,8 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                 if (!PhIsNullOrEmptyString(runAsUserName))
                 {
                     runAsUserNameIndex = ComboBox_FindString(
-                        context->UserComboBoxWindowHandle, 
-                        0, 
+                        context->UserComboBoxWindowHandle,
+                        0,
                         PhGetString(runAsUserName)
                         );
                 }
@@ -1127,7 +1210,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
         }
         break;
     case WM_COMMAND:
-        {    
+        {
             switch (GET_WM_COMMAND_CMD(wParam, lParam))
             {
             case CBN_DROPDOWN:
@@ -1206,7 +1289,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                         break;
 
                     // Fix up the user name if it doesn't have a domain.
-                    if (PhFindCharInString(username, 0, L'\\') == -1)
+                    if (PhFindCharInString(username, 0, L'\\') == SIZE_MAX)
                     {
                         PSID sid;
                         PPH_STRING newUserName;
@@ -1297,18 +1380,57 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                             {
                                 HANDLE processHandle = NULL;
                                 HANDLE newProcessHandle;
-                                STARTUPINFOEX startupInfo;
-                                SIZE_T attributeListLength = 0;
+                                STARTUPINFOEX startupInfo = { 0 };
                                 PSECURITY_DESCRIPTOR processSecurityDescriptor = NULL;
                                 PSECURITY_DESCRIPTOR tokenSecurityDescriptor = NULL;
                                 PVOID environment = NULL;
                                 HANDLE tokenHandle;
                                 ULONG flags = 0;
 
+                                {
+                                    PPH_STRING commandString;
+                                    PPH_STRING fullFileName = NULL;
+                                    PH_STRINGREF fileName;
+                                    PH_STRINGREF arguments;
+
+                                    if (!(commandString = PhExpandEnvironmentStrings(&program->sr)))
+                                        commandString = PhCreateString2(&program->sr);
+
+                                    PhParseCommandLineFuzzy(&commandString->sr, &fileName, &arguments, &fullFileName);
+
+                                    if (PhIsNullOrEmptyString(fullFileName))
+                                        PhMoveReference(&fullFileName, PhCreateString2(&fileName));
+
+                                    if (PhIsNullOrEmptyString(fullFileName))
+                                    {
+                                        if (fullFileName) PhDereferenceObject(fullFileName);
+                                        if (commandString) PhDereferenceObject(commandString);
+                                        status = STATUS_NOT_IMPLEMENTED;
+                                        goto CleanupExit;
+                                    }
+
+                                    // NOTE: CreateProcess has an issue when launching processes with execution aliases
+                                    // where they ignore PROCESS_CREATE_PROCESS and inherit our elevated token instead
+                                    // of the parents non-elevated process token.
+                                    // So we need to make sure they're created with WdcRunTaskAsInteractiveUser otherwise
+                                    // we'll end up incorrectly resetting their process token and current directory. (dmex)
+
+                                    if (PhIsAppExecutionAliasTarget(fullFileName))
+                                    {
+                                        if (fullFileName) PhDereferenceObject(fullFileName);
+                                        if (commandString) PhDereferenceObject(commandString);
+                                        status = STATUS_NOT_IMPLEMENTED;
+                                        goto CleanupExit;
+                                    }
+
+                                    if (fullFileName) PhDereferenceObject(fullFileName);
+                                    if (commandString) PhDereferenceObject(commandString);
+                                }
+
                                 memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
                                 startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
                                 startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-                                startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+                                startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
 
                                 status = PhOpenProcess(
                                     &processHandle,
@@ -1319,27 +1441,21 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                                 if (!NT_SUCCESS(status))
                                     goto CleanupExit;
 
-#if (PHNT_VERSION >= PHNT_WIN7)
-                                if (!InitializeProcThreadAttributeList(NULL, 1, 0, &attributeListLength) && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-                                {
-                                    status = PhGetLastWin32ErrorAsNtStatus();
-                                    goto CleanupExit;
-                                }
+                                status = PhInitializeProcThreadAttributeList(&startupInfo.lpAttributeList, 1);
 
-                                startupInfo.lpAttributeList = PhAllocate(attributeListLength);
-
-                                if (!InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, &attributeListLength))
-                                {
-                                    status = PhGetLastWin32ErrorAsNtStatus();
+                                if (!NT_SUCCESS(status))
                                     goto CleanupExit;
-                                }
 
-                                if (!UpdateProcThreadAttribute(startupInfo.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &processHandle, sizeof(HANDLE), NULL, NULL))
-                                {
-                                    status = PhGetLastWin32ErrorAsNtStatus();
+                                status = PhUpdateProcThreadAttribute(
+                                    startupInfo.lpAttributeList,
+                                    PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                                    &(HANDLE){ processHandle },
+                                    sizeof(HANDLE)
+                                    );
+
+                                if (!NT_SUCCESS(status))
                                     goto CleanupExit;
-                                }
-#endif
+
                                 if (PhGetOwnTokenAttributes().Elevated)
                                 {
                                     PhGetObjectSecurity(
@@ -1371,7 +1487,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
 
                                     NtClose(tokenHandle);
                                 }
-                
+
                                 status = PhCreateProcessWin32Ex(
                                     NULL,
                                     PhGetString(program),
@@ -1391,9 +1507,9 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
 
                                     if (PhGetOwnTokenAttributes().Elevated)
                                     {
-                                        // Note: This is needed to workaround a severe bug with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS 
-                                        // where the process and token security descriptors are created without an ACE for the current user, 
-                                        // owned by the wrong user and with a High-IL when the process token is Medium-IL 
+                                        // Note: This is needed to workaround a severe bug with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
+                                        // where the process and token security descriptors are created without an ACE for the current user,
+                                        // owned by the wrong user and with a High-IL when the process token is Medium-IL
                                         // preventing the new process from accessing user/system resources above Low-IL. (dmex)
 
                                         if (processSecurityDescriptor)
@@ -1445,13 +1561,12 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                                 {
                                     PhFree(processSecurityDescriptor);
                                 }
-#if (PHNT_VERSION >= PHNT_WIN7)
+
                                 if (startupInfo.lpAttributeList)
                                 {
-                                    DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-                                    PhFree(startupInfo.lpAttributeList);
+                                    PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
                                 }
-#endif
+
                                 if (processHandle)
                                 {
                                     NtClose(processHandle);
@@ -1488,7 +1603,16 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
                     if (!NT_SUCCESS(status))
                     {
                         if (status != STATUS_CANCELLED)
-                            PhShowStatus(hwndDlg, L"Unable to start the program.", status, 0);
+                        {
+                            if (status == STATUS_NOT_IMPLEMENTED)
+                            {
+                                PhShowError2(hwndDlg, L"Unable to start the program.", L"Unable to start the execution alias with custom tokens.", "");
+                            }
+                            else
+                            {
+                                PhShowStatus(hwndDlg, L"Unable to start the program.", status, 0);
+                            }
+                        }
                     }
                     else if (status != STATUS_TIMEOUT)
                     {
@@ -1531,7 +1655,7 @@ INT_PTR CALLBACK PhpRunAsDlgProc(
 
                     if (!context->ProcessId && GET_WM_COMMAND_CMD(wParam, lParam) == CBN_SELCHANGE)
                     {
-                        username = PH_AUTO(PhGetComboBoxString(context->UserComboBoxWindowHandle, -1));
+                        username = PH_AUTO(PhGetComboBoxString(context->UserComboBoxWindowHandle, INT_ERROR));
                     }
                     else if (!context->ProcessId && (
                         GET_WM_COMMAND_CMD(wParam, lParam) == CBN_EDITCHANGE ||
@@ -1665,7 +1789,7 @@ NTSTATUS PhExecuteRunAsCommand(
     if (!(scManagerHandle = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE)))
         return PhGetLastWin32ErrorAsNtStatus();
 
-    if (!(applicationFileName = PhGetApplicationFileName()))
+    if (!(applicationFileName = PhGetApplicationFileNameWin32()))
         return STATUS_FAIL_CHECK;
 
     commandLine = PhFormatString(L"\"%s\" -ras \"%s\"", applicationFileName->Buffer, Parameters->ServiceName);
@@ -1832,10 +1956,11 @@ NTSTATUS PhExecuteRunAsCommand3(
 
     // An existing instance was not available. Proceed normally.
 
-    memcpy(serviceName, L"SystemInformer", 13 * sizeof(WCHAR));
-    PhGenerateRandomAlphaString(&serviceName[13], 16);
+    memset(serviceName, 0, sizeof(serviceName));
+    memcpy(serviceName, L"SystemInformer", 14 * sizeof(WCHAR));
+    PhGenerateRandomAlphaString(&serviceName[14], ARRAYSIZE(serviceName) - 14);
     PhAcquireQueuedLockExclusive(&RunAsOldServiceLock);
-    memcpy(RunAsOldServiceName, serviceName, sizeof(serviceName));
+    memcpy(RunAsOldServiceName, serviceName, sizeof(serviceName) - sizeof(UNICODE_NULL));
     PhReleaseQueuedLockExclusive(&RunAsOldServiceLock);
 
     parameters.ServiceName = serviceName;
@@ -1934,7 +2059,7 @@ static VOID WINAPI RunAsServiceMain(
     SetRunAsServiceStatus(SERVICE_RUNNING);
 
     portName = PhConcatStrings2(
-        L"\\BaseNamedObjects\\", 
+        L"\\BaseNamedObjects\\",
         RunAsServiceName->Buffer
         );
 
@@ -1947,8 +2072,12 @@ NTSTATUS PhRunAsServiceStart(
     _In_ PPH_STRING ServiceName
     )
 {
+    SERVICE_TABLE_ENTRY serviceDispatchTable[] =
+    {
+        { PhGetString(ServiceName), RunAsServiceMain },
+        { NULL, NULL }
+    };
     HANDLE tokenHandle;
-    SERVICE_TABLE_ENTRY entry;
 
     // Enable some required privileges.
 
@@ -1968,10 +2097,7 @@ NTSTATUS PhRunAsServiceStart(
 
     RunAsServiceName = ServiceName;
 
-    entry.lpServiceName = ServiceName->Buffer;
-    entry.lpServiceProc = RunAsServiceMain;
-
-    StartServiceCtrlDispatcher(&entry);
+    StartServiceCtrlDispatcher(serviceDispatchTable);
 
     return STATUS_SUCCESS;
 }
@@ -2101,7 +2227,7 @@ NTSTATUS PhpRunAsShellExecute(
     info.lpParameters = Parameters;
     info.lpDirectory = PhGetString(parentDirectory);
     info.fMask = SEE_MASK_FLAG_NO_UI;
-    info.nShow = SW_SHOWDEFAULT;
+    info.nShow = SW_SHOWNORMAL;
     info.hwnd = hWnd;
 
     if (Elevated)
@@ -2130,32 +2256,17 @@ BOOLEAN PhpRunFileAsInteractiveUser(
     _In_ PPH_STRING Command
     )
 {
-    ULONG (WINAPI *WdcRunTaskAsInteractiveUser_I)(
-        _In_ PWSTR CommandLine,
-        _In_ PWSTR CurrentDirectory,
-        _In_ ULONG Reserved
-        ) = NULL;
     BOOLEAN success = FALSE;
-    PVOID wdcLibraryHandle;
     PPH_STRING executeString = NULL;
     INT cmdlineArgCount;
     PWSTR* cmdlineArgList;
-
-    if (!(wdcLibraryHandle = PhLoadLibrary(L"wdc.dll")))
-        return FALSE;
-
-    if (!(WdcRunTaskAsInteractiveUser_I = PhGetDllBaseProcedureAddress(wdcLibraryHandle, "WdcRunTaskAsInteractiveUser", 0)))
-    {
-        FreeLibrary(wdcLibraryHandle);
-        return FALSE;
-    }
 
     // Extract the filename.
     if (cmdlineArgList = CommandLineToArgvW(Command->Buffer, &cmdlineArgCount))
     {
         PPH_STRING fileName = PhCreateString(cmdlineArgList[0]);
 
-        if (fileName && !PhDoesFileExistsWin32(fileName->Buffer))
+        if (fileName && !PhDoesFileExistWin32(fileName->Buffer))
         {
             PPH_STRING filePathString;
 
@@ -2200,7 +2311,7 @@ BOOLEAN PhpRunFileAsInteractiveUser(
     {
         PPH_STRING parentDirectory = PhpQueryRunFileParentDirectory(FALSE);
 
-        if (WdcRunTaskAsInteractiveUser_I(PhGetString(executeString), PhGetString(parentDirectory), 0) == 0)
+        if (PhCreateProcessAsInteractiveUser(PhGetString(executeString), PhGetString(parentDirectory)) == S_OK)
         {
             success = TRUE;
         }
@@ -2211,8 +2322,7 @@ BOOLEAN PhpRunFileAsInteractiveUser(
         }
     }
 
-    if (executeString) PhDereferenceObject(executeString);
-    FreeLibrary(wdcLibraryHandle);
+    PhClearReference(&executeString);
 
     return success;
 }
@@ -2261,7 +2371,7 @@ NTSTATUS PhpRunFileProgram(
     }
 
     // If the file doesn't exist its probably a URL with http, https, www (dmex)
-    if (isDirectory || !PhDoesFileExistsWin32(fullFileName->Buffer))
+    if (isDirectory || !PhDoesFileExistWin32(fullFileName->Buffer))
     {
         status = PhpRunAsShellExecute(
             Context->WindowHandle,
@@ -2271,7 +2381,7 @@ NTSTATUS PhpRunFileProgram(
             );
     }
     else if (Button_GetCheck(Context->RunAsCheckboxHandle) == BST_CHECKED ||
-        // The explorer runas dialog executes programs as administrator when holding ctrl/shift keys 
+        // The explorer runas dialog executes programs as administrator when holding ctrl/shift keys
         // and clicking the OK button, so we'll implement the same functionality. (dmex)
         (!!(GetKeyState(VK_CONTROL) < 0 && !!(GetKeyState(VK_SHIFT) < 0))))
     {
@@ -2291,7 +2401,6 @@ NTSTATUS PhpRunFileProgram(
         HANDLE tokenHandle;
         HWND shellWindow;
         STARTUPINFOEX startupInfo;
-        SIZE_T attributeListLength = 0;
         PSECURITY_DESCRIPTOR processSecurityDescriptor = NULL;
         PSECURITY_DESCRIPTOR tokenSecurityDescriptor = NULL;
         PVOID environment = NULL;
@@ -2300,10 +2409,15 @@ NTSTATUS PhpRunFileProgram(
         memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
         startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
         startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-        startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+        startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
         parentDirectory = PhpQueryRunFileParentDirectory(FALSE);
 
-        if (!(shellWindow = GetShellWindow()))
+        // NOTE: CreateProcess has an issue when launching processes with execution aliases
+        // where they ignore PROCESS_CREATE_PROCESS and inherit our elevated token instead
+        // of the parents non-elevated process token.
+        // So we need to make sure they're created with WdcRunTaskAsInteractiveUser otherwise
+        // we'll end up incorrectly resetting their process token and current directory. (dmex)
+        if (PhIsAppExecutionAliasTarget(fullFileName) || !(shellWindow = GetShellWindow()))
         {
             if (PhpRunFileAsInteractiveUser(Context, commandString))
                 status = STATUS_SUCCESS;
@@ -2328,27 +2442,21 @@ NTSTATUS PhpRunFileProgram(
         if (!NT_SUCCESS(status))
             goto CleanupExit;
 
-#if (PHNT_VERSION >= PHNT_WIN7)
-        if (!InitializeProcThreadAttributeList(NULL, 1, 0, &attributeListLength) && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-        {
-            status = PhGetLastWin32ErrorAsNtStatus();
-            goto CleanupExit;
-        }
+        status = PhInitializeProcThreadAttributeList(&startupInfo.lpAttributeList, 1);
 
-        startupInfo.lpAttributeList = PhAllocate(attributeListLength);
-
-        if (!InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, &attributeListLength))
-        {
-            status = PhGetLastWin32ErrorAsNtStatus();
+        if (!NT_SUCCESS(status))
             goto CleanupExit;
-        }
 
-        if (!UpdateProcThreadAttribute(startupInfo.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &processHandle, sizeof(HANDLE), NULL, NULL))
-        {
-            status = PhGetLastWin32ErrorAsNtStatus();
+        status = PhUpdateProcThreadAttribute(
+            startupInfo.lpAttributeList,
+            PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+            &(HANDLE){ processHandle },
+            sizeof(HANDLE)
+            );
+
+        if (!NT_SUCCESS(status))
             goto CleanupExit;
-        }
-#endif
+
         if (PhGetOwnTokenAttributes().Elevated)
         {
             PhGetObjectSecurity(
@@ -2400,9 +2508,9 @@ NTSTATUS PhpRunFileProgram(
 
             if (PhGetOwnTokenAttributes().Elevated)
             {
-                // Note: This is needed to workaround a severe bug with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS 
-                // where the process and token security descriptors are created without an ACE for the current user, 
-                // owned by the wrong user and with a High-IL when the process token is Medium-IL 
+                // Note: This is needed to workaround a severe bug with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
+                // where the process and token security descriptors are created without an ACE for the current user,
+                // owned by the wrong user and with a High-IL when the process token is Medium-IL
                 // preventing the new process from accessing user/system resources above Low-IL. (dmex)
 
                 if (processSecurityDescriptor)
@@ -2465,13 +2573,11 @@ NTSTATUS PhpRunFileProgram(
             PhFree(processSecurityDescriptor);
         }
 
-#if (PHNT_VERSION >= PHNT_WIN7)
         if (startupInfo.lpAttributeList)
         {
-            DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-            PhFree(startupInfo.lpAttributeList);
+            PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
         }
-#endif
+
         if (processHandle)
         {
             NtClose(processHandle);
@@ -2500,7 +2606,6 @@ NTSTATUS RunAsCreateProcessThread(
     SC_HANDLE serviceHandle = NULL;
     HANDLE processHandle = NULL;
     STARTUPINFOEX startupInfo;
-    SIZE_T attributeListLength = 0;
     PPH_STRING commandLine = NULL;
     ULONG bytesNeeded = 0;
     PPH_STRING filePathString;
@@ -2508,12 +2613,12 @@ NTSTATUS RunAsCreateProcessThread(
     if (filePathString = PhSearchFilePath(command->Buffer, L".exe"))
         PhMoveReference(&commandLine, filePathString);
     else
-        commandLine = command; // HACK (dmex)
+        PhSetReference(&commandLine, command);
 
     memset(&startupInfo, 0, sizeof(STARTUPINFOEX));
     startupInfo.StartupInfo.cb = sizeof(STARTUPINFOEX);
     startupInfo.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    startupInfo.StartupInfo.wShowWindow = SW_SHOWDEFAULT;
+    startupInfo.StartupInfo.wShowWindow = SW_SHOWNORMAL;
 
     if (!(serviceHandle = PhOpenService(L"TrustedInstaller", SERVICE_QUERY_STATUS | SERVICE_START)))
     {
@@ -2574,27 +2679,18 @@ NTSTATUS RunAsCreateProcessThread(
     if (!NT_SUCCESS(status = PhOpenProcess(&processHandle, PROCESS_CREATE_PROCESS, UlongToHandle(serviceStatus.dwProcessId))))
         goto CleanupExit;
 
-#if (PHNT_VERSION >= PHNT_WIN7)
-    if (!InitializeProcThreadAttributeList(NULL, 1, 0, &attributeListLength) && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-    {
-        status = PhGetLastWin32ErrorAsNtStatus();
+    if (!NT_SUCCESS(status = PhInitializeProcThreadAttributeList(&startupInfo.lpAttributeList, 1)))
         goto CleanupExit;
-    }
 
-    startupInfo.lpAttributeList = PhAllocate(attributeListLength);
+    status = PhUpdateProcThreadAttribute(
+        startupInfo.lpAttributeList,
+        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+        &(HANDLE){ processHandle },
+        sizeof(HANDLE)
+        );
 
-    if (!InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, &attributeListLength))
-    {
-        status = PhGetLastWin32ErrorAsNtStatus();
+    if (!NT_SUCCESS(status))
         goto CleanupExit;
-    }
-
-    if (!UpdateProcThreadAttribute(startupInfo.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, &processHandle, sizeof(HANDLE), NULL, NULL))
-    {
-        status = PhGetLastWin32ErrorAsNtStatus();
-        goto CleanupExit;
-    }
-#endif
 
     AllowSetForegroundWindow(ASFW_ANY);
 
@@ -2619,20 +2715,54 @@ CleanupExit:
     if (serviceHandle)
         CloseServiceHandle(serviceHandle);
 
-#if (PHNT_VERSION >= PHNT_WIN7)
     if (startupInfo.lpAttributeList)
     {
-        DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-        PhFree(startupInfo.lpAttributeList);
+        PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
     }
-#endif
 
     if (commandLine)
     {
         PhDereferenceObject(commandLine);
     }
 
+    if (command)
+    {
+        PhDereferenceObject(command);
+    }
+
     return status;
+}
+
+static VOID PhpRunFileSetImageList(
+    _Inout_ PPHP_RUNFILEDLG Context
+    )
+{
+    HICON shieldIcon;
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(Context->WindowHandle);
+
+    if (shieldIcon = PhLoadIcon(
+        NULL,
+        IDI_SHIELD,
+        PH_LOAD_ICON_SIZE_SMALL,
+        0,
+        0,
+        dpiValue
+        ))
+    {
+        if (Context->ImageListHandle) PhImageListDestroy(Context->ImageListHandle);
+        Context->ImageListHandle = PhImageListCreate(
+            PhGetSystemMetrics(SM_CXSMICON, dpiValue),
+            PhGetSystemMetrics(SM_CYSMICON, dpiValue),
+            ILC_MASK | ILC_COLOR32,
+            1,
+            1
+            );
+
+        PhImageListAddIcon(Context->ImageListHandle, shieldIcon);
+        DestroyIcon(shieldIcon);
+    }
 }
 
 INT_PTR CALLBACK PhpRunFileWndProc(
@@ -2692,30 +2822,10 @@ INT_PTR CALLBACK PhpRunFileWndProc(
 
             if (!PhGetOwnTokenAttributes().Elevated)
             {
-                HICON shieldIcon;
-
                 Button_Enable(context->RunAsInstallerCheckboxHandle, FALSE);
                 context->RunAsInstallerCheckboxDisabled = TRUE;
 
-                if (shieldIcon = PhLoadIcon(
-                    NULL,
-                    IDI_SHIELD,
-                    PH_LOAD_ICON_SIZE_SMALL,
-                    PhSmallIconSize.X,
-                    PhSmallIconSize.Y
-                    ))
-                {
-                    context->ImageListHandle = PhImageListCreate(
-                        PhSmallIconSize.X,
-                        PhSmallIconSize.Y,
-                        ILC_MASK | ILC_COLOR32,
-                        1,
-                        1
-                        );
-
-                    PhImageListAddIcon(context->ImageListHandle, shieldIcon);
-                    DestroyIcon(shieldIcon);
-                }
+                PhpRunFileSetImageList(context);
             }
         }
         break;
@@ -2727,6 +2837,11 @@ INT_PTR CALLBACK PhpRunFileWndProc(
                 PhImageListDestroy(context->ImageListHandle);
 
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PhpRunFileSetImageList(context);
         }
         break;
     case WM_CTLCOLORSTATIC:
@@ -2754,6 +2869,7 @@ INT_PTR CALLBACK PhpRunFileWndProc(
                     {
                         if (Button_GetCheck(context->RunAsInstallerCheckboxHandle) == BST_CHECKED)
                         {
+                            PhReferenceObject(commandString);
                             status = PhCreateThread2(RunAsCreateProcessThread, commandString);
                         }
                         else
@@ -2816,17 +2932,20 @@ INT_PTR CALLBACK PhpRunFileWndProc(
         {
             HDC hdc = (HDC)wParam;
             RECT clientRect;
+            LONG dpiValue;
 
             if (!GetClientRect(hwndDlg, &clientRect))
                 break;
 
+            dpiValue = PhGetWindowDpi(hwndDlg);
+
             SetBkMode(hdc, TRANSPARENT);
 
-            clientRect.bottom -= PH_SCALE_DPI(60);
+            clientRect.bottom -= PhGetDpi(60, dpiValue);
             FillRect(hdc, &clientRect, GetSysColorBrush(COLOR_WINDOW));
 
             clientRect.top = clientRect.bottom;
-            clientRect.bottom = clientRect.top + PH_SCALE_DPI(60);
+            clientRect.bottom = clientRect.top + PhGetDpi(60, dpiValue);
             FillRect(hdc, &clientRect, GetSysColorBrush(COLOR_3DFACE));
 
             SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
@@ -2860,6 +2979,8 @@ INT_PTR CALLBACK PhpRunFileWndProc(
                             case CDDS_PREPAINT:
                                 {
                                     PPH_STRING buttonText;
+                                    LONG dpiValue;
+                                    LONG width;
 
                                     SetTextColor(customDraw->hdc, RGB(0, 0, 0));
                                     SetDCBrushColor(customDraw->hdc, RGB(0xff, 0xff, 0xff));
@@ -2867,7 +2988,11 @@ INT_PTR CALLBACK PhpRunFileWndProc(
 
                                     if (buttonText = PhGetWindowText(customDraw->hdr.hwndFrom))
                                     {
-                                        customDraw->rc.left += PhSmallIconSize.X;
+                                        dpiValue = PhGetWindowDpi (hwndDlg);
+
+                                        width = PhGetSystemMetrics(SM_CXSMICON, dpiValue);
+
+                                        customDraw->rc.left += width;
                                         DrawText(
                                             customDraw->hdc,
                                             buttonText->Buffer,
@@ -2875,7 +3000,7 @@ INT_PTR CALLBACK PhpRunFileWndProc(
                                             &customDraw->rc,
                                             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_HIDEPREFIX
                                             );
-                                        customDraw->rc.left -= PhSmallIconSize.X;
+                                        customDraw->rc.left -= width;
 
                                         PhDereferenceObject(buttonText);
                                     }

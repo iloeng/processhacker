@@ -237,8 +237,8 @@ VOID PhpUpdateHeapRegions(
     HANDLE clientProcessId = List->ProcessId;
     PROCESS_REFLECTION_INFORMATION reflectionInfo = { 0 };
     PRTL_DEBUG_INFORMATION debugBuffer = NULL;
+    PPH_PROCESS_DEBUG_HEAP_INFORMATION heapDebugInfo = NULL;
     HANDLE powerRequestHandle = NULL;
-    ULONG heapEntrySize;
 
     status = PhOpenProcess(
         &processHandle,
@@ -276,7 +276,7 @@ VOID PhpUpdateHeapRegions(
 
         status = RtlQueryProcessDebugInformation(
             clientProcessId,
-            RTL_QUERY_PROCESS_HEAP_SUMMARY | RTL_QUERY_PROCESS_HEAP_SEGMENTS,
+            RTL_QUERY_PROCESS_HEAP_SUMMARY | RTL_QUERY_PROCESS_HEAP_SEGMENTS | RTL_QUERY_PROCESS_NONINVASIVE,
             debugBuffer
             );
 
@@ -310,20 +310,46 @@ VOID PhpUpdateHeapRegions(
         return;
     }
 
-    heapEntrySize = WindowsVersion > WINDOWS_11 ? sizeof(RTL_HEAP_INFORMATION) : RTL_SIZEOF_THROUGH_FIELD(RTL_HEAP_INFORMATION, Entries);
-
-    for (ULONG i = 0; i < debugBuffer->Heaps->NumberOfHeaps; i++)
+    if (WindowsVersion > WINDOWS_11)
     {
-        PRTL_HEAP_INFORMATION heapInfo = PTR_ADD_OFFSET(debugBuffer->Heaps->Heaps, heapEntrySize * i);
+        heapDebugInfo = PhAllocateZero(sizeof(PH_PROCESS_DEBUG_HEAP_INFORMATION) + ((PRTL_PROCESS_HEAPS_V2)debugBuffer->Heaps)->NumberOfHeaps * sizeof(PH_PROCESS_DEBUG_HEAP_ENTRY));
+        heapDebugInfo->NumberOfHeaps = ((PRTL_PROCESS_HEAPS_V2)debugBuffer->Heaps)->NumberOfHeaps;
+    }
+    else
+    {
+        heapDebugInfo = PhAllocateZero(sizeof(PH_PROCESS_DEBUG_HEAP_INFORMATION) + ((PRTL_PROCESS_HEAPS_V1)debugBuffer->Heaps)->NumberOfHeaps * sizeof(PH_PROCESS_DEBUG_HEAP_ENTRY));
+        heapDebugInfo->NumberOfHeaps = ((PRTL_PROCESS_HEAPS_V1)debugBuffer->Heaps)->NumberOfHeaps;
+    }
+
+    for (ULONG i = 0; i < heapDebugInfo->NumberOfHeaps; i++)
+    {
+        RTL_HEAP_INFORMATION_V2 heapInfo = { 0 };
         PPH_MEMORY_ITEM heapMemoryItem;
 
-        if (heapMemoryItem = PhpSetMemoryRegionType(List, heapInfo->BaseAddress, TRUE, HeapRegion))
+        if (WindowsVersion > WINDOWS_11)
+        {
+            heapInfo = ((PRTL_PROCESS_HEAPS_V2)debugBuffer->Heaps)->Heaps[i];
+        }
+        else
+        {
+            RTL_HEAP_INFORMATION_V1 heapInfoV1 = ((PRTL_PROCESS_HEAPS_V1)debugBuffer->Heaps)->Heaps[i];
+            heapInfo.NumberOfEntries = heapInfoV1.NumberOfEntries;
+            heapInfo.Entries = heapInfoV1.Entries;
+            heapInfo.BytesCommitted = heapInfoV1.BytesCommitted;
+            heapInfo.Flags = heapInfoV1.Flags;
+            heapInfo.BaseAddress = heapInfoV1.BaseAddress;
+        }
+
+        if (!heapInfo.BaseAddress)
+            continue;
+
+        if (heapMemoryItem = PhpSetMemoryRegionType(List, heapInfo.BaseAddress, TRUE, HeapRegion))
         {
             heapMemoryItem->u.Heap.Index = i;
 
-            for (ULONG j = 0; j < heapInfo->NumberOfEntries; j++)
+            for (ULONG j = 0; j < heapInfo.NumberOfEntries; j++)
             {
-                PRTL_HEAP_ENTRY heapEntry = &heapInfo->Entries[j];
+                PRTL_HEAP_ENTRY heapEntry = &heapInfo.Entries[j];
 
                 if (heapEntry->Flags & RTL_HEAP_SEGMENT)
                 {
@@ -784,46 +810,20 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
 
 #ifdef _WIN64
 
-    PS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock = { 0 };
-    PVOID ldrInitBlockBaseAddress = NULL;
+    PPS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock;
     PPH_MEMORY_ITEM cfgBitmapMemoryItem;
-    PH_STRINGREF systemRootString;
-    PPH_STRING ntdllFileName;
 
-    PhGetSystemRoot(&systemRootString);
-    ntdllFileName = PhConcatStringRefZ(&systemRootString, L"\\System32\\ntdll.dll");
+    status = PhGetProcessSystemDllInitBlock(ProcessHandle, &ldrInitBlock);
 
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        ntdllFileName->Buffer,
-        "LdrSystemDllInitBlock",
-        0,
-        &ldrInitBlockBaseAddress,
-        NULL
-        );
-
-    if (NT_SUCCESS(status) && ldrInitBlockBaseAddress)
-    {
-        status = NtReadVirtualMemory(
-            ProcessHandle,
-            ldrInitBlockBaseAddress,
-            &ldrInitBlock,
-            sizeof(PS_SYSTEM_DLL_INIT_BLOCK),
-            NULL
-            );
-    }
-
-    PhDereferenceObject(ntdllFileName);
-
-    if (NT_SUCCESS(status) && ldrInitBlock.Size != 0)
+    if (NT_SUCCESS(status))
     {
         PVOID cfgBitmapAddress = NULL;
         PVOID cfgBitmapWow64Address = NULL;
 
-        if (RTL_CONTAINS_FIELD(&ldrInitBlock, ldrInitBlock.Size, Wow64CfgBitMap))
+        if (RTL_CONTAINS_FIELD(ldrInitBlock, ldrInitBlock->Size, Wow64CfgBitMap))
         {
-            cfgBitmapAddress = (PVOID)ldrInitBlock.CfgBitMap;
-            cfgBitmapWow64Address = (PVOID)ldrInitBlock.Wow64CfgBitMap;
+            cfgBitmapAddress = (PVOID)ldrInitBlock->CfgBitMap;
+            cfgBitmapWow64Address = (PVOID)ldrInitBlock->Wow64CfgBitMap;
         }
 
         if (cfgBitmapAddress && (cfgBitmapMemoryItem = PhLookupMemoryItemList(List, cfgBitmapAddress)))
@@ -857,6 +857,8 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
                 memoryItem = CONTAINING_RECORD(listEntry, PH_MEMORY_ITEM, ListEntry);
             }
         }
+
+        PhFree(ldrInitBlock);
     }
 #endif
 
@@ -1046,6 +1048,11 @@ NTSTATUS PhQueryMemoryItemList(
         if (allocationBaseItem && basicInfo.AllocationBase == allocationBaseItem->BaseAddress)
             memoryItem->AllocationBaseItem = allocationBaseItem;
 
+        if (Flags & PH_QUERY_MEMORY_ZERO_PAD_ADDRESSES)
+            PhPrintPointerPadZeros(memoryItem->BaseAddressString, memoryItem->BasicInfo.BaseAddress);
+        else
+            PhPrintPointer(memoryItem->BaseAddressString, memoryItem->BasicInfo.BaseAddress);
+
         if (basicInfo.State & MEM_COMMIT)
         {
             memoryItem->CommittedSize = memoryItem->RegionSize;
@@ -1105,6 +1112,11 @@ NTSTATUS PhQueryMemoryItemList(
                     otherMemoryItem->AllocationBase = otherMemoryItem->BaseAddress;
                     otherMemoryItem->RegionSize = basicInfo.RegionSize - potentialUnusableSize;
                     otherMemoryItem->AllocationBaseItem = otherMemoryItem;
+
+                    if (Flags & PH_QUERY_MEMORY_ZERO_PAD_ADDRESSES)
+                        PhPrintPointerPadZeros(otherMemoryItem->BaseAddressString, otherMemoryItem->BasicInfo.BaseAddress);
+                    else
+                        PhPrintPointer(otherMemoryItem->BaseAddressString, otherMemoryItem->BasicInfo.BaseAddress);
 
                     PhAddElementAvlTree(&List->Set, &otherMemoryItem->Links);
                     InsertTailList(&List->ListHead, &otherMemoryItem->ListEntry);

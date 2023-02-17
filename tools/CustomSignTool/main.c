@@ -6,6 +6,7 @@
  * Authors:
  *
  *     wj32    2016
+ *     dmex    2016-2023
  *
  */
 
@@ -24,6 +25,7 @@
 #define ARG_SIG 2
 #define ARG_HEX 3
 
+EXTERN_C PVOID __ImageBase;
 PPH_STRING CstCommand = NULL;
 PPH_STRING CstArgument1 = NULL;
 PPH_STRING CstArgument2 = NULL;
@@ -112,7 +114,7 @@ static VOID CstExportKey(
     if (!NT_SUCCESS(status = BCryptExportKey(KeyHandle, NULL, BlobType, blob, blobSize, &blobSize, 0)))
         CstFailWithStatus(PhFormatString(L"Unable to export %s: Unable to get blob data", Description)->Buffer, status, 0);
 
-    if (!NT_SUCCESS(status = PhCreateFileWin32(&fileHandle, FileName, FILE_GENERIC_WRITE, FILE_ATTRIBUTE_NORMAL, 0, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE)))
+    if (!NT_SUCCESS(status = PhCreateFileWin32Ex(&fileHandle, FileName, FILE_GENERIC_WRITE, &(LARGE_INTEGER){.QuadPart = blobSize}, FILE_ATTRIBUTE_NORMAL, 0, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL)))
         CstFailWithStatus(PhFormatString(L"Unable to create '%s'", FileName)->Buffer, status, 0);
     if (!NT_SUCCESS(status = NtWriteFile(fileHandle, NULL, NULL, NULL, &iosb, blob, blobSize, NULL, NULL)))
         CstFailWithStatus(PhFormatString(L"Unable to write blob to '%s'", FileName)->Buffer, status, 0);
@@ -237,18 +239,23 @@ int __cdecl wmain(int argc, wchar_t *argv[])
     NTSTATUS status;
     PH_STRINGREF commandLine;
 
-    if (!NT_SUCCESS(PhInitializePhLib()))
-        return 1;
+    if (!NT_SUCCESS(PhInitializePhLib(L"CustomSignTool", __ImageBase)))
+        return EXIT_FAILURE;
 
-    PhUnicodeStringToStringRef(&NtCurrentPeb()->ProcessParameters->CommandLine, &commandLine);
-    PhParseCommandLine(
+    if (!NT_SUCCESS(PhGetProcessCommandLineStringRef(&commandLine)))
+        return EXIT_FAILURE;
+
+    if (!PhParseCommandLine(
         &commandLine,
         options,
-        sizeof(options) / sizeof(PH_COMMAND_LINE_OPTION),
+        RTL_NUMBER_OF(options),
         PH_COMMAND_LINE_IGNORE_FIRST_PART,
         CstCommandLineCallback,
         NULL
-        );
+        ))
+    {
+        return EXIT_FAILURE;
+    }
 
     if (!CstCommand)
         CstFailWith(CstHelpMessage);
@@ -328,7 +335,7 @@ int __cdecl wmain(int argc, wchar_t *argv[])
         {
             // Write the signature to the output file.
 
-            if (!NT_SUCCESS(status = PhCreateFileWin32(&fileHandle, CstSigFileName->Buffer, FILE_GENERIC_WRITE, FILE_ATTRIBUTE_NORMAL, 0, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE)))
+            if (!NT_SUCCESS(status = PhCreateFileWin32Ex(&fileHandle, CstSigFileName->Buffer, FILE_GENERIC_WRITE, &(LARGE_INTEGER){.QuadPart = signatureSize}, FILE_ATTRIBUTE_NORMAL, 0, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL)))
                 CstFailWithStatus(PhFormatString(L"Unable to create '%s'", CstSigFileName->Buffer)->Buffer, status, 0);
             if (!NT_SUCCESS(status = NtWriteFile(fileHandle, NULL, NULL, NULL, &iosb, signature, signatureSize, NULL, NULL)))
                 CstFailWithStatus(PhFormatString(L"Unable to write signature to '%s'", CstSigFileName->Buffer)->Buffer, status, 0);

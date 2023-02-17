@@ -1,9 +1,9 @@
 #ifndef PH_ACTIONS_H
 #define PH_ACTIONS_H
 
-#define PH_KPH_ERROR_TITLE (L"KProcessHacker could not be loaded.")
-#define PH_KPH_ERROR_MESSAGE (L"KProcessHacker does not support your operating system " \
-    L"or could not be loaded. Make sure Process Hacker is running " \
+#define PH_KPH_ERROR_TITLE (L"KSystemInformer could not be loaded.")
+#define PH_KPH_ERROR_MESSAGE (L"KSystemInformer does not support your operating system " \
+    L"or could not be loaded. Make sure System Informer is running " \
     L"with administrative privileges.")
 
 typedef enum _PH_ACTION_ELEVATION_LEVEL
@@ -81,6 +81,7 @@ typedef enum _PH_POWERACTION_TYPE
     PH_POWERACTION_TYPE_ADVANCEDBOOT,
     PH_POWERACTION_TYPE_FIRMWAREBOOT,
     PH_POWERACTION_TYPE_UPDATE,
+    PH_POWERACTION_TYPE_WDOSCAN,
     PH_POWERACTION_TYPE_MAXIMUM
 } PH_POWERACTION_TYPE;
 
@@ -332,9 +333,27 @@ PhUiSetBoostPriorityProcess(
 PHAPPAPI
 BOOLEAN
 NTAPI
+PhUiStartServices(
+    _In_ HWND WindowHandle,
+    _In_ PPH_SERVICE_ITEM* Services,
+    _In_ ULONG NumberOfServices
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
 PhUiStartService(
     _In_ HWND hWnd,
     _In_ PPH_SERVICE_ITEM Service
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhUiContinueServices(
+    _In_ HWND WindowHandle,
+    _In_ PPH_SERVICE_ITEM* Services,
+    _In_ ULONG NumberOfServices
     );
 
 PHAPPAPI
@@ -348,9 +367,27 @@ PhUiContinueService(
 PHAPPAPI
 BOOLEAN
 NTAPI
+PhUiPauseServices(
+    _In_ HWND WindowHandle,
+    _In_ PPH_SERVICE_ITEM* Services,
+    _In_ ULONG NumberOfServices
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
 PhUiPauseService(
     _In_ HWND hWnd,
     _In_ PPH_SERVICE_ITEM Service
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhUiStopServices(
+    _In_ HWND WindowHandle,
+    _In_ PPH_SERVICE_ITEM* Services,
+    _In_ ULONG NumberOfServices
     );
 
 PHAPPAPI

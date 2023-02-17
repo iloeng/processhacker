@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2016
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_PHBASESUP_H
 #define _PH_PHBASESUP_H
 
@@ -91,29 +103,29 @@ PhLocalTimeToSystemTime(
 
 // Heap
 
+PHLIBAPI
 _May_raise_
 _Post_writable_byte_size_(Size)
-PHLIBAPI
 PVOID
 NTAPI
 PhAllocate(
     _In_ SIZE_T Size
     );
 
+PHLIBAPI
 _Must_inspect_result_
 _Ret_maybenull_
 _Post_writable_byte_size_(Size)
-PHLIBAPI
 PVOID
 NTAPI
 PhAllocateSafe(
     _In_ SIZE_T Size
     );
 
+PHLIBAPI
 _Must_inspect_result_
 _Ret_maybenull_
 _Post_writable_byte_size_(Size)
-PHLIBAPI
 PVOID
 NTAPI
 PhAllocateExSafe(
@@ -128,9 +140,9 @@ PhFree(
     _Frees_ptr_opt_ PVOID Memory
     );
 
+PHLIBAPI
 _May_raise_
 _Post_writable_byte_size_(Size)
-PHLIBAPI
 PVOID
 NTAPI
 PhReAllocate(
@@ -139,6 +151,9 @@ PhReAllocate(
     );
 
 PHLIBAPI
+_Must_inspect_result_
+_Ret_maybenull_
+_Post_writable_byte_size_(Size)
 PVOID
 NTAPI
 PhReAllocateSafe(
@@ -146,10 +161,11 @@ PhReAllocateSafe(
     _In_ SIZE_T Size
     );
 
-_Check_return_
-_Ret_maybenull_
-_Success_(return != NULL)
 PHLIBAPI
+_Must_inspect_result_
+_Ret_maybenull_
+_Post_writable_byte_size_(Size)
+_Success_(return != NULL)
 PVOID
 NTAPI
 PhAllocatePage(
@@ -1003,7 +1019,7 @@ PhEndsWithStringRef(
     if (Suffix->Length > String->Length)
         return FALSE;
 
-    sr.Buffer = (PWCHAR)PTR_ADD_OFFSET(String->Buffer, String->Length - Suffix->Length);
+    sr.Buffer = (PWCH)PTR_ADD_OFFSET(String->Buffer, String->Length - Suffix->Length);
     sr.Length = Suffix->Length;
 
     return PhEqualStringRef(&sr, Suffix, IgnoreCase);
@@ -1245,6 +1261,18 @@ PhGetStringRef(
     return sr;
 }
 
+FORCEINLINE
+PWSTR
+PhGetStringRefZ(
+    _In_opt_ PPH_STRINGREF String
+    )
+{
+    if (String)
+        return String->Buffer;
+    else
+        return (PWSTR)TEXT("");
+}
+
 /**
  * Retrieves a pointer to a string object's buffer or returns an empty string.
  *
@@ -1262,7 +1290,7 @@ PhGetStringOrEmpty(
     if (String)
         return String->Buffer;
     else
-        return (PWSTR)TEXT(""); // HACK fixes VS2019 conformance mode warning (dmex)
+        return (PWSTR)TEXT("");
 }
 
 /**
@@ -2076,13 +2104,25 @@ PhAppendStringBuilder(
     _In_ PPH_STRINGREF String
     );
 
-PHLIBAPI
+/**
+ * Appends a string to the end of a string builder string.
+ *
+ * \param StringBuilder A string builder object.
+ * \param String The string to append.
+ */
+FORCEINLINE
 VOID
 NTAPI
 PhAppendStringBuilder2(
     _Inout_ PPH_STRING_BUILDER StringBuilder,
     _In_ PWSTR String
-    );
+    )
+{
+    PH_STRINGREF string;
+
+    PhInitializeStringRef(&string, String);
+    PhAppendStringBuilder(StringBuilder, &string);
+}
 
 PHLIBAPI
 VOID
@@ -2367,7 +2407,6 @@ typedef struct _PH_LIST
     /** The array of list items. */
     PVOID *Items;
 } PH_LIST, *PPH_LIST;
-
 
 FORCEINLINE
 PVOID
@@ -3672,6 +3711,7 @@ typedef struct _PH_FORMAT
 #define PhInitFormatC(f, v) do { (f)->Type = CharFormatType; (f)->u.Char = (v); } while (0)
 #define PhInitFormatS(f, v) do { (f)->Type = StringFormatType; PhInitializeStringRef(&(f)->u.String, (v)); } while (0)
 #define PhInitFormatSR(f, v) do { (f)->Type = StringFormatType; (f)->u.String = (v); } while (0)
+#define PhInitFormatUCS(f, v) do { (f)->Type = StringFormatType; PhUnicodeStringToStringRef((v), &(f)->u.String); } while (0)
 #define PhInitFormatMultiByteS(f, v) do { (f)->Type = MultiByteStringFormatType; PhInitializeBytesRef(&(f)->u.MultiByteString, (v)); } while (0)
 #define PhInitFormatD(f, v) do { (f)->Type = Int32FormatType; (f)->u.Int32 = (v); } while (0)
 #define PhInitFormatU(f, v) do { (f)->Type = UInt32FormatType; (f)->u.UInt32 = (v); } while (0)
@@ -3683,6 +3723,7 @@ typedef struct _PH_FORMAT
 #define PhInitFormatI64X(f, v) do { (f)->Type = UInt64FormatType | FormatUseRadix; (f)->u.UInt64 = (v); (f)->Radix = 16; } while (0)
 #define PhInitFormatIU(f, v) do { (f)->Type = UIntPtrFormatType; (f)->u.UIntPtr = (v); } while (0)
 #define PhInitFormatIX(f, v) do { (f)->Type = UIntPtrFormatType | FormatUseRadix; (f)->u.UIntPtr = (v); (f)->Radix = 16; } while (0)
+#define PhInitFormatIXPadZeros(f, v) do { (f)->Type = UIntPtrFormatType | FormatUseRadix | FormatPadZeros; (f)->u.UIntPtr = (v); (f)->Radix = 16; (f)->Width = sizeof(ULONG_PTR) * 2; } while (0)
 #define PhInitFormatF(f, v, p) do { (f)->Type = DoubleFormatType | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)
 #define PhInitFormatE(f, v, p) do { (f)->Type = DoubleFormatType | FormatStandardForm | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)
 #define PhInitFormatA(f, v, p) do { (f)->Type = DoubleFormatType | FormatHexadecimalForm | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)

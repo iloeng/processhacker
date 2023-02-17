@@ -18,7 +18,6 @@
 #include <settings.h>
 #include <http.h>
 #include <json.h>
-#include <commonutil.h>
 #include <workqueue.h>
 #include <mapimg.h>
 
@@ -108,7 +107,7 @@ typedef struct _UPLOAD_CONTEXT
     ULONG Service;
     ULONG ErrorCode;
     ULONG TotalFileLength;
-    
+
     HWND DialogHandle;
     WNDPROC DialogWindowProc;
 

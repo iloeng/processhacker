@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2011-2020
+ *     dmex    2011-2022
  *
  */
 
@@ -15,21 +15,21 @@
 static PH_KEY_VALUE_PAIR GraphTypePairs[] =
 {
     { L"None", (PVOID)TASKBAR_ICON_NONE },
-    { L"CPU History", (PVOID)TASKBAR_ICON_CPU_HISTORY },
-    { L"CPU Usage", (PVOID)TASKBAR_ICON_CPU_USAGE },
-    { L"I/O History", (PVOID)TASKBAR_ICON_IO_HISTORY },
-    { L"Commit History", (PVOID)TASKBAR_ICON_COMMIT_HISTORY },
-    { L"Physical Memory History", (PVOID)TASKBAR_ICON_PHYSICAL_HISTORY },
+    { L"CPU usage", (PVOID)TASKBAR_ICON_CPU_USAGE },
+    { L"CPU history", (PVOID)TASKBAR_ICON_CPU_HISTORY },
+    { L"I/O history", (PVOID)TASKBAR_ICON_IO_HISTORY },
+    { L"Commit charge history", (PVOID)TASKBAR_ICON_COMMIT_HISTORY },
+    { L"Physical memory history", (PVOID)TASKBAR_ICON_PHYSICAL_HISTORY },
 };
 
-static PWSTR GraphTypeStrings[] = 
-{ 
-    L"None", 
-    L"CPU History", 
-    L"CPU Usage", 
-    L"I/O History",
-    L"Commit History",
-    L"Physical Memory History"
+static PWSTR GraphTypeStrings[] =
+{
+    L"None",
+    L"CPU usage",
+    L"CPU history",
+    L"I/O history",
+    L"Commit charge history",
+    L"Physical memory history"
 };
 
 PWSTR GraphTypeGetTypeString(
@@ -47,7 +47,7 @@ PWSTR GraphTypeGetTypeString(
     {
         return string;
     }
- 
+
     return L"None";
 }
 
@@ -66,7 +66,7 @@ ULONG GraphTypeGetTypeInteger(
     {
         return integer;
     }
-    
+
     return 0;
 }
 
@@ -88,6 +88,7 @@ INT_PTR CALLBACK OptionsDlgProc(
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_RESOLVEGHOSTWINDOWS), ToolStatusConfig.ResolveGhostWindows ? BST_CHECKED : BST_UNCHECKED);
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_AUTOHIDE_MENU), ToolStatusConfig.AutoHideMenu ? BST_CHECKED : BST_UNCHECKED);
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_AUTOFOCUS_SEARCH), ToolStatusConfig.SearchAutoFocus ? BST_CHECKED : BST_UNCHECKED);
+            Button_SetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_LARGETOOLBARICON), ToolStatusConfig.ToolBarLargeIcons ? BST_CHECKED : BST_UNCHECKED);
 
             graphTypeHandle = GetDlgItem(hwndDlg, IDC_CURRENT);
             PhAddComboBoxStrings(graphTypeHandle, GraphTypeStrings, RTL_NUMBER_OF(GraphTypeStrings));
@@ -103,10 +104,11 @@ INT_PTR CALLBACK OptionsDlgProc(
             ToolStatusConfig.ResolveGhostWindows = Button_GetCheck(GetDlgItem(hwndDlg, IDC_RESOLVEGHOSTWINDOWS)) == BST_CHECKED;
             ToolStatusConfig.AutoHideMenu = Button_GetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_AUTOHIDE_MENU)) == BST_CHECKED;
             ToolStatusConfig.SearchAutoFocus = Button_GetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_AUTOFOCUS_SEARCH)) == BST_CHECKED;
+            ToolStatusConfig.ToolBarLargeIcons = Button_GetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_LARGETOOLBARICON)) == BST_CHECKED;
 
             PhSetIntegerSetting(SETTING_NAME_TOOLSTATUS_CONFIG, ToolStatusConfig.Flags);
 
-            ToolbarLoadSettings();
+            ToolbarLoadSettings(FALSE);
             ToolbarCreateGraphs();
 
             if (ToolStatusConfig.AutoHideMenu)
@@ -126,6 +128,10 @@ INT_PTR CALLBACK OptionsDlgProc(
             PhSetIntegerSetting(SETTING_NAME_TASKBARDISPLAYSTYLE, GraphTypeGetTypeInteger(graphTypeString->Buffer));
             TaskbarListIconType = PhGetIntegerSetting(SETTING_NAME_TASKBARDISPLAYSTYLE);
             TaskbarIsDirty = TRUE;
+
+            TaskbarInitialize();
+
+            SendMessage(PhMainWindowHandle, WM_DPICHANGED, 0, 0);
         }
         break;
     case WM_CTLCOLORBTN:

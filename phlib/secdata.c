@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -78,6 +78,24 @@ ACCESS_ENTRIES(Directory)
     { L"Create subdirectories", DIRECTORY_CREATE_SUBDIRECTORY, TRUE, TRUE}
 };
 
+ACCESS_ENTRIES(EtwConsumer)
+{
+    { L"Full control", WMIGUID_ALL_ACCESS, TRUE, TRUE },
+    { L"Query", WMIGUID_QUERY, TRUE, TRUE },
+    { L"Read", WMIGUID_SET, TRUE, TRUE },
+    { L"Notification", WMIGUID_NOTIFICATION, TRUE, TRUE },
+    { L"Read description", WMIGUID_READ_DESCRIPTION, TRUE, TRUE },
+    { L"Execute", WMIGUID_EXECUTE, TRUE, TRUE },
+    { L"Create realtime", TRACELOG_CREATE_REALTIME, TRUE, TRUE },
+    { L"Create logfile", TRACELOG_CREATE_ONDISK, TRUE, TRUE },
+    { L"GUID enable", TRACELOG_GUID_ENABLE, TRUE, TRUE },
+    { L"Access kernel logger", TRACELOG_ACCESS_KERNEL_LOGGER, TRUE, TRUE },
+    { L"Log events", TRACELOG_LOG_EVENT, TRUE, TRUE },
+    { L"Access realtime", TRACELOG_ACCESS_REALTIME, TRUE, TRUE },
+    { L"Register guids", TRACELOG_REGISTER_GUIDS, TRUE, TRUE },
+    { L"Join group", TRACELOG_JOIN_GROUP, TRUE, TRUE }
+};
+
 ACCESS_ENTRIES(EtwRegistration)
 {
     { L"Full control", WMIGUID_ALL_ACCESS, TRUE, TRUE },
@@ -91,7 +109,6 @@ ACCESS_ENTRIES(EtwRegistration)
     { L"GUID enable", TRACELOG_GUID_ENABLE, TRUE, TRUE },
     { L"Access kernel logger", TRACELOG_ACCESS_KERNEL_LOGGER, TRUE, TRUE },
     { L"Log events", TRACELOG_LOG_EVENT, TRUE, TRUE },
-    { L"Create inprocess", TRACELOG_CREATE_INPROC, TRUE, TRUE },
     { L"Access realtime", TRACELOG_ACCESS_REALTIME, TRUE, TRUE },
     { L"Register guids", TRACELOG_REGISTER_GUIDS, TRUE, TRUE },
     { L"Join group", TRACELOG_JOIN_GROUP, TRUE, TRUE }
@@ -154,7 +171,7 @@ ACCESS_ENTRIES(Key)
     { L"Full control", KEY_ALL_ACCESS, TRUE, TRUE },
     { L"Read", KEY_READ, TRUE, FALSE },
     { L"Write", KEY_WRITE, TRUE, FALSE },
-    { L"Execute", KEY_EXECUTE, TRUE, FALSE },
+    //{ L"Execute", KEY_EXECUTE, TRUE, FALSE }, // KEY_EXECUTE has the same value as KEY_READ (dmex)
     { L"Enumerate subkeys", KEY_ENUMERATE_SUB_KEYS, FALSE, TRUE },
     { L"Query values", KEY_QUERY_VALUE, FALSE, TRUE },
     { L"Notify", KEY_NOTIFY, FALSE, TRUE },
@@ -634,6 +651,7 @@ static PH_SPECIFIC_TYPE PhSpecificTypes[] =
     ACCESS_ENTRY(DebugObject, TRUE),
     ACCESS_ENTRY(Desktop, FALSE),
     ACCESS_ENTRY(Directory, FALSE),
+    ACCESS_ENTRY(EtwConsumer, FALSE),
     ACCESS_ENTRY(EtwRegistration, FALSE),
     ACCESS_ENTRY(Event, TRUE),
     ACCESS_ENTRY(EventPair, TRUE),

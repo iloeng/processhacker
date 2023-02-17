@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2015
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -18,6 +18,7 @@
 #include <extmgri.h>
 #include <procprv.h>
 #include <phsettings.h>
+#include <mapldr.h>
 
 typedef ULONG (WINAPI *_SubscribeServiceChangeNotifications)(
     _In_ SC_HANDLE hService,
@@ -134,7 +135,7 @@ PH_QUEUED_LOCK PhServiceHashtableLock = PH_QUEUED_LOCK_INIT;
 BOOLEAN PhEnableServiceNonPoll = FALSE;
 static BOOLEAN PhpNonPollInitialized = FALSE;
 static BOOLEAN PhpNonPollActive = FALSE;
-static ULONG PhpNonPollGate = 0;
+static volatile LONG PhpNonPollGate = 0;
 static HANDLE PhpNonPollEventHandle = NULL;
 static LIST_ENTRY PhpNonPollServiceListHead = { &PhpNonPollServiceListHead, &PhpNonPollServiceListHead };
 static LIST_ENTRY PhpNonPollServicePendingListHead = { &PhpNonPollServicePendingListHead, &PhpNonPollServicePendingListHead };
@@ -265,7 +266,7 @@ PPH_SERVICE_ITEM PhReferenceServiceItem(
     PPH_SERVICE_ITEM serviceItem;
     PH_STRINGREF key;
 
-    PhInitializeStringRef(&key, Name);
+    PhInitializeStringRefLongHint(&key, Name);
 
     PhAcquireQueuedLockShared(&PhServiceHashtableLock);
 
@@ -441,7 +442,7 @@ VOID PhpUpdateServiceItemConfig(
 {
     SC_HANDLE serviceHandle;
 
-    serviceHandle = OpenService(ScManagerHandle, ServiceItem->Name->Buffer, SERVICE_QUERY_CONFIG);
+    serviceHandle = OpenService(ScManagerHandle, PhGetString(ServiceItem->Name), SERVICE_QUERY_CONFIG);
 
     if (serviceHandle)
     {
@@ -452,41 +453,13 @@ VOID PhpUpdateServiceItemConfig(
 
         if (config = PhGetServiceConfig(serviceHandle))
         {
-            PPH_STRING fileName = NULL;
-
             ServiceItem->StartType = config->dwStartType;
             ServiceItem->ErrorControl = config->dwErrorControl;
 
-            PhGetServiceDllParameter(config->dwServiceType, &ServiceItem->Name->sr, &fileName);
-
-            if (!fileName)
+            if (PhEnableServiceQueryStage2) // HACK
             {
-                PPH_STRING commandLine;
-
-                if (config->lpBinaryPathName[0])
-                {
-                    commandLine = PhCreateString(config->lpBinaryPathName);
-
-                    if (config->dwServiceType & SERVICE_WIN32)
-                    {
-                        PH_STRINGREF dummyFileName;
-                        PH_STRINGREF dummyArguments;
-
-                        PhParseCommandLineFuzzy(&commandLine->sr, &dummyFileName, &dummyArguments, &fileName);
-
-                        if (!fileName)
-                            PhSwapReference(&fileName, commandLine);
-                    }
-                    else
-                    {
-                        fileName = PhGetFileName(commandLine);
-                    }
-
-                    PhDereferenceObject(commandLine);
-                }
+                ServiceItem->FileName = PhGetServiceHandleFileName(serviceHandle, &ServiceItem->Name->sr);
             }
-
-            ServiceItem->FileName = fileName;
 
             PhFree(config);
         }
@@ -546,7 +519,7 @@ VOID PhpServiceQueryStage1(
     {
         if (!(serviceItem->Type & SERVICE_DRIVER)) // Skip icons for driver services (dmex)
         {
-            Data->IconEntry = PhImageListExtractIcon(serviceItem->FileName, FALSE);
+            Data->IconEntry = PhImageListExtractIcon(serviceItem->FileName, FALSE, 0, NULL, PhSystemDpi);
         }
 
         // Version info.
@@ -1073,7 +1046,7 @@ VOID CALLBACK PhpServiceNonPollScNotifyCallback(
 
     if (notifyBuffer->dwNotificationStatus == ERROR_SUCCESS)
     {
-        if ((notifyBuffer->dwNotificationTriggered & (SERVICE_NOTIFY_CREATED | SERVICE_NOTIFY_DELETED)) && 
+        if ((notifyBuffer->dwNotificationTriggered & (SERVICE_NOTIFY_CREATED | SERVICE_NOTIFY_DELETED)) &&
             notifyBuffer->pszServiceNames)
         {
             PWSTR name;
@@ -1088,7 +1061,7 @@ VOID CALLBACK PhpServiceNonPollScNotifyCallback(
                 if (nameLength == 0)
                     break;
 
-                if (name[0] == L'/')
+                if (name[0] == OBJ_NAME_ALTPATH_SEPARATOR)
                 {
                     PPHP_SERVICE_NOTIFY_CONTEXT newNotifyContext;
 
@@ -1463,7 +1436,7 @@ VOID PhpWorkaroundWindows10ServiceTypeBug(
     _Inout_ LPENUM_SERVICE_STATUS_PROCESS ServiceEntry
     )
 {
-    // https://github.com/processhacker2/processhacker/issues/120 (dmex)
+    // https://github.com/winsiderss/systeminformer/issues/120 (dmex)
     if (ServiceEntry->ServiceStatusProcess.dwServiceType == SERVICE_WIN32)
         ServiceEntry->ServiceStatusProcess.dwServiceType = SERVICE_WIN32_SHARE_PROCESS;
     if (ServiceEntry->ServiceStatusProcess.dwServiceType == (SERVICE_WIN32 | SERVICE_USER_SHARE_PROCESS | SERVICE_USERSERVICE_INSTANCE))

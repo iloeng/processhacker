@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2015-2021
+ *     dmex    2015-2023
  *
  */
 
@@ -21,6 +21,7 @@ typedef struct _ET_DISKNET_CONTEXT
     PET_PROCESS_BLOCK Block;
     PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
     BOOLEAN Enabled;
+    LONG WindowDpi;
 
     PH_LAYOUT_MANAGER LayoutManager;
 
@@ -43,6 +44,13 @@ INT_PTR CALLBACK EtwDiskNetworkPanelDialogProc(
     )
 {
     return FALSE;
+}
+
+VOID EtwDiskNetworkUpdateWindowDpi(
+    _In_ PET_DISKNET_CONTEXT Context
+    )
+{
+    Context->WindowDpi = PhGetWindowDpi(Context->WindowHandle);
 }
 
 VOID EtwDiskNetworkCreateGraphs(
@@ -127,11 +135,18 @@ VOID EtwDiskNetworkLayoutGraphs(
     HDWP deferHandle;
     RECT clientRect;
     RECT panelRect;
-    RECT margin = { PH_SCALE_DPI(13), PH_SCALE_DPI(13), PH_SCALE_DPI(13), PH_SCALE_DPI(13) };
-    RECT innerMargin = { PH_SCALE_DPI(10), PH_SCALE_DPI(20), PH_SCALE_DPI(10), PH_SCALE_DPI(10) };
-    LONG between = PH_SCALE_DPI(3);
+    RECT margin;
+    RECT innerMargin;
+    LONG between;
     ULONG graphWidth;
     ULONG graphHeight;
+
+    margin.left = margin.top = margin.right = margin.bottom = PhGetDpi(13, Context->WindowDpi);
+
+    innerMargin.left = innerMargin.right = innerMargin.bottom = PhGetDpi(10, Context->WindowDpi);
+    innerMargin.top = PhGetDpi(20, Context->WindowDpi);
+
+    between = PhGetDpi(3, Context->WindowDpi);
 
     PhLayoutManagerLayout(&Context->LayoutManager);
 
@@ -228,7 +243,7 @@ VOID NTAPI EtwDiskNetworkUpdateHandler(
 
     if (context && context->WindowHandle && context->Enabled)
     {
-        PostMessage(context->WindowHandle, ET_WM_UPDATE, 0, 0);
+        PostMessage(context->WindowHandle, WM_PH_UPDATE_DIALOG, 0, 0);
     }
 }
 
@@ -276,6 +291,7 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
             PhInitializeGraphState(&context->DiskGraphState);
             PhInitializeGraphState(&context->NetworkGraphState);
 
+            EtwDiskNetworkUpdateWindowDpi(context);
             EtwDiskNetworkCreateGraphs(context);
             EtwDiskNetworkCreatePanel(context);
             EtwDiskNetworkUpdatePanel(context);
@@ -314,6 +330,13 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
                 PhEndPropPageLayout(hwndDlg, propPageContext);
         }
         break;
+    case WM_DPICHANGED_AFTERPARENT:
+        {
+            EtwDiskNetworkUpdateWindowDpi(context);
+
+            EtwDiskNetworkLayoutGraphs(context);
+        }
+        break;
     case WM_NOTIFY:
         {
             LPNMHDR header = (LPNMHDR)lParam;
@@ -346,7 +369,7 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
                     if (header->hwndFrom == context->DiskGraphHandle)
                     {
                         drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), context->WindowDpi);
                         PhGraphStateGetDrawInfo(&context->DiskGraphState, getDrawInfo, context->Block->DiskReadHistory.Count);
 
                         if (!context->DiskGraphState.Valid)
@@ -403,7 +426,7 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
                             PhInitFormatSize(&format[3], context->Block->CurrentDiskWrite);
 
                             PhMoveReference(&context->DiskGraphState.Text, PhFormat(format, RTL_NUMBER_OF(format), 0));
-    
+
                             hdc = Graph_GetBufferedContext(context->DiskGraphHandle);
                             PhSetGraphText(
                                 hdc,
@@ -422,7 +445,7 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
                     else if (header->hwndFrom == context->NetworkGraphHandle)
                     {
                         drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+                        PhSiSetColorsGraphDrawInfo(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), context->WindowDpi);
                         PhGraphStateGetDrawInfo(&context->NetworkGraphState, getDrawInfo, context->Block->NetworkSendHistory.Count);
 
                         if (!context->NetworkGraphState.Valid)
@@ -571,7 +594,7 @@ INT_PTR CALLBACK EtwDiskNetworkPageDlgProc(
             }
         }
         break;
-    case ET_WM_UPDATE:
+    case WM_PH_UPDATE_DIALOG:
         {
             if (!(processItem->State & PH_PROCESS_ITEM_REMOVED) && context->Enabled)
             {

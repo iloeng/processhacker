@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2019-2021
+ *     dmex    2019-2023
  *
  */
 
@@ -215,21 +215,22 @@ NTSTATUS PhpBaseThreadStart(
 
 // rev from RtlCreateUserThread (dmex)
 NTSTATUS PhCreateUserThread(
-    _Out_opt_ PHANDLE ThreadHandle,
     _In_ HANDLE ProcessHandle,
-    _In_ ULONG CreateFlags,
+    _In_opt_ ULONG CreateFlags,
     _In_opt_ SIZE_T StackSize,
     _In_ PUSER_THREAD_START_ROUTINE StartAddress,
-    _In_opt_ PVOID Parameter
+    _In_opt_ PVOID Parameter,
+    _Out_opt_ PHANDLE ThreadHandle,
+    _Out_opt_ PCLIENT_ID ClientId
     )
 {
     NTSTATUS status;
     HANDLE threadHandle;
     OBJECT_ATTRIBUTES objectAttributes;
-    UCHAR buffer[FIELD_OFFSET(PS_ATTRIBUTE_LIST, Attributes) + sizeof(PS_ATTRIBUTE[2])] = { 0 };
+    UCHAR buffer[FIELD_OFFSET(PS_ATTRIBUTE_LIST, Attributes) + sizeof(PS_ATTRIBUTE[1])] = { 0 };
     PPS_ATTRIBUTE_LIST attributeList = (PPS_ATTRIBUTE_LIST)buffer;
     CLIENT_ID clientId = { 0 };
-    PTEB teb = NULL;
+    //PTEB teb = NULL;
 
     InitializeObjectAttributes(&objectAttributes, NULL, 0, NULL, NULL);
     attributeList->TotalLength = sizeof(buffer);
@@ -237,10 +238,10 @@ NTSTATUS PhCreateUserThread(
     attributeList->Attributes[0].Size = sizeof(CLIENT_ID);
     attributeList->Attributes[0].ValuePtr = &clientId;
     attributeList->Attributes[0].ReturnLength = NULL;
-    attributeList->Attributes[1].Attribute = PS_ATTRIBUTE_TEB_ADDRESS;
-    attributeList->Attributes[1].Size = sizeof(PTEB);
-    attributeList->Attributes[1].ValuePtr = &teb;
-    attributeList->Attributes[1].ReturnLength = NULL;
+    //attributeList->Attributes[1].Attribute = PS_ATTRIBUTE_TEB_ADDRESS;
+    //attributeList->Attributes[1].Size = sizeof(PTEB);
+    //attributeList->Attributes[1].ValuePtr = &teb;
+    //attributeList->Attributes[1].ReturnLength = NULL;
 
     status = NtCreateThreadEx(
         &threadHandle,
@@ -252,8 +253,8 @@ NTSTATUS PhCreateUserThread(
         CreateFlags,
         0,
         StackSize,
-        StackSize,
-        NULL // attributeList
+        0,
+        attributeList
         );
 
     if (NT_SUCCESS(status))
@@ -265,6 +266,11 @@ NTSTATUS PhCreateUserThread(
         else if (threadHandle)
         {
             NtClose(threadHandle);
+        }
+
+        if (ClientId)
+        {
+            *ClientId = clientId;
         }
     }
 
@@ -570,6 +576,9 @@ PVOID PhReAllocate(
  * \return A pointer to the new block of memory, or NULL if the block could not be allocated. The
  * existing contents of the memory block are copied to the new block.
  */
+_Must_inspect_result_
+_Ret_maybenull_
+_Post_writable_byte_size_(Size)
 PVOID PhReAllocateSafe(
     _In_ PVOID Memory,
     _In_ SIZE_T Size
@@ -589,8 +598,9 @@ PVOID PhReAllocateSafe(
  *
  * \return A pointer to the allocated block of memory, or NULL if the block could not be allocated.
  */
-_Check_return_
+_Must_inspect_result_
 _Ret_maybenull_
+_Post_writable_byte_size_(Size)
 _Success_(return != NULL)
 PVOID PhAllocatePage(
     _In_ SIZE_T Size,
@@ -798,7 +808,7 @@ BOOLEAN PhCopyBytesZ(
     BOOLEAN copied;
 
     // Determine the length of the input string.
-    
+
     if (InputCount != SIZE_MAX)
     {
         i = 0;
@@ -3745,24 +3755,6 @@ VOID PhAppendStringBuilder(
         StringBuilder,
         String->Buffer,
         String->Length
-        );
-}
-
-/**
- * Appends a string to the end of a string builder string.
- *
- * \param StringBuilder A string builder object.
- * \param String The string to append.
- */
-VOID PhAppendStringBuilder2(
-    _Inout_ PPH_STRING_BUILDER StringBuilder,
-    _In_ PWSTR String
-    )
-{
-    PhAppendStringBuilderEx(
-        StringBuilder,
-        String,
-        PhCountStringZ(String) * sizeof(WCHAR)
         );
 }
 

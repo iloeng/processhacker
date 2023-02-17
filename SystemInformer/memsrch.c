@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -294,8 +294,8 @@ VOID PhSearchMemoryString(
                 byte = buffer[i];
 
                 // dmex: We don't want to enable extra bits in the PhCharIsPrintable array by default
-                // or we'll get higher amounts of false positive search results. If the user selects the 
-                // ExtendedUnicode option then we'll use iswprint (GetStringTypeW) which does check 
+                // or we'll get higher amounts of false positive search results. If the user selects the
+                // ExtendedUnicode option then we'll use iswprint (GetStringTypeW) which does check
                 // every available character by default.
                 if (detectUnicode && extendedUnicode && !iswascii(byte))
                     printable = !!iswprint(byte);
@@ -509,12 +509,12 @@ VOID PhShowMemoryStringDialog(
     context.ProcessId = ProcessItem->ProcessId;
     context.ProcessHandle = processHandle;
 
-    if (DialogBoxParam(
+    if (PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_MEMSTRING),
         ParentWindowHandle,
         PhpMemoryStringDlgProc,
-        (LPARAM)&context
+        &context
         ) != IDOK)
     {
         NtClose(processHandle);

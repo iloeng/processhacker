@@ -25,11 +25,11 @@
 #define PAGE_ENCLAVE_THREAD_CONTROL 0x80000000
 #define PAGE_TARGETS_NO_UPDATE      0x40000000
 #define PAGE_TARGETS_INVALID        0x40000000
-#define PAGE_ENCLAVE_UNVALIDATED    0x20000000  
+#define PAGE_ENCLAVE_UNVALIDATED    0x20000000
 #define PAGE_ENCLAVE_NO_CHANGE      0x20000000
-#define PAGE_ENCLAVE_MASK           0x10000000  
-#define PAGE_ENCLAVE_DECOMMIT       (PAGE_ENCLAVE_MASK | 0) 
-#define PAGE_ENCLAVE_SS_FIRST       (PAGE_ENCLAVE_MASK | 1) 
+#define PAGE_ENCLAVE_MASK           0x10000000
+#define PAGE_ENCLAVE_DECOMMIT       (PAGE_ENCLAVE_MASK | 0)
+#define PAGE_ENCLAVE_SS_FIRST       (PAGE_ENCLAVE_MASK | 1)
 #define PAGE_ENCLAVE_SS_REST        (PAGE_ENCLAVE_MASK | 2)
 
 // Region and section constants
@@ -59,8 +59,8 @@
 #define MEM_REPLACE_PLACEHOLDER 0x00004000
 #define MEM_RESERVE_PLACEHOLDER 0x00040000
 
-#define SEC_HUGE_PAGES 0x00020000  
-#define SEC_PARTITION_OWNER_HANDLE 0x00040000 
+#define SEC_HUGE_PAGES 0x00020000
+#define SEC_PARTITION_OWNER_HANDLE 0x00040000
 #define SEC_64K_PAGES 0x00080000
 #define SEC_BASED 0x00200000
 #define SEC_NO_CHANGE 0x00400000
@@ -82,15 +82,15 @@
 // private
 typedef enum _MEMORY_INFORMATION_CLASS
 {
-    MemoryBasicInformation, // MEMORY_BASIC_INFORMATION
-    MemoryWorkingSetInformation, // MEMORY_WORKING_SET_INFORMATION
-    MemoryMappedFilenameInformation, // UNICODE_STRING
-    MemoryRegionInformation, // MEMORY_REGION_INFORMATION
-    MemoryWorkingSetExInformation, // MEMORY_WORKING_SET_EX_INFORMATION // since VISTA
-    MemorySharedCommitInformation, // MEMORY_SHARED_COMMIT_INFORMATION // since WIN8
-    MemoryImageInformation, // MEMORY_IMAGE_INFORMATION
+    MemoryBasicInformation, // q: MEMORY_BASIC_INFORMATION
+    MemoryWorkingSetInformation, // q: MEMORY_WORKING_SET_INFORMATION
+    MemoryMappedFilenameInformation, // q: UNICODE_STRING
+    MemoryRegionInformation, // q: MEMORY_REGION_INFORMATION
+    MemoryWorkingSetExInformation, // q: MEMORY_WORKING_SET_EX_INFORMATION // since VISTA
+    MemorySharedCommitInformation, // q: MEMORY_SHARED_COMMIT_INFORMATION // since WIN8
+    MemoryImageInformation, // q: MEMORY_IMAGE_INFORMATION
     MemoryRegionInformationEx, // MEMORY_REGION_INFORMATION
-    MemoryPrivilegedBasicInformation,
+    MemoryPrivilegedBasicInformation, // MEMORY_BASIC_INFORMATION
     MemoryEnclaveImageInformation, // MEMORY_ENCLAVE_IMAGE_INFORMATION // since REDSTONE3
     MemoryBasicInformationCapped, // 10
     MemoryPhysicalContiguityInformation, // MEMORY_PHYSICAL_CONTIGUITY_INFORMATION // since 20H1
@@ -131,7 +131,7 @@ typedef struct _MEMORY_WORKING_SET_BLOCK
 typedef struct _MEMORY_WORKING_SET_INFORMATION
 {
     ULONG_PTR NumberOfEntries;
-    MEMORY_WORKING_SET_BLOCK WorkingSetInfo[1];
+    _Field_size_(NumberOfEntries) MEMORY_WORKING_SET_BLOCK WorkingSetInfo[1];
 } MEMORY_WORKING_SET_INFORMATION, *PMEMORY_WORKING_SET_INFORMATION;
 
 // private
@@ -166,7 +166,7 @@ typedef struct _MEMORY_REGION_INFORMATION
     ULONG_PTR NodePreference; // 20H1
 } MEMORY_REGION_INFORMATION, *PMEMORY_REGION_INFORMATION;
 
-// private 
+// private
 typedef enum _MEMORY_WORKING_SET_EX_LOCATION
 {
     MemoryLocationInvalid,
@@ -538,7 +538,7 @@ NtAllocateVirtualMemory(
     );
 
 #if (PHNT_VERSION >= PHNT_REDSTONE5)
-NTSYSAPI
+NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtAllocateVirtualMemoryEx(
@@ -575,7 +575,7 @@ NtReadVirtualMemory(
 
 #if (PHNT_VERSION >= PHNT_WIN11)
 // rev
-NTSYSAPI
+NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtReadVirtualMemoryEx(
@@ -770,7 +770,7 @@ NtMapViewOfSection(
     );
 
 #if (PHNT_VERSION >= PHNT_REDSTONE5)
-NTSYSAPI
+NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtMapViewOfSectionEx(
@@ -781,7 +781,7 @@ NtMapViewOfSectionEx(
     _Inout_ PSIZE_T ViewSize,
     _In_ ULONG AllocationType,
     _In_ ULONG Win32Protect,
-    _Inout_updates_opt_(ParameterCount) PMEM_EXTENDED_PARAMETER ExtendedParameters,
+    _Inout_updates_opt_(ExtendedParameterCount) PMEM_EXTENDED_PARAMETER ExtendedParameters,
     _In_ ULONG ExtendedParameterCount
     );
 #endif
@@ -950,7 +950,7 @@ typedef struct _MEMORY_PARTITION_INITIAL_ADD_INFORMATION
 typedef struct _MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION
 {
     union
-    {    
+    {
         struct
         {
             ULONG CommitEvents : 1;
@@ -958,7 +958,7 @@ typedef struct _MEMORY_PARTITION_MEMORY_EVENTS_INFORMATION
         };
         ULONG AllFlags;
     } Flags;
-    
+
     ULONG HandleAttributes;
     ULONG DesiredAccess;
     HANDLE LowCommitCondition; // \KernelObjects\LowCommitCondition

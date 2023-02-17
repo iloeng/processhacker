@@ -11,7 +11,16 @@
  */
 
 #include <peview.h>
+
+#ifdef __has_include
+#if __has_include (<metahost.h>)
 #include <metahost.h>
+#else
+#include "metahost/metahost.h"
+#endif
+#else
+#include "metahost/metahost.h"
+#endif
 
 typedef struct _PVP_PE_CLR_CONTEXT
 {
@@ -65,6 +74,19 @@ typedef struct _MDSTREAMHEADER
     ULONGLONG Sorted;
 } MDSTREAMHEADER, *PMDSTREAMHEADER;
 #include <poppack.h>
+
+PSTORAGESTREAM PvGetNextClrStream(
+    _In_ PSTORAGESTREAM Stream
+    )
+{
+    size_t length;
+
+    length = strlen(Stream->Name) + sizeof(ANSI_NULL);
+    length = ALIGN_UP(length, ULONG);
+
+    return PTR_ADD_OFFSET(Stream, FIELD_OFFSET(STORAGESTREAM, Name) + length);
+    //return ALIGN_UP(UFIELD_OFFSET(STORAGESTREAM, Name) + strlen(Stream->Name) + sizeof(ANSI_NULL), ULONG);
+}
 
 PSTORAGESIGNATURE PvpPeGetClrMetaDataHeader(
     _In_opt_ PVOID PdbMetadataAddress
@@ -204,9 +226,8 @@ PPH_STRING PvpPeClrGetMvid(
             break;
         }
 
-        streamHeader = PTR_ADD_OFFSET(streamHeader, ALIGN_UP(UFIELD_OFFSET(STORAGESTREAM, Name) + strlen(streamHeader->Name) + sizeof(ANSI_NULL), ULONG));
+        streamHeader = PvGetNextClrStream(streamHeader);
     }
-
 
     return guidMvidString;
 }
@@ -279,9 +300,7 @@ VOID PvpPeClrEnumSections(
             }
         }
 
-        // CLR stream headers don't have fixed sizes.
-        // The size is aligned up based on a variable length string at the end. (dmex)
-        streamHeader = PTR_ADD_OFFSET(streamHeader, ALIGN_UP(UFIELD_OFFSET(STORAGESTREAM, Name) + strlen(streamHeader->Name) + 1, ULONG));
+        streamHeader = PvGetNextClrStream(streamHeader);
     }
 }
 
@@ -401,7 +420,7 @@ CleanupExit:
     if (clrMetaHost)
         ICLRMetaHost_Release(clrMetaHost);
     if (mscoreeHandle)
-        FreeLibrary(mscoreeHandle);
+        PhFreeLibrary(mscoreeHandle);
 }
 
 INT_PTR CALLBACK PvpPeClrDlgProc(
@@ -437,7 +456,6 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
     {
     case WM_INITDIALOG:
         {
-            HIMAGELIST listViewImageList;
             PSTORAGESIGNATURE clrMetaData;
 
             context->WindowHandle = hwndDlg;
@@ -453,25 +471,31 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
             PhAddListViewColumn(context->ListViewHandle, 5, 5, 5, LVCFMT_LEFT, 80, L"Hash");
             PhSetExtendedListView(context->ListViewHandle);
             PhLoadListViewColumnsFromSetting(L"ImageClrListViewColumns", context->ListViewHandle);
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_CLRGROUP), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_FLAGS), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_MVIDSTRING), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_TOKENSTRING), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);         
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_TOKENSTRING), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
             PhAddLayoutItem(&context->LayoutManager, context->ListViewHandle, NULL, PH_ANCHOR_ALL);
-
-            if (listViewImageList = PhImageListCreate(2, 20, ILC_MASK | ILC_COLOR, 1, 1))
-                ListView_SetImageList(context->ListViewHandle, listViewImageList, LVSIL_SMALL);
 
             if (!context->PdbMetadataAddress)
             {
-                PhSetDialogItemText(hwndDlg, IDC_RUNTIMEVERSION, PH_AUTO_T(PH_STRING, PvpPeGetClrVersionText())->Buffer);
+                PPH_STRING clrVersion = PvpPeGetClrVersionText();
+                PPH_STRING targetVersion = PvGetClrImageTargetFramework();
+
+                PhSetDialogItemText(hwndDlg, IDC_RUNTIMEVERSION, PhGetStringOrEmpty(clrVersion));
+                PhSetDialogItemText(hwndDlg, IDC_TARGETVERSION, PhGetStringOrEmpty(targetVersion));
                 PhSetDialogItemText(hwndDlg, IDC_FLAGS, PH_AUTO_T(PH_STRING, PvpPeGetClrFlagsText())->Buffer);
+
+                PhClearReference(&targetVersion);
+                PhClearReference(&clrVersion);
             }
             else
             {
                 PhSetDialogItemText(hwndDlg, IDC_RUNTIMEVERSION, L"");
+                PhSetDialogItemText(hwndDlg, IDC_TARGETVERSION, L"");
                 PhSetDialogItemText(hwndDlg, IDC_FLAGS, L"");
             }
 
@@ -496,7 +520,13 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
         {
             PhSaveListViewColumnsToSetting(L"ImageClrListViewColumns", context->ListViewHandle);
             PhDeleteLayoutManager(&context->LayoutManager);
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
         }
         break;
     case WM_SHOWWINDOW:

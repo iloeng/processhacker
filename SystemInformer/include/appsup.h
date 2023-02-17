@@ -54,7 +54,7 @@ typedef enum _PH_KNOWN_PROCESS_TYPE
     ExplorerProcessType, // explorer
     UmdfHostProcessType, // wudfhost
     NtVdmHostProcessType, // ntvdm
-    EdgeProcessType, // Microsoft Edge
+    //EdgeProcessType, // Microsoft Edge
     WmiProviderHostType,
     MaximumProcessType,
     KnownProcessTypeMask = 0xffff,
@@ -237,7 +237,6 @@ PhWritePhTextHeader(
 
 #define PH_SHELL_APP_PROPAGATE_PARAMETERS 0x1
 #define PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY 0x2
-#define PH_SHELL_APP_PROPAGATE_PARAMETERS_FORCE_SETTINGS 0x4
 
 PHAPPAPI
 BOOLEAN
@@ -433,19 +432,30 @@ NTAPI
 PhHandleCopyListViewEMenuItem(
     _In_ struct _PH_EMENU_ITEM *SelectedItem
     );
-// end_phapppub
 
-BOOLEAN PhShellOpenKey2(
+PHAPPAPI
+VOID
+NTAPI
+PhShellOpenKey(
     _In_ HWND WindowHandle,
     _In_ PPH_STRING KeyName
     );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhShellOpenKey2(
+    _In_ HWND WindowHandle,
+    _In_ PPH_STRING KeyName
+    );
+// end_phapppub
 
 PPH_STRING PhPcre2GetErrorMessage(
     _In_ INT ErrorCode
     );
 
 HBITMAP PhGetShieldBitmap(
-    VOID
+    _In_ LONG dpiValue
     );
 
 // begin_phapppub
@@ -464,19 +474,19 @@ PhSetApplicationWindowIcon(
     );
 // end_phapppub
 
-#define SI_RUNAS_ADMIN_TASK_NAME L"SystemInformerTaskAdmin"
+#define SI_RUNAS_ADMIN_TASK_NAME ((PH_STRINGREF)PH_STRINGREF_INIT(L"SystemInformerTaskAdmin"))
 
 HRESULT PhRunAsAdminTask(
-    _In_ PWSTR TaskName
+    _In_ PPH_STRINGREF TaskName
     );
 
 HRESULT PhDeleteAdminTask(
-    _In_ PWSTR TaskName
+    _In_ PPH_STRINGREF TaskName
     );
 
 HRESULT PhCreateAdminTask(
-    _In_ PWSTR TaskName,
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF TaskName,
+    _In_ PPH_STRINGREF FileName
     );
 
 // begin_phapppub
@@ -495,10 +505,17 @@ PhWordMatchStringZ(
     _In_ PPH_STRING SearchText,
     _In_ PWSTR Text
     );
+
+PHAPPAPI
+PVOID
+NTAPI
+PhCreateKsiSettingsBlob( // ksisup.c
+    VOID
+    );
 // end_phapppub
 
-#define PH_LOAD_SHARED_ICON_SMALL(BaseAddress, Name) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_SMALL, 0, 0) // phapppub
-#define PH_LOAD_SHARED_ICON_LARGE(BaseAddress, Name) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_LARGE, 0, 0) // phapppub
+#define PH_LOAD_SHARED_ICON_SMALL(BaseAddress, Name, dpiValue) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_SMALL, 0, 0, dpiValue) // phapppub
+#define PH_LOAD_SHARED_ICON_LARGE(BaseAddress, Name, dpiValue) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_LARGE, 0, 0, dpiValue) // phapppub
 
 FORCEINLINE PVOID PhpGenericPropertyPageHeader(
     _In_ HWND hwndDlg,

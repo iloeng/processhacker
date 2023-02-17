@@ -306,10 +306,22 @@
     <ClCompile Include="heapinfo.c">
       <Filter>System Informer</Filter>
     </ClCompile>
-    <ClCompile Include="notiftoast.cpp">
+    <ClCompile Include="prpgvdm.c">
       <Filter>System Informer</Filter>
     </ClCompile>
-    <ClCompile Include="prpgvdm.c">
+    <ClCompile Include="delayload.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="admintask.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="ksisup.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="delayhook.c">
+      <Filter>System Informer</Filter>
+    </ClCompile>
+    <ClCompile Include="ksyscall.c">
       <Filter>System Informer</Filter>
     </ClCompile>
   </ItemGroup>
@@ -458,18 +470,15 @@
     <ClInclude Include="include\notiftoast.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="include\ksisup.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="resources\cross.bmp">
-      <Filter>Resources</Filter>
-    </None>
     <None Include="SystemInformer.ico">
       <Filter>Resources</Filter>
     </None>
     <None Include="resources\SystemInformer.png">
-      <Filter>Resources</Filter>
-    </None>
-    <None Include="resources\tick.bmp">
       <Filter>Resources</Filter>
     </None>
     <None Include="resources\application.ico">
@@ -499,9 +508,6 @@
     <Image Include="resources\pin.ico">
       <Filter>Resources</Filter>
     </Image>
-    <Image Include="resources\pencil.ico">
-      <Filter>Resources</Filter>
-    </Image>
     <Image Include="resources\folder.ico">
       <Filter>Resources</Filter>
     </Image>
@@ -521,6 +527,12 @@
       <Filter>Resources</Filter>
     </Image>
     <Image Include="resources\shield.ico">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="resources\active_search_small.png">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="resources\inactive_search_small.png">
       <Filter>Resources</Filter>
     </Image>
   </ItemGroup>

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -120,7 +120,7 @@ VOID PluginsLoadSettingsTreeList(
     )
 {
     PPH_STRING settings;
-    
+
     settings = PhGetStringSetting(L"PluginManagerTreeListColumns");
     PhCmLoadSettings(Context->TreeNewHandle, &settings->sr);
     PhDereferenceObject(settings);
@@ -195,7 +195,7 @@ PPH_PLUGIN_TREE_ROOT_NODE AddPluginsNode(
 
     if (fileName = PhGetPluginFileName(Plugin))
     {
-        if (PhInitializeImageVersionInfoEx(&versionInfo, fileName, FALSE))
+        if (PhInitializeImageVersionInfoEx(&versionInfo, &fileName->sr, FALSE))
         {
             pluginNode->Version = PhReferenceObject(versionInfo.FileVersion);
             PhDeleteImageVersionInfo(&versionInfo);
@@ -266,26 +266,19 @@ VOID UpdatePluginsNode(
 BOOLEAN NTAPI PluginsTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGMAN_CONTEXT context = Context;
     PPH_PLUGIN_TREE_ROOT_NODE node;
-
-    if (!context)
-        return FALSE;
 
     switch (Message)
     {
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PPH_PLUGIN_TREE_ROOT_NODE)getChildren->Node;
 
             if (!getChildren->Node)
@@ -316,10 +309,6 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     case TreeNewIsLeaf:
         {
             PPH_TREENEW_IS_LEAF isLeaf = (PPH_TREENEW_IS_LEAF)Parameter1;
-
-            if (!isLeaf)
-                break;
-
             node = (PPH_PLUGIN_TREE_ROOT_NODE)isLeaf->Node;
 
             isLeaf->IsLeaf = TRUE;
@@ -328,10 +317,6 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     case TreeNewGetCellText:
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = (PPH_TREENEW_GET_CELL_TEXT)Parameter1;
-
-            if (!getCellText)
-                break;
-
             node = (PPH_PLUGIN_TREE_ROOT_NODE)getCellText->Node;
 
             switch (getCellText->Id)
@@ -352,10 +337,6 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
-
-            if (!getNodeColor)
-                break;
-
             node = (PPH_PLUGIN_TREE_ROOT_NODE)getNodeColor->Node;
 
             getNodeColor->Flags = TN_CACHE | TN_AUTO_FORECOLOR;
@@ -371,9 +352,6 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     case TreeNewKeyDown:
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
-
-            if (!keyEvent)
-                break;
 
             switch (keyEvent->VirtualKey)
             {
@@ -401,7 +379,7 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     case TreeNewContextMenu:
         {
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
-            
+
             SendMessage(context->WindowHandle, WM_COMMAND, ID_SHOWCONTEXTMENU, (LPARAM)contextMenuEvent);
         }
         return TRUE;
@@ -413,7 +391,7 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
     //        data.MouseEvent = Parameter1;
     //        data.DefaultSortColumn = 0;
     //        data.DefaultSortOrder = AscendingSortOrder;
-    //        PhInitializeTreeNewColumnMenu(&data);
+    //        PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
     //
     //        data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
     //            PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);
@@ -426,9 +404,6 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
             PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
             RECT rect;
 
-            if (!customDraw)
-                break;
-
             rect = customDraw->CellRect;
             node = (PPH_PLUGIN_TREE_ROOT_NODE)customDraw->Node;
 
@@ -439,11 +414,14 @@ BOOLEAN NTAPI PluginsTreeNewCallback(
                     PH_STRINGREF text;
                     SIZE nameSize;
                     SIZE textSize;
- 
-                    rect.left += PH_SCALE_DPI(15);
-                    rect.top += PH_SCALE_DPI(5);
-                    rect.right -= PH_SCALE_DPI(5);
-                    rect.bottom -= PH_SCALE_DPI(8);
+                    LONG dpiValue;
+
+                    dpiValue = PhGetWindowDpi(hwnd);
+
+                    rect.left += PhGetDpi(15, dpiValue);
+                    rect.top += PhGetDpi(5, dpiValue);
+                    rect.right -= PhGetDpi(5, dpiValue);
+                    rect.bottom -= PhGetDpi(8, dpiValue);
 
                     // top
                     if (PhEnableThemeSupport)
@@ -547,6 +525,10 @@ VOID InitializePluginsTree(
     _Inout_ PPH_PLUGMAN_CONTEXT Context
     )
 {
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(Context->WindowHandle);
+
     Context->NodeList = PhCreateList(20);
     Context->NodeHashtable = PhCreateHashtable(
         sizeof(PPH_PLUGIN_TREE_ROOT_NODE),
@@ -555,13 +537,13 @@ VOID InitializePluginsTree(
         20
         );
 
-    Context->NormalFontHandle = PhCreateCommonFont(-10, FW_NORMAL, NULL);
-    Context->TitleFontHandle = PhCreateCommonFont(-14, FW_BOLD, NULL);
+    Context->NormalFontHandle = PhCreateCommonFont(-10, FW_NORMAL, NULL, dpiValue);
+    Context->TitleFontHandle = PhCreateCommonFont(-14, FW_BOLD, NULL, dpiValue);
 
     PhSetControlTheme(Context->TreeNewHandle, L"explorer");
 
     TreeNew_SetCallback(Context->TreeNewHandle, PluginsTreeNewCallback, Context);
-    TreeNew_SetRowHeight(Context->TreeNewHandle, PH_SCALE_DPI(48));
+    TreeNew_SetRowHeight(Context->TreeNewHandle, PhGetDpi(48, dpiValue));
 
     PhAddTreeNewColumnEx2(Context->TreeNewHandle, PH_PLUGIN_TREE_COLUMN_ITEM_NAME, TRUE, L"Plugin", 80, PH_ALIGN_LEFT, 0, 0, TN_COLUMN_FLAG_CUSTOMDRAW);
     //PhAddTreeNewColumnEx2(Context->TreeNewHandle, PH_PLUGIN_TREE_COLUMN_ITEM_AUTHOR, TRUE, L"Author", 80, PH_ALIGN_LEFT, 1, 0, 0);
@@ -701,11 +683,12 @@ INT_PTR CALLBACK PhPluginsDlgProc(
             {
             case IDC_DISABLED:
                 {
-                    DialogBox(
+                    PhDialogBox(
                         PhInstanceHandle,
                         MAKEINTRESOURCE(IDD_PLUGINSDISABLED),
                         hwndDlg,
-                        PhpPluginsDisabledDlgProc
+                        PhpPluginsDisabledDlgProc,
+                        NULL
                         );
 
                     ClearPluginsTree(context);
@@ -770,7 +753,7 @@ INT_PTR CALLBACK PhPluginsDlgProc(
                         case PH_PLUGIN_TREE_ITEM_MENU_DISABLE:
                             {
                                 PPH_STRING baseName = PhpGetPluginBaseName(selectedNode->PluginInstance);
-          
+
                                 PhSetPluginDisabled(&baseName->sr, TRUE);
 
                                 RemovePluginsNode(context, selectedNode);
@@ -782,12 +765,12 @@ INT_PTR CALLBACK PhPluginsDlgProc(
                             break;
                         case PH_PLUGIN_TREE_ITEM_MENU_PROPERTIES:
                             {
-                                DialogBoxParam(
-                                    PhInstanceHandle, 
-                                    MAKEINTRESOURCE(IDD_PLUGINPROPERTIES), 
-                                    hwndDlg, 
+                                PhDialogBox(
+                                    PhInstanceHandle,
+                                    MAKEINTRESOURCE(IDD_PLUGINPROPERTIES),
+                                    hwndDlg,
                                     PhpPluginPropertiesDlgProc,
-                                    (LPARAM)selectedNode->PluginInstance
+                                    selectedNode->PluginInstance
                                     );
                             }
                             break;
@@ -803,12 +786,12 @@ INT_PTR CALLBACK PhPluginsDlgProc(
                     if (!selectedNode)
                         break;
 
-                    DialogBoxParam(
+                    PhDialogBox(
                         PhInstanceHandle,
                         MAKEINTRESOURCE(IDD_PLUGINPROPERTIES),
                         hwndDlg,
                         PhpPluginPropertiesDlgProc,
-                        (LPARAM)selectedNode->PluginInstance
+                        selectedNode->PluginInstance
                         );
                 }
                 break;
@@ -900,7 +883,7 @@ INT_PTR CALLBACK PhPluginsDlgProc(
 //    else
 //    {
 //        PhShowInformation2(
-//            ParentWindowHandle, 
+//            ParentWindowHandle,
 //            L"Plugins are not enabled.",
 //            L"%s",
 //            L"To use plugins enable them in Options and restart System Informer."
@@ -927,7 +910,7 @@ VOID PhpRefreshPluginDetails(
     PhSetDialogItemText(hwndDlg, IDC_DESCRIPTION, SelectedPlugin->Information.Description);
     PhSetDialogItemText(hwndDlg, IDC_URL, SelectedPlugin->Information.Url);
 
-    if (fileName && PhInitializeImageVersionInfoEx(&versionInfo, fileName, FALSE))
+    if (fileName && PhInitializeImageVersionInfoEx(&versionInfo, &fileName->sr, FALSE))
     {
         PhSetDialogItemText(hwndDlg, IDC_VERSION, PhGetStringOrDefault(versionInfo.FileVersion, L"Unknown"));
         PhDeleteImageVersionInfo(&versionInfo);

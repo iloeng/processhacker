@@ -6,11 +6,12 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
 #include "exttools.h"
+#include "extension\plugin.h"
 
 PPH_PLUGIN PluginInstance = NULL;
 HWND ProcessTreeNewHandle = NULL;
@@ -23,6 +24,7 @@ PH_CALLBACK_REGISTRATION PluginShowOptionsCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginTreeNewMessageCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginPhSvcRequestCallbackRegistration;
+PH_CALLBACK_REGISTRATION MainMenuInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION MainWindowShowingCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessesUpdatedCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessPropertiesInitializingCallbackRegistration;
@@ -40,11 +42,22 @@ PH_CALLBACK_REGISTRATION NetworkItemsUpdatedCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessStatsEventCallbackRegistration;
 PH_CALLBACK_REGISTRATION SettingsUpdatedCallbackRegistration;
 
+EXTENDEDTOOLS_INTERFACE PluginInterface =
+{
+    EXTENDEDTOOLS_INTERFACE_VERSION,
+    EtLookupTotalGpuAdapterUtilization,
+    EtLookupTotalGpuAdapterDedicated,
+    EtLookupTotalGpuAdapterShared,
+    EtLookupTotalGpuAdapterEngineUtilization
+};
+
 ULONG ProcessesUpdatedCount = 0;
 static HANDLE ModuleProcessId = NULL;
 ULONG EtUpdateInterval = 0;
+USHORT EtMaxPrecisionUnit = 2;
 BOOLEAN EtGraphShowText = FALSE;
 BOOLEAN EtEnableScaleGraph = FALSE;
+BOOLEAN EtEnableScaleText = FALSE;
 BOOLEAN EtPropagateCpuUsage = FALSE;
 
 VOID NTAPI LoadCallback(
@@ -89,14 +102,11 @@ VOID NTAPI ShowOptionsCallback(
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
-
-    if (!menuItem)
-        return;
 
     switch (menuItem->Id)
     {
@@ -124,18 +134,47 @@ VOID NTAPI MenuItemCallback(
                 );
         }
         break;
+    case ID_REPARSE_POINTS:
+    case ID_REPARSE_OBJID:
+    case ID_REPARSE_SDDL:
+        {
+            EtShowReparseDialog(menuItem->OwnerWindow, UlongToPtr(menuItem->Id));
+        }
+        break;
+    case ID_WCT_MENUITEM:
+        {
+            EtShowWaitChainDialog(menuItem->OwnerWindow, menuItem->Context);
+        }
+        break;
+    case ID_PIPE_ENUM:
+        {
+            EtShowPipeEnumDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_FIRMWARE:
+        {
+            EtShowFirmwareDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_OBJMGR:
+        {
+            EtShowObjectManagerDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_POOL_TABLE:
+        {
+            EtShowPoolTableDialog(menuItem->OwnerWindow);
+        }
+        break;
     }
 }
 
 VOID NTAPI TreeNewMessageCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_MESSAGE message = Parameter;
-
-    if (!message)
-        return;
 
     if (message->TreeNewHandle == ProcessTreeNewHandle)
         EtProcessTreeNewMessage(Parameter);
@@ -152,6 +191,43 @@ VOID NTAPI PhSvcRequestCallback(
         return;
 
     DispatchPhSvcRequest(Parameter);
+}
+
+VOID NTAPI MainMenuInitializingCallback(
+    _In_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
+    PPH_EMENU_ITEM systemMenu;
+    PPH_EMENU_ITEM bootMenuItem;
+    PPH_EMENU_ITEM reparsePointsMenu;
+    PPH_EMENU_ITEM reparseObjIdMenu;
+    PPH_EMENU_ITEM reparseSsdlMenu;
+
+    if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_TOOLS)
+        return;
+
+    if (!(systemMenu = PhFindEMenuItem(menuInfo->Menu, 0, L"System", 0)))
+    {
+        PhInsertEMenuItem(menuInfo->Menu, systemMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&System", NULL), ULONG_MAX);
+    }
+
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_POOL_TABLE, L"Poo&l Table", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_OBJMGR, L"&Object Manager", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, bootMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_FIRMWARE, L"Firm&ware Table", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_PIPE_ENUM, L"&Named Pipes", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparsePointsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_POINTS, L"NTFS Reparse Points", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparseObjIdMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_OBJID, L"NTFS Object Identifiers", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparseSsdlMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_SDDL, L"NTFS Security Descriptors", NULL), ULONG_MAX);
+
+    if (!PhGetOwnTokenAttributes().Elevated)
+    {
+        bootMenuItem->Flags |= PH_EMENU_DISABLED;
+        reparsePointsMenu->Flags |= PH_EMENU_DISABLED;
+        reparseObjIdMenu->Flags |= PH_EMENU_DISABLED;
+        reparseSsdlMenu->Flags |= PH_EMENU_DISABLED;
+    }
 }
 
 VOID NTAPI MainWindowShowingCallback(
@@ -201,7 +277,7 @@ VOID NTAPI HandlePropertiesInitializingCallback(
 }
 
 VOID NTAPI ProcessMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -210,8 +286,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
     ULONG flags;
     PPH_EMENU_ITEM miscMenu;
 
-    if (!menuInfo)
-        return;
+    WctProcessMenuInitializingCallback(Parameter, Context);
 
     if (menuInfo->u.Process.NumberOfProcesses == 1)
         processItem = menuInfo->u.Process.Processes[0];
@@ -243,7 +318,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
 }
 
 VOID NTAPI ThreadMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -252,8 +327,7 @@ VOID NTAPI ThreadMenuInitializingCallback(
     ULONG insertIndex;
     PPH_EMENU_ITEM menuItem;
 
-    if (!menuInfo)
-        return;
+    WctThreadMenuInitializingCallback(Parameter, Context);
 
     if (menuInfo->u.Thread.NumberOfThreads == 1)
         threadItem = menuInfo->u.Thread.Threads[0];
@@ -275,7 +349,7 @@ VOID NTAPI ThreadMenuInitializingCallback(
 }
 
 VOID NTAPI ModuleMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -287,9 +361,6 @@ VOID NTAPI ModuleMenuInitializingCallback(
     PPH_EMENU_ITEM menuItem;
 
     addMenuItem = FALSE;
-
-    if (!menuInfo)
-        return;
 
     if (processItem = PhReferenceProcessItem(menuInfo->u.Module.ProcessId))
     {
@@ -322,41 +393,32 @@ VOID NTAPI ModuleMenuInitializingCallback(
 }
 
 VOID NTAPI ProcessTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION treeNewInfo = Parameter;
-
-    if (!treeNewInfo)
-        return;
 
     ProcessTreeNewHandle = treeNewInfo->TreeNewHandle;
     EtProcessTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI NetworkTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION treeNewInfo = Parameter;
-
-    if (!treeNewInfo)
-        return;
 
     NetworkTreeNewHandle = treeNewInfo->TreeNewHandle;
     EtNetworkTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI SystemInformationInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     if (EtGpuEnabled)
         EtGpuSystemInformationInitializing(Parameter);
     if (EtEtwEnabled && !!PhGetIntegerSetting(SETTING_NAME_ENABLE_SYSINFO_GRAPHS))
@@ -364,13 +426,10 @@ VOID NTAPI SystemInformationInitializingCallback(
 }
 
 VOID NTAPI MiniInformationInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     if (EtGpuEnabled)
         EtGpuMiniInformationInitializing(Parameter);
     if (EtEtwEnabled)
@@ -378,13 +437,10 @@ VOID NTAPI MiniInformationInitializingCallback(
 }
 
 VOID NTAPI TrayIconsInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     EtLoadTrayIconGuids();
     EtRegisterNotifyIcons(Parameter);
 }
@@ -774,9 +830,39 @@ VOID EtLoadSettings(
     )
 {
     EtUpdateInterval = PhGetIntegerSetting(L"UpdateInterval");
+    EtMaxPrecisionUnit = (USHORT)PhGetIntegerSetting(L"MaxPrecisionUnit");
     EtGraphShowText = !!PhGetIntegerSetting(L"GraphShowText");
-    EtEnableScaleGraph = !!PhGetIntegerSetting(L"EnableScaleCpuGraph");
+    EtEnableScaleGraph = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
+    EtEnableScaleText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
     EtPropagateCpuUsage = !!PhGetIntegerSetting(L"PropagateCpuUsage");
+}
+
+PPH_STRING PhGetSelectedListViewItemText(
+    _In_ HWND hWnd
+    )
+{
+    INT index = PhFindListViewItemByFlags(
+        hWnd,
+        -1,
+        LVNI_SELECTED
+        );
+
+    if (index != -1)
+    {
+        WCHAR buffer[DOS_MAX_PATH_LENGTH] = L"";
+
+        LVITEM item;
+        item.mask = LVIF_TEXT;
+        item.iItem = index;
+        item.iSubItem = 0;
+        item.pszText = buffer;
+        item.cchTextMax = ARRAYSIZE(buffer);
+
+        if (ListView_GetItem(hWnd, &item))
+            return PhCreateString(buffer);
+    }
+
+    return NULL;
 }
 
 VOID NTAPI SettingsUpdatedCallback(
@@ -969,6 +1055,7 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_DISK_TREE_LIST_COLUMNS, L"" },
                 { IntegerPairSettingType, SETTING_NAME_DISK_TREE_LIST_SORT, L"4,2" }, // 4, DescendingSortOrder
                 { IntegerSettingType, SETTING_NAME_ENABLE_GPUPERFCOUNTERS, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_DISKPERFCOUNTERS, L"1" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_ETW_MONITOR, L"1" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_GPU_MONITOR, L"1" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_FPS_MONITOR, L"0" },
@@ -990,6 +1077,29 @@ LOGICAL DllMain(
                 { IntegerPairSettingType, SETTING_NAME_FW_TREE_LIST_SORT, L"12,2" },
                 { IntegerSettingType, SETTING_NAME_FW_IGNORE_PORTSCAN, L"0" },
                 { IntegerSettingType, SETTING_NAME_SHOWSYSINFOGRAPH, L"1" },
+                { StringSettingType, SETTING_NAME_WCT_TREE_LIST_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_WCT_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_WCT_WINDOW_SIZE, L"@96|690,540" },
+                { IntegerPairSettingType, SETTING_NAME_REPARSE_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_REPARSE_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_REPARSE_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_REPARSE_OBJECTID_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_REPARSE_SD_LISTVIEW_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_SIZE, L"@96|490,340" },
+                { StringSettingType, SETTING_NAME_FIRMWARE_LISTVIEW_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_OBJMGR_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_OBJMGR_WINDOW_SIZE, L"@96|1065,627" },
+                { StringSettingType, SETTING_NAME_OBJMGR_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_POOL_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_POOL_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_POOL_TREE_LIST_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_POOL_TREE_LIST_SORT, L"0,0" },
+                { IntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_SIZE, L"@96|510,380" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -1000,6 +1110,7 @@ LOGICAL DllMain(
             info->DisplayName = L"Extended Tools";
             info->Author = L"dmex, wj32";
             info->Description = L"Extended functionality for Windows 7 and above, including ETW, GPU, Disk and Firewall monitoring tabs.";
+            info->Interface = &PluginInterface;
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
@@ -1038,6 +1149,12 @@ LOGICAL DllMain(
                 &PluginPhSvcRequestCallbackRegistration
                 );
 
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackMainMenuInitializing),
+                MainMenuInitializingCallback,
+                NULL,
+                &MainMenuInitializingCallbackRegistration
+                );
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackMainWindowShowing),
                 MainWindowShowingCallback,

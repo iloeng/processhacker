@@ -1,18 +1,34 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2015
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_PHNET_H
 #define _PH_PHNET_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+EXTERN_C_START
 
 #define __WINDOT11_H__ // temporary preprocessor workaround (dmex)
 
+#ifndef UM_NDIS60
+#define UM_NDIS60 1
+#endif
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <ws2ipdef.h>
+#include <ws2def.h>
 #include <windns.h>
+#include <nldef.h>
 #include <iphlpapi.h>
 #include <mstcpip.h>
+#include <icmpapi.h>
 
 #define PH_IPV4_NETWORK_TYPE 0x1
 #define PH_IPV6_NETWORK_TYPE 0x2
@@ -50,7 +66,6 @@ FORCEINLINE BOOLEAN PhEqualIpAddress(
     if (Address1->Type != Address2->Type)
         return FALSE;
 
-    // TODO: Remove the below commented code if the ADDR_EQUAL macros work -dmex
     if (Address1->Type == PH_IPV4_NETWORK_TYPE)
     {
         return IN4_ADDR_EQUAL(&Address1->InAddr, &Address2->InAddr);
@@ -158,7 +173,6 @@ typedef struct _PH_HTTP_CONTEXT
     PVOID SessionHandle;
     PVOID ConnectionHandle;
     PVOID RequestHandle;
-    PWSTR ServerName;
 } PH_HTTP_CONTEXT, *PPH_HTTP_CONTEXT;
 
 _Success_(return)
@@ -179,9 +193,9 @@ PhHttpSocketDestroy(
 
 typedef enum _PH_HTTP_SOCKET_CLOSE_TYPE
 {
-    PH_HTTP_SOCKET_CLOSE_SESSION = 0x0,
-    PH_HTTP_SOCKET_CLOSE_CONNECTION = 0x1,
-    PH_HTTP_SOCKET_CLOSE_REQUEST = 0x2,
+    PH_HTTP_SOCKET_CLOSE_SESSION = 0x1,
+    PH_HTTP_SOCKET_CLOSE_CONNECTION = 0x2,
+    PH_HTTP_SOCKET_CLOSE_REQUEST = 0x4,
 } PH_HTTP_SOCKET_CLOSE_TYPE;
 
 PHLIBAPI
@@ -298,6 +312,16 @@ PhHttpSocketQueryHeaderUlong(
     _Out_ PULONG HeaderValue
     );
 
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhHttpSocketQueryHeaderUlong64(
+    _In_ PPH_HTTP_CONTEXT HttpContext,
+    _In_ ULONG QueryValue,
+    _Out_ PULONG64 HeaderValue
+    );
+
 PHLIBAPI
 PPH_STRING
 NTAPI
@@ -343,7 +367,7 @@ NTSTATUS
 NTAPI
 PhHttpSocketDownloadToFile(
     _In_ PPH_HTTP_CONTEXT HttpContext,
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PPH_HTTPDOWNLOAD_CALLBACK Callback,
     _In_opt_ PVOID Context
     );
@@ -390,7 +414,7 @@ PhHttpSocketGetErrorMessage(
     );
 
 PHLIBAPI
-BOOLEAN 
+BOOLEAN
 NTAPI
 PhHttpSocketSetCredentials(
     _In_ PPH_HTTP_CONTEXT HttpContext,
@@ -435,8 +459,6 @@ PhDnsFree(
     _In_ PDNS_RECORD DnsRecordList
     );
 
-#ifdef __cplusplus
-}
-#endif
+EXTERN_C_END
 
 #endif

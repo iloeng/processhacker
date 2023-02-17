@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -14,7 +14,6 @@
 #include <modlist.h>
 
 #include <emenu.h>
-#include <mapimg.h>
 #include <settings.h>
 #include <verify.h>
 
@@ -52,9 +51,9 @@ LONG PhpModuleTreeNewPostSortFunction(
 BOOLEAN NTAPI PhpModuleTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     );
 
 VOID PhInitializeModuleList(
@@ -63,6 +62,8 @@ VOID PhInitializeModuleList(
     _Out_ PPH_MODULE_LIST_CONTEXT Context
     )
 {
+    BOOLEAN enableMonospaceFont = !!PhGetIntegerSetting(L"EnableMonospaceFont");
+
     memset(Context, 0, sizeof(PH_MODULE_LIST_CONTEXT));
     Context->EnableStateHighlighting = TRUE;
 
@@ -86,7 +87,7 @@ VOID PhInitializeModuleList(
 
     // Default columns
     PhAddTreeNewColumn(Context->TreeNewHandle, PHMOTLC_NAME, TRUE, L"Name", 100, PH_ALIGN_LEFT, -2, 0);
-    PhAddTreeNewColumn(Context->TreeNewHandle, PHMOTLC_BASEADDRESS, TRUE, L"Base address", 80, PH_ALIGN_RIGHT, 0, DT_RIGHT);
+    PhAddTreeNewColumn(Context->TreeNewHandle, PHMOTLC_BASEADDRESS, TRUE, L"Base address", 80, PH_ALIGN_LEFT | (enableMonospaceFont ? PH_ALIGN_MONOSPACE_FONT : 0), 0, 0);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_SIZE, TRUE, L"Size", 60, PH_ALIGN_RIGHT, 1, DT_RIGHT, TRUE);
     PhAddTreeNewColumn(Context->TreeNewHandle, PHMOTLC_DESCRIPTION, TRUE, L"Description", 160, PH_ALIGN_LEFT, 2, 0);
 
@@ -105,8 +106,8 @@ VOID PhInitializeModuleList(
     PhAddTreeNewColumn(Context->TreeNewHandle, PHMOTLC_LOADREASON, FALSE, L"Load reason", 80, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_FILEMODIFIEDTIME, FALSE, L"File modified time", 140, PH_ALIGN_LEFT, ULONG_MAX, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_FILESIZE, FALSE, L"File size", 70, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
-    PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_ENTRYPOINT, FALSE, L"Entry point", 70, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
-    PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_PARENTBASEADDRESS, FALSE, L"Parent base address", 70, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
+    PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_ENTRYPOINT, FALSE, L"Entry point", 70, PH_ALIGN_RIGHT | (enableMonospaceFont ? PH_ALIGN_MONOSPACE_FONT : 0), ULONG_MAX, DT_RIGHT, TRUE);
+    PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_PARENTBASEADDRESS, FALSE, L"Parent base address", 70, PH_ALIGN_RIGHT | (enableMonospaceFont ? PH_ALIGN_MONOSPACE_FONT : 0), ULONG_MAX, DT_RIGHT, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_CET, FALSE, L"CET", 50, PH_ALIGN_LEFT, ULONG_MAX, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PHMOTLC_COHERENCY, FALSE, L"Image coherency", 70, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
     PhAddTreeNewColumnEx2(Context->TreeNewHandle, PHMOTLC_TIMELINE, FALSE, L"Timeline", 100, PH_ALIGN_LEFT, ULONG_MAX, 0, TN_COLUMN_FLAG_CUSTOMDRAW | TN_COLUMN_FLAG_SORTDESCENDING);
@@ -247,6 +248,9 @@ VOID PhSetOptionsModuleList(
     case PH_MODULE_FLAGS_HIGHLIGHT_IMAGEKNOWNDLL:
         Context->HighlightImageKnownDll = !Context->HighlightImageKnownDll;
         break;
+    case PH_MODULE_FLAGS_ZERO_PAD_ADDRESSES:
+        Context->ZeroPadAddresses = !Context->ZeroPadAddresses;
+        break;
     }
 }
 
@@ -310,7 +314,7 @@ PPH_MODULE_NODE PhAddModuleNode(
     for (i = 0; i < Context->NodeList->Count; i++)
     {
         parentNode = Context->NodeList->Items[i];
-    
+
         if (parentNode != moduleNode && parentNode->ModuleItem->BaseAddress == ModuleItem->ParentBaseAddress)
         {
             moduleNode->Parent = parentNode;
@@ -450,6 +454,53 @@ VOID PhUpdateModuleNode(
 
     ModuleNode->ValidMask = 0;
     PhInvalidateTreeNewNode(&ModuleNode->Node, TN_CACHE_COLOR);
+    TreeNew_NodesStructured(Context->TreeNewHandle);
+}
+
+VOID PhInvalidateAllModuleNodes(
+    _In_ PPH_MODULE_LIST_CONTEXT Context
+    )
+{
+    for (ULONG i = 0; i < Context->NodeList->Count; i++)
+    {
+        PPH_MODULE_NODE moduleNode = Context->NodeList->Items[i];
+
+        memset(moduleNode->TextCache, 0, sizeof(PH_STRINGREF) * PHMOTLC_MAXIMUM);
+        moduleNode->ValidMask = 0;
+        PhInvalidateTreeNewNode(&moduleNode->Node, TN_CACHE_COLOR);
+    }
+
+    InvalidateRect(Context->TreeNewHandle, NULL, FALSE);
+    TreeNew_NodesStructured(Context->TreeNewHandle);
+}
+
+VOID PhInvalidateAllModuleBaseAddressNodes(
+    _In_ PPH_MODULE_LIST_CONTEXT Context
+    )
+{
+    for (ULONG i = 0; i < Context->NodeList->Count; i++)
+    {
+        PPH_MODULE_NODE moduleNode = Context->NodeList->Items[i];
+
+        if (Context->ZeroPadAddresses)
+        {
+            PhPrintPointerPadZeros(moduleNode->ModuleItem->BaseAddressString, moduleNode->ModuleItem->BaseAddress);
+            PhPrintPointerPadZeros(moduleNode->ModuleItem->EntryPointAddressString, moduleNode->ModuleItem->EntryPoint);
+            PhPrintPointerPadZeros(moduleNode->ModuleItem->ParentBaseAddressString, moduleNode->ModuleItem->ParentBaseAddress);
+        }
+        else
+        {
+            PhPrintPointer(moduleNode->ModuleItem->BaseAddressString, moduleNode->ModuleItem->BaseAddress);
+            PhPrintPointer(moduleNode->ModuleItem->EntryPointAddressString, moduleNode->ModuleItem->EntryPoint);
+            PhPrintPointer(moduleNode->ModuleItem->ParentBaseAddressString, moduleNode->ModuleItem->ParentBaseAddress);
+        }
+
+        memset(moduleNode->TextCache, 0, sizeof(PH_STRINGREF) * PHMOTLC_MAXIMUM);
+        moduleNode->ValidMask = 0;
+        PhInvalidateTreeNewNode(&moduleNode->Node, TN_CACHE_COLOR);
+    }
+
+    InvalidateRect(Context->TreeNewHandle, NULL, FALSE);
     TreeNew_NodesStructured(Context->TreeNewHandle);
 }
 
@@ -694,12 +745,18 @@ BEGIN_SORT_FUNCTION(OriginalName)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(ServiceName)
+{
+    sortResult = PhCompareStringWithNull(node1->ServiceText, node2->ServiceText, TRUE);
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI PhpModuleTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PPH_MODULE_LIST_CONTEXT context = Context;
@@ -713,10 +770,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PPH_MODULE_NODE)getChildren->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -761,7 +814,8 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                     SORT_FUNCTION(Cet),
                     SORT_FUNCTION(ImageCoherency),
                     SORT_FUNCTION(LoadTime), // Timeline
-                    SORT_FUNCTION(OriginalName)
+                    SORT_FUNCTION(OriginalName),
+                    SORT_FUNCTION(ServiceName),
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
 
@@ -803,10 +857,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewIsLeaf:
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
-
-            if (!isLeaf)
-                break;
-
             node = (PPH_MODULE_NODE)isLeaf->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -819,9 +869,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PPH_MODULE_ITEM moduleItem;
-
-            if (!getCellText)
-                break;
 
             node = (PPH_MODULE_NODE)getCellText->Node;
             moduleItem = node->ModuleItem;
@@ -887,7 +934,7 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 {
                     if (moduleItem->LoadCount != USHRT_MAX)
                     {
-                        PhPrintInt32(node->LoadCountText, moduleItem->LoadCount);
+                        PhPrintUInt32(node->LoadCountText, moduleItem->LoadCount);
                         PhInitializeStringRefLongHint(&getCellText->Text, node->LoadCountText);
                     }
                     else
@@ -904,7 +951,7 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 {
                     if (moduleItem->Type != PH_MODULE_TYPE_ELF_MAPPED_IMAGE)
                     {
-                        PhInitializeStringRef(&getCellText->Text, 
+                        PhInitializeStringRef(&getCellText->Text,
                             moduleItem->VerifyResult == VrTrusted ? L"Trusted" : L"Not trusted");
                     }
                     else
@@ -1033,17 +1080,11 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                 break;
             case PHMOTLC_ENTRYPOINT:
                 if (moduleItem->EntryPoint != 0)
-                {
-                    PhPrintPointer(moduleItem->EntryPointAddressString, moduleItem->EntryPoint);
-                    PhInitializeStringRef(&getCellText->Text, moduleItem->EntryPointAddressString);
-                }
+                    PhInitializeStringRefLongHint(&getCellText->Text, moduleItem->EntryPointAddressString);
                 break;
             case PHMOTLC_PARENTBASEADDRESS:
                 if (moduleItem->ParentBaseAddress != 0)
-                {
-                    PhPrintPointer(moduleItem->ParentBaseAddressString, moduleItem->ParentBaseAddress);
                     PhInitializeStringRefLongHint(&getCellText->Text, moduleItem->ParentBaseAddressString);
-                }
                 break;
             case PHMOTLC_CET:
                 if (moduleItem->ImageDllCharacteristicsEx & IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT)
@@ -1088,8 +1129,13 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
                             PhInitializeStringRef(&getCellText->Text, L"100%");
                             break;
                         }
+                        if (moduleItem->ImageCoherency > 0.9999f)
+                        {
+                            PhInitializeStringRef(&getCellText->Text, L">99.99%");
+                            break;
+                        }
 
-                        PhInitFormatF(&format[0], (DOUBLE)(moduleItem->ImageCoherency * 100.0f), 2);
+                        PhInitFormatF(&format[0], moduleItem->ImageCoherency * 100.0f, PhMaxPrecisionUnit);
                         PhInitFormatS(&format[1], L"%");
 
                         PhMoveReference(&node->ImageCoherencyText, PhFormat(format, RTL_NUMBER_OF(format), 0));
@@ -1127,9 +1173,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
             PPH_MODULE_ITEM moduleItem;
-
-            if (!getNodeColor)
-                break;
 
             node = (PPH_MODULE_NODE)getNodeColor->Node;
             moduleItem = node->ModuleItem;
@@ -1171,10 +1214,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetNodeFont:
         {
             PPH_TREENEW_GET_NODE_FONT getNodeFont = Parameter1;
-
-            if (!getNodeFont)
-                break;
-
             node = (PPH_MODULE_NODE)getNodeFont->Node;
 
             // Make the executable file module item bold.
@@ -1192,10 +1231,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewGetCellTooltip:
         {
             PPH_TREENEW_GET_CELL_TOOLTIP getCellTooltip = Parameter1;
-
-            if (!getCellTooltip)
-                break;
-
             node = (PPH_MODULE_NODE)getCellTooltip->Node;
 
             if (getCellTooltip->Column->Id != 0)
@@ -1270,9 +1305,6 @@ BOOLEAN NTAPI PhpModuleTreeNewCallback(
     case TreeNewKeyDown:
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
-
-            if (!keyEvent)
-                break;
 
             switch (keyEvent->VirtualKey)
             {
@@ -1428,7 +1460,7 @@ BOOLEAN PhShouldShowModuleCoherency(
     {
         //
         // We special case these modules types and opt not to show/calculate
-        // the coherency for them. 
+        // the coherency for them.
         //
         return FALSE;
     }

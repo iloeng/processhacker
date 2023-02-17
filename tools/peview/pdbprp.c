@@ -14,7 +14,7 @@
 #include "colmgr.h"
 
 static PH_STRINGREF EmptySymbolsText = PH_STRINGREF_INIT(L"There are no symbols to display.");
-static PH_STRINGREF LoadingSymbolsText = PH_STRINGREF_INIT(L"Loading symbols from image...");
+static PH_STRINGREF LoadingSymbolsText = PH_STRINGREF_INIT(L"Loading symbols...");
 
 BOOLEAN SymbolNodeHashtableCompareFunction(
     _In_ PVOID Entry1,
@@ -333,7 +333,7 @@ BOOLEAN NTAPI PvSymbolTreeNewCallback(
                         PH_FORMAT format[1];
 
                         PhInitFormatSize(&format[0], node->Size);
-  
+
                         PhMoveReference(&node->SizeText, PhFormat(format, 1, 0));
                         getCellText->Text = node->SizeText->sr;
                     }
@@ -365,6 +365,37 @@ BOOLEAN NTAPI PvSymbolTreeNewCallback(
         }
         return TRUE;
     case TreeNewKeyDown:
+        {
+            PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
+
+            if (!keyEvent)
+                break;
+
+            switch (keyEvent->VirtualKey)
+            {
+            case 'C':
+                {
+                    if (GetKeyState(VK_CONTROL) < 0)
+                    {
+                        PPH_STRING text;
+
+                        text = PhGetTreeNewText(hwnd, 0);
+                        PhSetClipboardString(hwnd, &text->sr);
+                        PhDereferenceObject(text);
+                    }
+                }
+                break;
+            case 'A':
+                {
+                    if (GetKeyState(VK_CONTROL) < 0)
+                    {
+                        TreeNew_SelectRange(hwnd, 0, -1);
+                    }
+                }
+                break;
+            }
+        }
+        return TRUE;
     case TreeNewNodeExpanding:
         return TRUE;
     case TreeNewLeftDoubleClick:
@@ -379,7 +410,7 @@ BOOLEAN NTAPI PvSymbolTreeNewCallback(
             SendMessage(context->ParentWindowHandle, WM_PV_SEARCH_SHOWMENU, 0, (LPARAM)contextMenu);
         }
         return TRUE;
-    case TreeNewHeaderRightClick: 
+    case TreeNewHeaderRightClick:
         {
             PH_TN_COLUMN_MENU_DATA data;
 
@@ -638,6 +669,23 @@ VOID PvAddPendingSymbolNodes(
     TreeNew_SetRedraw(Context->TreeNewHandle, TRUE);
 }
 
+HANDLE PvSymbolGetGlobalTimerQueue(
+    VOID
+    )
+{
+    static HANDLE PhTimerQueueHandle = NULL;
+    static PH_INITONCE PhTimerQueueHandleInitOnce = PH_INITONCE_INIT;
+
+    if (PhBeginInitOnce(&PhTimerQueueHandleInitOnce))
+    {
+        RtlCreateTimerQueue(&PhTimerQueueHandle);
+
+        PhEndInitOnce(&PhTimerQueueHandleInitOnce);
+    }
+
+    return PhTimerQueueHandle;
+}
+
 VOID CALLBACK PvSymbolTreeUpdateCallback(
     _In_ PPDB_SYMBOL_CONTEXT Context,
     _In_ BOOLEAN TimerOrWaitFired
@@ -648,7 +696,7 @@ VOID CALLBACK PvSymbolTreeUpdateCallback(
 
     PvAddPendingSymbolNodes(Context);
 
-    RtlUpdateTimer(PhGetGlobalTimerQueue(), Context->UpdateTimerHandle, 1000, INFINITE);
+    RtlUpdateTimer(PvSymbolGetGlobalTimerQueue(), Context->UpdateTimerHandle, 1000, INFINITE);
 }
 
 INT_PTR CALLBACK PvpSymbolsDlgProc(
@@ -706,7 +754,7 @@ INT_PTR CALLBACK PvpSymbolsDlgProc(
             PhCreateThread2(PeDumpFileSymbols, context);
 
             RtlCreateTimer(
-                PhGetGlobalTimerQueue(),
+                PvSymbolGetGlobalTimerQueue(),
                 &context->UpdateTimerHandle,
                 PvSymbolTreeUpdateCallback,
                 context,
@@ -722,7 +770,7 @@ INT_PTR CALLBACK PvpSymbolsDlgProc(
         {
             if (context->UpdateTimerHandle)
             {
-                RtlDeleteTimer(PhGetGlobalTimerQueue(), context->UpdateTimerHandle, NULL);
+                RtlDeleteTimer(PvSymbolGetGlobalTimerQueue(), context->UpdateTimerHandle, NULL);
                 context->UpdateTimerHandle = NULL;
             }
 
@@ -730,6 +778,7 @@ INT_PTR CALLBACK PvpSymbolsDlgProc(
 
             PhDeleteLayoutManager(&context->LayoutManager);
 
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
         }
         break;
@@ -792,7 +841,7 @@ INT_PTR CALLBACK PvpSymbolsDlgProc(
         {
             if (context->UpdateTimerHandle)
             {
-                RtlDeleteTimer(PhGetGlobalTimerQueue(), context->UpdateTimerHandle, NULL);
+                RtlDeleteTimer(PvSymbolGetGlobalTimerQueue(), context->UpdateTimerHandle, NULL);
                 context->UpdateTimerHandle = NULL;
             }
 
@@ -849,6 +898,17 @@ INT_PTR CALLBACK PvpSymbolsDlgProc(
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLORDLG:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORLISTBOX:
+        {
+            SetBkMode((HDC)wParam, TRANSPARENT);
+            SetTextColor((HDC)wParam, RGB(0, 0, 0));
+            SetDCBrushColor((HDC)wParam, RGB(255, 255, 255));
+            return (INT_PTR)GetStockBrush(DC_BRUSH);
+        }
+        break;
     }
 
     return FALSE;
@@ -860,7 +920,7 @@ VOID PvPdbProperties(
 {
     PPV_PROPCONTEXT propContext;
 
-    if (!PhDoesFileExistsWin32(PvFileName->Buffer))
+    if (!PhDoesFileExistWin32(PhGetString(PvFileName)))
     {
         PhShowStatus(NULL, L"Unable to load the pdb file", STATUS_FILE_NOT_AVAILABLE, 0);
         return;

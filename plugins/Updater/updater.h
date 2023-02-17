@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2011-2019
+ *     dmex    2011-2023
  *
  */
 
@@ -18,8 +18,6 @@
 #include <verify.h>
 #include <settings.h>
 #include <workqueue.h>
-
-#include <commonutil.h>
 
 #include "resource.h"
 
@@ -37,6 +35,7 @@
 #define SETTING_NAME_UPDATE_MODE (PLUGIN_NAME L".UpdateMode")
 #define SETTING_NAME_UPDATE_AVAILABLE (PLUGIN_NAME L".UpdateAvailable")
 #define SETTING_NAME_UPDATE_DATA (PLUGIN_NAME L".UpdateData")
+#define SETTING_NAME_AUTO_CHECK_PAGE (PLUGIN_NAME L".AutoCheckPage")
 #define SETTING_NAME_CHANGELOG_WINDOW_POSITION (PLUGIN_NAME L".ChangelogWindowPosition")
 #define SETTING_NAME_CHANGELOG_WINDOW_SIZE (PLUGIN_NAME L".ChangelogWindowSize")
 #define SETTING_NAME_CHANGELOG_COLUMNS (PLUGIN_NAME L".ChangelogListColumns")
@@ -51,11 +50,29 @@
 #ifdef _DEBUG
 //#define FORCE_UPDATE_CHECK
 //#define FORCE_LATEST_VERSION
+//#define FORCE_ELEVATION_CHECK
 #endif
 
 extern HWND UpdateDialogHandle;
 extern PH_EVENT InitializedEvent;
 extern PPH_PLUGIN PluginInstance;
+
+typedef enum _UPDATER_TYPE
+{
+    InvalidUpdaterType,
+
+    //
+    // N.B. Order here is important.
+    //
+
+    UpdaterTypeNightly,
+    UpdaterTypeNightlyLegacy,
+    UpdaterTypeRelease,
+    UpdaterTypeReleaseLegacy,
+
+    MaxUpdaterType
+
+} UPDATER_TYPE;
 
 typedef struct _PH_UPDATER_CONTEXT
 {
@@ -68,7 +85,9 @@ typedef struct _PH_UPDATER_CONTEXT
             BOOLEAN HaveData : 1;
             BOOLEAN FixedWindowStyles : 1;
             BOOLEAN Cancel : 1;
-            BOOLEAN Spare : 5;
+            BOOLEAN DirectoryElevationRequired : 1;
+            BOOLEAN Cleanup : 1;
+            BOOLEAN Spare : 3;
         };
     };
 
@@ -88,9 +107,10 @@ typedef struct _PH_UPDATER_CONTEXT
     PPH_STRING SetupFileSignature;
     // Nightly builds only
     PPH_STRING CommitHash;
+    UPDATER_TYPE Type;
 } PH_UPDATER_CONTEXT, *PPH_UPDATER_CONTEXT;
 
-// TDM_NAVIGATE_PAGE can not be called from other threads without comctl32.dll throwing access violations 
+// TDM_NAVIGATE_PAGE can not be called from other threads without comctl32.dll throwing access violations
 // after navigating to the page and you press keys such as ctrl, alt, home and insert. (dmex)
 #define TaskDialogNavigatePage(WindowHandle, Config) \
     assert(HandleToUlong(NtCurrentThreadId()) == GetWindowThreadProcessId(WindowHandle, NULL)); \
@@ -150,6 +170,15 @@ VOID ShowUpdateFailedDialog(
 
 // updater.c
 
+BOOLEAN UpdateShellExecute(
+    _In_ PPH_UPDATER_CONTEXT Context,
+    _In_opt_ HWND WindowHandle
+    );
+
+BOOLEAN UpdateCheckDirectoryElevationRequired(
+    VOID
+    );
+
 VOID ShowUpdateDialog(
     _In_opt_ PPH_UPDATER_CONTEXT Context
     );
@@ -201,7 +230,7 @@ typedef struct _UPDATER_HASH_CONTEXT
 } UPDATER_HASH_CONTEXT, *PUPDATER_HASH_CONTEXT;
 
 PUPDATER_HASH_CONTEXT UpdaterInitializeHash(
-    VOID
+    _In_ UPDATER_TYPE Type
     );
 
 BOOLEAN UpdaterUpdateHash(

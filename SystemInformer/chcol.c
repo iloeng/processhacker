@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -60,12 +60,12 @@ VOID PhShowChooseColumnsDialog(
     else
         return;
 
-    DialogBoxParam(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_CHOOSECOLUMNS),
         ParentWindowHandle,
         PhpColumnsDlgProc,
-        (LPARAM)&context
+        &context
         );
 
     PhDereferenceObject(context.Columns);
@@ -108,21 +108,6 @@ static ULONG IndexOfStringInList(
     }
 
     return ULONG_MAX;
-}
-
-static HFONT PhpColumnsGetCurrentFont(
-    VOID
-    )
-{
-    NONCLIENTMETRICS metrics = { sizeof(NONCLIENTMETRICS) };
-    HFONT font;
-
-    if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, &metrics, 0))
-        font = CreateFontIndirect(&metrics.lfMessageFont);
-    else
-        font = NULL;
-
-    return font;
 }
 
 VOID PhpColumnsResetListBox(
@@ -197,9 +182,12 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
             ULONG total;
             ULONG i;
             PPH_LIST displayOrderList = NULL;
+            LONG dpiValue;
 
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
             PhSetApplicationWindowIcon(hwndDlg);
+
+            dpiValue = PhGetWindowDpi(hwndDlg);
 
             context->InactiveWindowHandle = GetDlgItem(hwndDlg, IDC_INACTIVE);
             context->ActiveWindowHandle = GetDlgItem(hwndDlg, IDC_ACTIVE);
@@ -207,15 +195,15 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
             context->SearchActiveHandle = GetDlgItem(hwndDlg, IDC_FILTER);
             context->InactiveListArray = PhCreateList(1);
             context->ActiveListArray = PhCreateList(1);
-            context->ControlFont = PhpColumnsGetCurrentFont();
+            context->ControlFont = PhCreateMessageFont(dpiValue);
             context->InactiveSearchboxText = PhReferenceEmptyString();
             context->ActiveSearchboxText = PhReferenceEmptyString();
 
             PhCreateSearchControl(hwndDlg, context->SearchInactiveHandle, L"Inactive columns...");
             PhCreateSearchControl(hwndDlg, context->SearchActiveHandle, L"Active columns...");
 
-            ListBox_SetItemHeight(context->InactiveWindowHandle, 0, PH_SCALE_DPI(16));
-            ListBox_SetItemHeight(context->ActiveWindowHandle, 0, PH_SCALE_DPI(16));
+            ListBox_SetItemHeight(context->InactiveWindowHandle, 0, PhGetDpi(16, dpiValue));
+            ListBox_SetItemHeight(context->ActiveWindowHandle, 0, PhGetDpi(16, dpiValue));
 
             Button_Enable(GetDlgItem(hwndDlg, IDC_HIDE), FALSE);
             Button_Enable(GetDlgItem(hwndDlg, IDC_SHOW), FALSE);
@@ -334,6 +322,15 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
                 PhDereferenceObject(context->ActiveSearchboxText);
 
             PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            if (context->ControlFont) DeleteFont(context->ControlFont);
+            context->ControlFont = PhCreateMessageFont(LOWORD(wParam));
+
+            ListBox_SetItemHeight(context->InactiveWindowHandle, 0, PhGetDpi(16, LOWORD(wParam)));
+            ListBox_SetItemHeight(context->ActiveWindowHandle, 0, PhGetDpi(16, LOWORD(wParam)));
         }
         break;
     case WM_COMMAND:
@@ -656,6 +653,7 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
                  HDC bufferDc;
                  HBITMAP bufferBitmap;
                  HBITMAP oldBufferBitmap;
+                 HFONT oldFontHandle;
                  PPH_STRING string;
                  RECT bufferRect =
                  {
@@ -679,6 +677,7 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
 
                  bufferDc = CreateCompatibleDC(drawInfo->hDC);
                  bufferBitmap = CreateCompatibleBitmap(drawInfo->hDC, bufferRect.right, bufferRect.bottom);
+                 oldFontHandle = SelectFont(bufferDc, PhTreeWindowFont);
 
                  oldBufferBitmap = SelectBitmap(bufferDc, bufferBitmap);
                  SelectFont(bufferDc, context->ControlFont);
@@ -719,6 +718,7 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
                      SRCCOPY
                      );
 
+                 SelectFont(bufferDc, oldFontHandle);
                  SelectBitmap(bufferDc, oldBufferBitmap);
                  DeleteBitmap(bufferBitmap);
                  DeleteDC(bufferDc);

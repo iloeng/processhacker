@@ -126,8 +126,6 @@ INT_PTR CALLBACK PvpPeExtendedAttributesDlgProc(
     {
     case WM_INITDIALOG:
         {
-            HIMAGELIST listViewImageList;
-
             context->WindowHandle = hwndDlg;
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
 
@@ -139,12 +137,10 @@ INT_PTR CALLBACK PvpPeExtendedAttributesDlgProc(
             PhSetExtendedListView(context->ListViewHandle);
             PhLoadListViewColumnsFromSetting(L"ImageAttributesListViewColumns", context->ListViewHandle);
             PvConfigTreeBorders(context->ListViewHandle);
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, context->ListViewHandle, NULL, PH_ANCHOR_ALL);
-
-            if (listViewImageList = PhImageListCreate(2, 20, ILC_MASK | ILC_COLOR, 1, 1))
-                ListView_SetImageList(context->ListViewHandle, listViewImageList, LVSIL_SMALL);
 
             PvEnumerateFileExtendedAttributes(context->ListViewHandle);
 
@@ -157,7 +153,13 @@ INT_PTR CALLBACK PvpPeExtendedAttributesDlgProc(
 
             PhDeleteLayoutManager(&context->LayoutManager);
 
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
         }
         break;
     case WM_SHOWWINDOW:
@@ -225,7 +227,7 @@ INT_PTR CALLBACK PvpPeExtendedAttributesDlgProc(
                                     PPH_BYTES nameAnsi = NULL;
                                     INT index;
 
-                                    if ((index = PhFindListViewItemByFlags(context->ListViewHandle, -1, LVNI_SELECTED)) != -1)
+                                    if ((index = PhFindListViewItemByFlags(context->ListViewHandle, INT_ERROR, LVNI_SELECTED)) != INT_ERROR)
                                     {
                                         nameUtf = PhGetListViewItemText(context->ListViewHandle, index, 1);
                                     }

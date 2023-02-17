@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2016
- *     dmex    2015-2020
+ *     dmex    2015-2023
  *
  */
 
@@ -60,8 +60,8 @@ VOID DiskDrivesUpdate(
 
         if (NT_SUCCESS(PhCreateFile(
             &deviceHandle,
-            entry->Id.DevicePath,
-            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &entry->Id.DevicePath->sr,
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE, // (PhGetOwnTokenAttributes().Elevated ? FILE_GENERIC_READ : FILE_READ_ATTRIBUTES)
             FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             FILE_OPEN,
@@ -198,7 +198,7 @@ VOID DiskDriveUpdateDeviceInfo(
     _In_ PDV_DISK_ENTRY DiskEntry
     )
 {
-    if (!DiskEntry->DiskName || DiskEntry->DiskIndex == ULONG_MAX)
+    if (PhIsNullOrEmptyString(DiskEntry->DiskName) || DiskEntry->DiskIndex == ULONG_MAX)
     {
         HANDLE deviceHandle = NULL;
 
@@ -210,8 +210,8 @@ VOID DiskDriveUpdateDeviceInfo(
         {
             PhCreateFile(
                 &deviceHandle,
-                DiskEntry->Id.DevicePath,
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                &DiskEntry->Id.DevicePath->sr,
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE, // (PhGetOwnTokenAttributes().Elevated ? FILE_GENERIC_READ : FILE_READ_ATTRIBUTES)
                 FILE_ATTRIBUTE_NORMAL,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 FILE_OPEN,
@@ -221,7 +221,7 @@ VOID DiskDriveUpdateDeviceInfo(
 
         if (deviceHandle)
         {
-            if (!DiskEntry->DiskName)
+            if (PhIsNullOrEmptyString(DiskEntry->DiskName))
             {
                 PPH_STRING diskName = NULL;
 
@@ -288,15 +288,15 @@ PDV_DISK_ENTRY CreateDiskEntry(
     )
 {
     PDV_DISK_ENTRY entry;
+    ULONG sampleCount;
 
-    entry = PhCreateObject(sizeof(DV_DISK_ENTRY), DiskDriveEntryType);
-    memset(entry, 0, sizeof(DV_DISK_ENTRY));
-
+    entry = PhCreateObjectZero(sizeof(DV_DISK_ENTRY), DiskDriveEntryType);
     entry->DiskIndex = ULONG_MAX;
     CopyDiskId(&entry->Id, Id);
 
-    PhInitializeCircularBuffer_ULONG64(&entry->ReadBuffer, PhGetIntegerSetting(L"SampleCount"));
-    PhInitializeCircularBuffer_ULONG64(&entry->WriteBuffer, PhGetIntegerSetting(L"SampleCount"));
+    sampleCount = PhGetIntegerSetting(L"SampleCount");
+    PhInitializeCircularBuffer_ULONG64(&entry->ReadBuffer, sampleCount);
+    PhInitializeCircularBuffer_ULONG64(&entry->WriteBuffer, sampleCount);
 
     PhAcquireQueuedLockExclusive(&DiskDrivesListLock);
     PhAddItemList(DiskDrivesList, entry);

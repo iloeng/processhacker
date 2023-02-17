@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2011-2020
+ *     dmex    2011-2023
  *
  */
 
@@ -18,8 +18,8 @@
 #include <phappresource.h>
 #include <settings.h>
 
-#include <uxtheme.h>
-#include <vssym32.h>
+#include <malloc.h>
+#include <shobjidl.h>
 
 #include "resource.h"
 #include <toolstatusintf.h>
@@ -30,16 +30,17 @@
 #define SETTING_NAME_TOOLBAR_CONFIG (PLUGIN_NAME L".ToolbarButtonConfig")
 #define SETTING_NAME_TOOLBAR_GRAPH_CONFIG (PLUGIN_NAME L".ToolbarGraphConfig")
 #define SETTING_NAME_STATUSBAR_CONFIG (PLUGIN_NAME L".StatusbarConfig")
-//#define SETTING_NAME_TOOLBAR_THEME (PLUGIN_NAME L".ToolbarTheme")
+#define SETTING_NAME_DELAYED_INITIALIZATION_MAX (PLUGIN_NAME L".DelayConfig")
 #define SETTING_NAME_TOOLBARDISPLAYSTYLE (PLUGIN_NAME L".ToolbarDisplayStyle")
 #define SETTING_NAME_SEARCHBOXDISPLAYMODE (PLUGIN_NAME L".SearchBoxDisplayMode")
 #define SETTING_NAME_TASKBARDISPLAYSTYLE (PLUGIN_NAME L".TaskbarDisplayStyle")
 #define SETTING_NAME_SHOWSYSINFOGRAPH (PLUGIN_NAME L".ToolbarShowSystemInfoGraph")
+#define SETTING_NAME_RESTOREROWAFTERSEARCH (PLUGIN_NAME L".RestoreSelectionAfterSearch")
 
 #define MAX_DEFAULT_TOOLBAR_ITEMS 11
 #define MAX_DEFAULT_STATUSBAR_ITEMS 3
 #define MAX_TOOLBAR_ITEMS 13
-#define MAX_STATUSBAR_ITEMS 15
+#define MAX_STATUSBAR_ITEMS 16
 
 #define TIDC_FINDWINDOW (WM_APP + 1)
 #define TIDC_FINDWINDOWTHREAD (WM_APP + 2)
@@ -108,7 +109,8 @@ typedef union _TOOLSTATUS_CONFIG
         ULONG AutoHideMenu : 1;
         ULONG Reserved : 4;
         ULONG SearchAutoFocus : 1;
-        ULONG Spare : 20;
+        ULONG ToolBarLargeIcons : 1;
+        ULONG Spare : 19;
     };
 } TOOLSTATUS_CONFIG;
 
@@ -132,6 +134,7 @@ extern HACCEL AcceleratorTable;
 extern PPH_STRING SearchboxText;
 extern PH_PLUGIN_SYSTEM_STATISTICS SystemStatistics;
 
+extern SIZE ToolBarImageSize;
 extern HIMAGELIST ToolBarImageList;
 extern TBBUTTON ToolbarButtons[MAX_TOOLBAR_ITEMS];
 extern HFONT ToolbarWindowFont;
@@ -163,6 +166,10 @@ BOOLEAN RebarBandExists(
     );
 
 VOID ToolbarLoadSettings(
+    _In_ BOOLEAN DpiChanged
+    );
+
+VOID ToolbarRemoveButons(
     VOID
     );
 
@@ -175,7 +182,8 @@ PWSTR ToolbarGetText(
     );
 
 HBITMAP ToolbarGetImage(
-    _In_ INT CommandID
+    _In_ INT CommandID,
+    _In_ LONG DpiValue
     );
 
 VOID ToolbarLoadDefaultButtonSettings(
@@ -268,6 +276,13 @@ typedef struct _PH_TOOLBAR_GRAPH
     PH_GRAPH_STATE GraphState;
 } PH_TOOLBAR_GRAPH, *PPH_TOOLBAR_GRAPH;
 
+extern ULONG CpuHistoryGraphColor1;
+extern ULONG CpuHistoryGraphColor2;
+extern ULONG PhysicalHistoryGraphColor1;
+extern ULONG CommitHistoryGraph1Color1;
+extern ULONG IoHistoryGraphColor1;
+extern ULONG IoHistoryGraphColor2;
+
 VOID ToolbarGraphLoadSettings(
     VOID
     );
@@ -277,6 +292,10 @@ VOID ToolbarGraphSaveSettings(
     );
 
 VOID ToolbarGraphsInitialize(
+    VOID
+    );
+
+VOID ToolbarGraphsInitializeDpi(
     VOID
     );
 
@@ -362,13 +381,13 @@ VOID StatusBarUpdate(
     );
 
 VOID StatusBarShowMenu(
-    VOID
+    _In_ HWND WindowHandle
     );
 
 // customizetb.c
 
 VOID ToolBarShowCustomizeDialog(
-    VOID
+    _In_ HWND ParentWindowHandle
     );
 
 // customizesb.c
@@ -390,11 +409,12 @@ typedef enum _ID_STATUS
     ID_STATUS_NUMBEROFSELECTEDITEMS,
     ID_STATUS_INTERVALSTATUS,
     ID_STATUS_FREEMEMORY,
-    ID_STATUS_SELECTEDWORKINGSET
+    ID_STATUS_SELECTEDWORKINGSET,
+    ID_STATUS_SELECTEDPRIVATEBYTES,
 } ID_STATUS;
 
 VOID StatusBarShowCustomizeDialog(
-    VOID
+    _In_ HWND ParentWindowHandle
     );
 
 // Shared by customizetb.c and customizesb.c
@@ -424,11 +444,13 @@ typedef struct _CUSTOMIZE_CONTEXT
     HBRUSH BrushPushed;
     HBRUSH BrushHot;
     COLORREF TextColor;
+
+    LONG WindowDpi;
     INT CXWidth;
     INT ImageWidth;
     INT ImageHeight;
 
-    HWND DialogHandle;
+    HWND WindowHandle;
     HWND AvailableListHandle;
     HWND CurrentListHandle;
     HWND MoveUpButtonHandle;
@@ -439,7 +461,8 @@ typedef struct _CUSTOMIZE_CONTEXT
 
 HICON CustomizeGetToolbarIcon(
     _In_ PCUSTOMIZE_CONTEXT Context,
-    _In_ INT CommandID
+    _In_ INT CommandID,
+    _In_ LONG DpiValue
     );
 
 // searchbox.c
@@ -462,9 +485,38 @@ typedef enum _PH_TASKBAR_ICON
 
 extern PH_TASKBAR_ICON TaskbarListIconType;
 extern BOOLEAN TaskbarIsDirty;
+extern BOOLEAN TaskbarMainWndExiting;
 
-VOID NTAPI TaskbarUpdateGraphs(
+VOID NTAPI TaskbarInitialize(
     VOID
+    );
+
+VOID NTAPI TaskbarUpdateEvents(
+    VOID
+    );
+
+NTSTATUS TaskbarIconUpdateThread(
+    _In_opt_ PVOID Context
+    );
+
+HICON PhUpdateIconCpuHistory(
+    _In_ PH_PLUGIN_SYSTEM_STATISTICS Statistics
+    );
+
+HICON PhUpdateIconIoHistory(
+    _In_ PH_PLUGIN_SYSTEM_STATISTICS Statistics
+    );
+
+HICON PhUpdateIconCommitHistory(
+    _In_ PH_PLUGIN_SYSTEM_STATISTICS Statistics
+    );
+
+HICON PhUpdateIconPhysicalHistory(
+    _In_ PH_PLUGIN_SYSTEM_STATISTICS Statistics
+    );
+
+HICON PhUpdateIconCpuUsage(
+    _In_ PH_PLUGIN_SYSTEM_STATISTICS Statistics
     );
 
 #endif

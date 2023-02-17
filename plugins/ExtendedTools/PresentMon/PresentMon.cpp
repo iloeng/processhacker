@@ -48,7 +48,7 @@ static void CheckForTerminatedRealtimeProcesses(
             )
         {
             LARGE_INTEGER performanceCounter;
-            PhQueryPerformanceCounter(&performanceCounter, nullptr);
+            PhQueryPerformanceCounter(&performanceCounter);
             terminatedProcesses->emplace_back(processId, performanceCounter.QuadPart);
 
             PhClearReference(reinterpret_cast<PVOID*>(&processInfo->ProcessItem));
@@ -80,7 +80,7 @@ static void AddPresents(
     for (size_t n = presentEvents.size(); i < n; ++i)
     {
         auto presentEvent = presentEvents[i];
-        assert(presentEvent->Completed);
+        assert(presentEvent->IsCompleted);
 
         // Stop processing events if we hit the next stop time.
         if (checkStopQpc && presentEvent->QpcTime >= stopQpc)
@@ -407,7 +407,7 @@ NTSTATUS PresentMonOutputThread(
     for (auto& pair : ProcessesHashTable)
     {
        auto processInfo = &pair.second;
-    
+
        if (processInfo->ProcessItem)
        {
            PhClearReference(reinterpret_cast<PVOID*>(&processInfo->ProcessItem));

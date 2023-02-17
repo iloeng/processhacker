@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2015-2022
+ *     dmex    2015-2023
  *
  */
 
@@ -20,6 +20,9 @@ ULONG FwTreeNewSortColumn = FW_COLUMN_NAME;
 PH_SORT_ORDER FwTreeNewSortOrder = NoSortOrder;
 PH_STRINGREF FwTreeEmptyText = PH_STRINGREF_INIT(L"Firewall monitoring requires System Informer to be restarted with administrative privileges.");
 PPH_STRING FwTreeErrorText = NULL;
+LONG FwTreeIconHeightPadding = 0;
+LONG FwTreeLeftMarginPadding = 0;
+LONG FwTreeRightMarginPadding = 0;
 PPH_MAIN_TAB_PAGE EtFwAddedTabPage;
 PH_PROVIDER_EVENT_QUEUE FwNetworkEventQueue;
 PH_CALLBACK_REGISTRATION FwItemAddedRegistration;
@@ -31,7 +34,6 @@ PTOOLSTATUS_INTERFACE EtFwToolStatusInterface;
 PH_CALLBACK_REGISTRATION EtFwSearchChangedRegistration;
 BOOLEAN EtFwEnabled = FALSE;
 ULONG EtFwStatus = ERROR_SUCCESS;
-ULONG EtFwIconWidth = 16;
 PPH_STRING EtFwStatusText = NULL;
 PPH_LIST FwNodeList = NULL;
 
@@ -80,7 +82,6 @@ BOOLEAN FwTabPageCallback(
                 return FALSE;
 
             FwTreeNewCreated = TRUE;
-            EtFwIconWidth = GetSystemMetrics(SM_CXSMICON);
 
             if (PhGetIntegerSetting(L"EnableThemeSupport"))
             {
@@ -204,6 +205,14 @@ BOOLEAN FwTabPageCallback(
                 SendMessage(FwTreeNewHandle, WM_SETFONT, (WPARAM)Parameter1, TRUE);
         }
         break;
+    case MainTabPageDpiChanged:
+        {
+            if (FwTreeNewHandle)
+            {
+                InitializeFwTreeListDpi(FwTreeNewHandle);
+            }
+        }
+        break;
     }
 
     return FALSE;
@@ -244,6 +253,8 @@ VOID InitializeFwTreeList(
 {
     FwNodeList = PhCreateList(100);
     FwTreeNewHandle = TreeNewHandle;
+
+    InitializeFwTreeListDpi(FwTreeNewHandle);
 
     PhSetControlTheme(FwTreeNewHandle, L"explorer");
     TreeNew_SetCallback(FwTreeNewHandle, FwTreeNewCallback, NULL);
@@ -286,6 +297,20 @@ VOID InitializeFwTreeList(
     }
 }
 
+VOID InitializeFwTreeListDpi(
+    _In_ HWND TreeNewHandle
+    )
+{
+#define TNP_CELL_LEFT_MARGIN 6
+#define TNP_ICON_RIGHT_PADDING 4
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(TreeNewHandle);
+    FwTreeIconHeightPadding = PhGetSystemMetrics(SM_CYSMICON, dpiValue);
+    FwTreeLeftMarginPadding = PhGetDpi(TNP_CELL_LEFT_MARGIN, dpiValue);
+    FwTreeRightMarginPadding = PhGetSystemMetrics(SM_CXSMICON, dpiValue) + PhGetDpi(TNP_ICON_RIGHT_PADDING, dpiValue);
+}
+
 VOID LoadSettingsFwTreeList(
     _In_ HWND TreeNewHandle
     )
@@ -310,7 +335,7 @@ VOID SaveSettingsFwTreeList(
     ULONG sortColumn;
     PH_SORT_ORDER sortOrder;
 
-    if (!FwTreeNewCreated)  
+    if (!FwTreeNewCreated)
         return;
 
     settings = PhCmSaveSettings(TreeNewHandle);
@@ -386,7 +411,7 @@ VOID FwTickNodes(
 
             oldList = FwNodeList;
             FwNodeList = newList;
-            EtFwFilterSupport.NodeList = newList; // HACK 
+            EtFwFilterSupport.NodeList = newList; // HACK
             PhDereferenceObject(oldList);
             lastTickCount = tickCount;
         }
@@ -457,13 +482,34 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddress)
 {
-    sortResult = PhCompareStringZ(node1->LocalAddressString, node2->LocalAddressString, TRUE);
+    SOCKADDR_IN6 localAddress1 = { 0 };
+    SOCKADDR_IN6 localAddress2 = { 0 };
+
+    if (node1->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    {
+        IN6ADDR_SETV4MAPPED(&localAddress1, &node1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+    }
+    else if (node1->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&localAddress1, &node1->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
+    }
+
+    if (node2->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    {
+        IN6ADDR_SETV4MAPPED(&localAddress2, &node2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+    }
+    else if (node2->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&localAddress2, &node2->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node2->ScopeId }, 0);
+    }
+
+    sortResult = memcmp(&localAddress1, &localAddress2, sizeof(SOCKADDR_IN6));
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalPort)
 {
-    sortResult = PhCompareStringZ(node1->LocalPortString, node2->LocalPortString, TRUE);
+    sortResult = uintcmp(node1->LocalEndpoint.Port, node2->LocalEndpoint.Port);
 }
 END_SORT_FUNCTION
 
@@ -475,13 +521,34 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddress)
 {
-    sortResult = PhCompareStringZ(node1->RemoteAddressString, node2->RemoteAddressString, TRUE);
+    SOCKADDR_IN6 remoteAddress1 = { 0 };
+    SOCKADDR_IN6 remoteAddress2 = { 0 };
+
+    if (node1->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    {
+        IN6ADDR_SETV4MAPPED(&remoteAddress1, &node1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+    }
+    else if (node1->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&remoteAddress1, &node1->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
+    }
+
+    if (node2->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    {
+        IN6ADDR_SETV4MAPPED(&remoteAddress2, &node2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+    }
+    else if (node2->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&remoteAddress2, &node2->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node2->ScopeId }, 0);
+    }
+
+    sortResult = memcmp(&remoteAddress1, &remoteAddress2, sizeof(SOCKADDR_IN6));
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemotePort)
 {
-    sortResult = PhCompareStringZ(node1->RemotePortString, node2->RemotePortString, TRUE);
+    sortResult = uintcmp(node1->RemoteEndpoint.Port, node2->RemoteEndpoint.Port);
 }
 END_SORT_FUNCTION
 
@@ -562,15 +629,15 @@ int __cdecl EtFwNodeNoOrderSortFunction(
     int sortResult = 0;
 
     sortResult = uint64cmp(node1->Index, node2->Index);
-    
+
     return PhModifySort(sortResult, DescendingSortOrder);
 }
 
 BOOLEAN NTAPI FwTreeNewCallback(
     _In_ HWND WindowHandle,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     )
 {
@@ -581,10 +648,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PFW_EVENT_ITEM)getChildren->Node;
 
             if (FwTreeNewSortOrder == NoSortOrder)
@@ -647,19 +710,12 @@ BOOLEAN NTAPI FwTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = (PPH_TREENEW_IS_LEAF)Parameter1;
 
-            if (!isLeaf)
-                break;
-
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
     case TreeNewGetCellText:
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = (PPH_TREENEW_GET_CELL_TEXT)Parameter1;
-
-            if (!getCellText)
-                break;
-
             node = (PFW_EVENT_ITEM)getCellText->Node;
 
             switch (getCellText->Id)
@@ -680,7 +736,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                     case FWPM_NET_EVENT_TYPE_CAPABILITY_DROP:
                         PhInitializeStringRef(&getCellText->Text, L"DROP");
                         break;
-                    case FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW:    
+                    case FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW:
                     case FWPM_NET_EVENT_TYPE_CAPABILITY_ALLOW:
                         PhInitializeStringRef(&getCellText->Text, L"ALLOW");
                         break;
@@ -729,7 +785,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                 {
                     getCellText->Text = PhGetStringRef(node->RuleName);
                 }
-                break; 
+                break;
             case FW_COLUMN_RULEDESCRIPTION:
                 {
                     getCellText->Text = PhGetStringRef(node->RuleDescription);
@@ -1069,10 +1125,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
     case TreeNewGetNodeIcon:
         {
             PPH_TREENEW_GET_NODE_ICON getNodeIcon = (PPH_TREENEW_GET_NODE_ICON)Parameter1;
-
-            if (!getNodeIcon)
-                break;
-
             node = (PFW_EVENT_ITEM)getNodeIcon->Node;
 
             getNodeIcon->Flags = TN_CACHE;
@@ -1081,10 +1133,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = (PPH_TREENEW_GET_NODE_COLOR)Parameter1;
-
-            if (!getNodeColor)
-                break;
-
             node = (PFW_EVENT_ITEM)getNodeColor->Node;
 
             switch (node->Type)
@@ -1111,9 +1159,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
     case TreeNewKeyDown:
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
-
-            if (!keyEvent)
-                break;
 
             switch (keyEvent->VirtualKey)
             {
@@ -1159,9 +1204,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
         {
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
 
-            if (!contextMenuEvent)
-                break;
-
             ShowFwContextMenu(WindowHandle, contextMenuEvent);
         }
         return TRUE;
@@ -1172,14 +1214,9 @@ BOOLEAN NTAPI FwTreeNewCallback(
         return TRUE;
     case TreeNewCustomDraw:
         {
-            #define TNP_CELL_LEFT_MARGIN 6
-            #define TNP_ICON_RIGHT_PADDING 4
             PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
             HDC hdc;
             RECT rect;
-
-            if (!customDraw)
-                break;
 
             hdc = customDraw->Dc;
             rect = customDraw->CellRect;
@@ -1189,11 +1226,11 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
                 if (node->RemoteCountryName)
                 {
-                    if (node->CountryIconIndex != INT_MAX)
+                    if (node->CountryIconIndex != INT_ERROR)
                     {
-                        rect.left += TNP_CELL_LEFT_MARGIN;
+                        rect.left += FwTreeLeftMarginPadding;
                         EtFwDrawCountryIcon(hdc, rect, node->CountryIconIndex);
-                        rect.left += 16 + TNP_ICON_RIGHT_PADDING;
+                        rect.left += FwTreeRightMarginPadding;
                     }
 
                     DrawText(
@@ -1218,20 +1255,20 @@ BOOLEAN NTAPI FwTreeNewCallback(
             }
 
             // Padding
-            rect.left += TNP_CELL_LEFT_MARGIN;
+            rect.left += FwTreeLeftMarginPadding;
 
             PhImageListDrawIcon(
                 PhGetProcessSmallImageList(),
                 (ULONG)(ULONG_PTR)node->ProcessIconIndex, // HACK (dmex)
                 hdc,
                 rect.left,
-                rect.top + ((rect.bottom - rect.top) - 16) / 2,
+                rect.top + ((rect.bottom - rect.top) - FwTreeIconHeightPadding) / 2,
                 ILD_NORMAL | ILD_TRANSPARENT,
                 FALSE
                 );
 
             // Padding
-            rect.left += EtFwIconWidth + TNP_ICON_RIGHT_PADDING;
+            rect.left += FwTreeRightMarginPadding;
 
             if (PhIsNullOrEmptyString(node->ProcessBaseString))
             {
@@ -1355,7 +1392,7 @@ VOID EtFwWriteFwList(
         PPH_STRING line;
 
         line = lines->Items[i];
-        
+
         PhWriteStringAsUtf8FileStream(FileStream, &line->sr);
         PhDereferenceObject(line);
         PhWriteStringAsUtf8FileStream2(FileStream, L"\r\n");
@@ -1386,7 +1423,7 @@ VOID EtFwHandleFwCommand(
 
             if (entry = EtFwGetSelectedFwItem())
             {
-                EtFwShowPingWindow(entry->RemoteEndpoint);
+                EtFwShowPingWindow(GetParent(TreeWindowHandle), entry->RemoteEndpoint);
             }
         }
         break;
@@ -1396,7 +1433,7 @@ VOID EtFwHandleFwCommand(
 
             if (entry = EtFwGetSelectedFwItem())
             {
-                EtFwShowTracerWindow(entry->RemoteEndpoint);
+                EtFwShowTracerWindow(GetParent(TreeWindowHandle), entry->RemoteEndpoint);
             }
         }
         break;
@@ -1406,7 +1443,7 @@ VOID EtFwHandleFwCommand(
 
             if (entry = EtFwGetSelectedFwItem())
             {
-                EtFwShowWhoisWindow(entry->RemoteEndpoint);
+                EtFwShowWhoisWindow(GetParent(TreeWindowHandle), entry->RemoteEndpoint);
             }
         }
         break;
@@ -1433,7 +1470,7 @@ VOID EtFwHandleFwCommand(
             {
                 if (
                     !PhIsNullOrEmptyString(entry->ProcessFileName) &&
-                    PhDoesFileExists(entry->ProcessFileName)
+                    PhDoesFileExist(&entry->ProcessFileName->sr)
                     )
                 {
                     PhShellExecuteUserString(
@@ -1474,7 +1511,7 @@ VOID InitializeFwMenu(
         }
         else
         {
-            if (!PhDoesFileExists(FwItems[0]->ProcessFileName))
+            if (!PhDoesFileExist(&FwItems[0]->ProcessFileName->sr))
             {
                 PhEnableEMenuItem(Menu, ID_DISK_OPENFILELOCATION, FALSE);
                 PhEnableEMenuItem(Menu, ID_DISK_INSPECT, FALSE);
@@ -1559,7 +1596,7 @@ VOID ShowFwContextMenu(
 
         if (item = PhShowEMenu(
             menu,
-            PhMainWndHandle,
+            TreeWindowHandle,
             PH_EMENU_SHOW_LEFTRIGHT,
             PH_ALIGN_LEFT | PH_ALIGN_TOP,
             ContextMenuEvent->Location.x,
@@ -1577,14 +1614,11 @@ VOID ShowFwContextMenu(
 }
 
 VOID NTAPI FwItemAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PFW_EVENT_ITEM fwItem = (PFW_EVENT_ITEM)Parameter;
-
-    if (!fwItem)
-        return;
 
     PhReferenceObject(fwItem);
     PhPushProviderEventQueue(&FwNetworkEventQueue, ProviderAddedEvent, Parameter, FwRunCount);

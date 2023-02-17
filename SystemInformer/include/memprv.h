@@ -64,6 +64,8 @@ typedef struct _PH_MEMORY_ITEM
         };
     };
 
+    WCHAR BaseAddressString[PH_PTR_STR_LEN_1];
+
     struct _PH_MEMORY_ITEM *AllocationBaseItem;
 
     SIZE_T CommittedSize;
@@ -148,9 +150,10 @@ PhLookupMemoryItemList(
     _In_ PVOID Address
     );
 
-#define PH_QUERY_MEMORY_IGNORE_FREE 0x1
-#define PH_QUERY_MEMORY_REGION_TYPE 0x2
-#define PH_QUERY_MEMORY_WS_COUNTERS 0x4
+#define PH_QUERY_MEMORY_IGNORE_FREE        0x1
+#define PH_QUERY_MEMORY_REGION_TYPE        0x2
+#define PH_QUERY_MEMORY_WS_COUNTERS        0x4
+#define PH_QUERY_MEMORY_ZERO_PAD_ADDRESSES 0x8
 
 PHAPPAPI
 NTSTATUS

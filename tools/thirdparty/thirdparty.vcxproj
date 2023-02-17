@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM64">
@@ -73,8 +73,6 @@
     <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -116,18 +114,17 @@
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>None</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <Lib>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>
-      </AdditionalDependencies>
       <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
     </Lib>
   </ItemDefinitionGroup>
@@ -139,7 +136,7 @@
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>None</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -147,11 +144,10 @@
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <Lib>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>
-      </AdditionalDependencies>
       <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
     </Lib>
   </ItemDefinitionGroup>
@@ -163,7 +159,7 @@
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>None</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpplatest</LanguageStandard>
@@ -194,13 +190,11 @@
       <IntelJCCErratum>true</IntelJCCErratum>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /d1nodatetime /d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
       <WholeProgramOptimization>true</WholeProgramOptimization>
     </ClCompile>
     <Lib>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>
-      </AdditionalDependencies>
       <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
     </Lib>
   </ItemDefinitionGroup>
@@ -222,13 +216,11 @@
       <IntelJCCErratum>true</IntelJCCErratum>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /d1nodatetime /d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
       <WholeProgramOptimization>true</WholeProgramOptimization>
     </ClCompile>
     <Lib>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>
-      </AdditionalDependencies>
       <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
     </Lib>
   </ItemDefinitionGroup>
@@ -248,7 +240,7 @@
       <ControlFlowGuard>Guard</ControlFlowGuard>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /d1nodatetime /d1trimfile:"$(SolutionDir)\" %(AdditionalOptions)</AdditionalOptions>
       <WholeProgramOptimization>true</WholeProgramOptimization>
     </ClCompile>
     <Lib>
@@ -302,26 +294,14 @@
     <ClCompile Include="capstone\MCRegisterInfo.c" />
     <ClCompile Include="capstone\SStream.c" />
     <ClCompile Include="capstone\utils.c" />
-    <ClCompile Include="gzip\adler32.c" />
-    <ClCompile Include="gzip\compress.c" />
-    <ClCompile Include="gzip\crc32.c" />
-    <ClCompile Include="gzip\deflate.c" />
-    <ClCompile Include="gzip\gzclose.c" />
-    <ClCompile Include="gzip\gzlib.c" />
-    <ClCompile Include="gzip\gzread.c" />
-    <ClCompile Include="gzip\gzwrite.c" />
-    <ClCompile Include="gzip\infback.c" />
-    <ClCompile Include="gzip\inffast.c" />
-    <ClCompile Include="gzip\inflate.c" />
-    <ClCompile Include="gzip\inftrees.c" />
-    <ClCompile Include="gzip\ioapi.c" />
-    <ClCompile Include="gzip\iowin32.c" />
-    <ClCompile Include="gzip\mztools.c" />
-    <ClCompile Include="gzip\trees.c" />
-    <ClCompile Include="gzip\uncompr.c" />
-    <ClCompile Include="gzip\unzip.c" />
-    <ClCompile Include="gzip\zip.c" />
-    <ClCompile Include="gzip\zutil.c" />
+    <ClCompile Include="detours\detours.cpp" />
+    <ClCompile Include="detours\disasm.cpp" />
+    <ClCompile Include="detours\disolarm.cpp" />
+    <ClCompile Include="detours\disolarm64.cpp" />
+    <ClCompile Include="detours\disolia64.cpp" />
+    <ClCompile Include="detours\disolx64.cpp" />
+    <ClCompile Include="detours\disolx86.cpp" />
+    <ClCompile Include="detours\modules.cpp" />
     <ClCompile Include="jsonc\arraylist.c" />
     <ClCompile Include="jsonc\debug.c" />
     <ClCompile Include="jsonc\json_c_version.c" />
@@ -385,6 +365,7 @@
     <ClCompile Include="tlsh\tlsh_impl.cpp" />
     <ClCompile Include="tlsh\tlsh_util.cpp" />
     <ClCompile Include="tlsh\tlsh_wrapper.cpp" />
+    <ClCompile Include="zydis\Zydis.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="capstone\arch\AArch64\AArch64AddressingModes.h" />
@@ -459,23 +440,7 @@
     <ClInclude Include="capstone\MCRegisterInfo.h" />
     <ClInclude Include="capstone\SStream.h" />
     <ClInclude Include="capstone\utils.h" />
-    <ClInclude Include="gzip\crc32.h" />
-    <ClInclude Include="gzip\crypt.h" />
-    <ClInclude Include="gzip\deflate.h" />
-    <ClInclude Include="gzip\gzguts.h" />
-    <ClInclude Include="gzip\inffast.h" />
-    <ClInclude Include="gzip\inffixed.h" />
-    <ClInclude Include="gzip\inflate.h" />
-    <ClInclude Include="gzip\inftrees.h" />
-    <ClInclude Include="gzip\ioapi.h" />
-    <ClInclude Include="gzip\iowin32.h" />
-    <ClInclude Include="gzip\mztools.h" />
-    <ClInclude Include="gzip\trees.h" />
-    <ClInclude Include="gzip\unzip.h" />
-    <ClInclude Include="gzip\zconf.h" />
-    <ClInclude Include="gzip\zip.h" />
-    <ClInclude Include="gzip\zlib.h" />
-    <ClInclude Include="gzip\zutil.h" />
+    <ClInclude Include="detours\detours.h" />
     <ClInclude Include="jsonc\arraylist.h" />
     <ClInclude Include="jsonc\config.h" />
     <ClInclude Include="jsonc\debug.h" />
@@ -524,6 +489,7 @@
     <ClInclude Include="tlsh\tlsh_win_version.h" />
     <ClInclude Include="tlsh\tlsh_wrapper.h" />
     <ClInclude Include="tlsh\win_version.h" />
+    <ClInclude Include="zydis\Zydis.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="capstone\arch\AArch64\AArch64GenAsmWriter.inc" />
@@ -581,6 +547,4 @@
     <None Include="capstone\arch\XCore\XCoreMappingInsn.inc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-  </ImportGroup>
 </Project>

@@ -150,7 +150,7 @@ VOID PhUiAnalyzeWaitThread(
         processHandle,
         &clientId,
         SymbolProvider,
-        PH_WALK_I386_STACK,
+        PH_WALK_USER_WOW64_STACK,
         PhpWalkThreadStackAnalyzeCallback,
         &context
         );
@@ -987,7 +987,6 @@ PPH_STRING PhpaGetAlpcInformation(
     _In_ HANDLE ThreadId
     )
 {
-#if (PHNT_VERSION >= PHNT_WIN7)
     NTSTATUS status;
     PPH_STRING string = NULL;
     HANDLE threadHandle;
@@ -1028,7 +1027,4 @@ PPH_STRING PhpaGetAlpcInformation(
     NtClose(threadHandle);
 
     return string;
-#else
-    return NULL;
-#endif
 }

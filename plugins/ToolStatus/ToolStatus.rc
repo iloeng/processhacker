@@ -1,5 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
+#pragma code_page(65001)
+
 #include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
@@ -12,11 +14,10 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// English (Australia) resources
+// Neutral resources
 
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENA)
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
-#pragma code_page(1252)
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEU)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -62,8 +63,10 @@ BEGIN
     CONTROL         "Enable auto focus to search box",IDC_ENABLE_AUTOFOCUS_SEARCH,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,81,113,10
     LTEXT           "Note: Right-click the toolbar on the main window to customize the icons and graphs.",IDC_STATIC,7,7,157,18
-    COMBOBOX        IDC_CURRENT,7,115,119,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Select the graph for the taskbar window icon:",IDC_STATIC,7,104,147,8
+    COMBOBOX        IDC_CURRENT,7,121,119,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Select the graph for the taskbar window icon:",IDC_STATIC,7,110,147,8
+    CONTROL         "Enable large toolbar icons",IDC_ENABLE_LARGETOOLBARICON,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,94,98,10
 END
 
 IDD_CUSTOMIZE_TB DIALOGEX 0, 0, 369, 188
@@ -159,23 +162,41 @@ END
 // PNG
 //
 
-IDB_APPLICATION_GET_MODERN PNG                     "resources\\application_get_modern.png"
+IDB_ARROW_REFRESH_MODERN_LIGHT PNG                     "resources\\arrow_refresh_modern_light.png"
 
-IDB_APPLICATION_GO_MODERN PNG                     "resources\\application_go_modern.png"
+IDB_ARROW_REFRESH_MODERN_DARK PNG                     "resources\\arrow_refresh_modern_dark.png"
 
-IDB_APPLICATION_MODERN  PNG                     "resources\\application_modern.png"
+IDB_COG_EDIT_MODERN_LIGHT PNG                     "resources\\cog_edit_modern_light.png"
 
-IDB_ARROW_REFRESH_MODERN PNG                     "resources\\arrow_refresh_modern.png"
+IDB_COG_EDIT_MODERN_DARK PNG                     "resources\\cog_edit_modern_dark.png"
 
-IDB_CHART_LINE_MODERN   PNG                     "resources\\chart_line_modern.png"
+IDB_FIND_MODERN_LIGHT   PNG                     "resources\\find_modern_light.png"
 
-IDB_COG_EDIT_MODERN     PNG                     "resources\\cog_edit_modern.png"
+IDB_FIND_MODERN_DARK    PNG                     "resources\\find_modern_dark.png"
 
-IDB_CROSS_MODERN        PNG                     "resources\\cross_modern.png"
+IDB_CHART_LINE_MODERN_LIGHT PNG                     "resources\\chart_line_modern_light.png"
 
-IDB_FIND_MODERN         PNG                     "resources\\find_modern.png"
+IDB_CHART_LINE_MODERN_DARK PNG                     "resources\\chart_line_modern_dark.png"
 
-IDB_POWER_MODERN        PNG                     "resources\\lightbulb_off_modern.png"
+IDB_TBAPPLICATION_MODERN_LIGHT PNG                     "resources\\application_modern_light.png"
+
+IDB_TBAPPLICATION_MODERN_DARK PNG                     "resources\\application_modern_dark.png"
+
+IDB_APPLICATION_GO_MODERN_LIGHT PNG                     "resources\\application_go_modern_light.png"
+
+IDB_APPLICATION_GO_MODERN_DARK PNG                     "resources\\application_go_modern_dark.png"
+
+IDB_CROSS_MODERN_LIGHT  PNG                     "resources\\cross_modern_light.png"
+
+IDB_CROSS_MODERN_DARK   PNG                     "resources\\cross_modern_dark.png"
+
+IDB_APPLICATION_GET_MODERN_LIGHT PNG                     "resources\\application_get_modern_light.png"
+
+IDB_APPLICATION_GET_MODERN_DARK PNG                     "resources\\application_get_modern_dark.png"
+
+IDB_LIGHTBULB_OFF_MODERN_LIGHT PNG                     "resources\\lightbulb_off_modern_light.png"
+
+IDB_LIGHTBULB_OFF_MODERN_DARK PNG                     "resources\\lightbulb_off_modern_dark.png"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -206,15 +227,43 @@ IDI_LIGHTBULB_OFF       ICON                    "resources\\lightbulb_off.ico"
 
 /////////////////////////////////////////////////////////////////////////////
 //
-// AFX_DIALOG_LAYOUT
+// Version
 //
 
-IDD_OPTIONS AFX_DIALOG_LAYOUT
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 3,0,0,0
+ PRODUCTVERSION 3,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
 BEGIN
-    0
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName", "System Informer"
+            VALUE "FileDescription", "System Informer"
+            VALUE "FileVersion", "3.0.0.0"
+            VALUE "InternalName", "ToolStatus.dll"
+            VALUE "LegalCopyright", "Copyright (c) Winsider Seminars & Solutions, Inc.  All rights reserved."
+            VALUE "OriginalFilename", "ToolStatus.dll"
+            VALUE "ProductName", "System Informer"
+            VALUE "ProductVersion", "3.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
 END
 
-#endif    // English (Australia) resources
+#endif    // Neutral resources
 /////////////////////////////////////////////////////////////////////////////
 
 

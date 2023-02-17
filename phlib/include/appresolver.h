@@ -12,9 +12,7 @@
 #ifndef _PH_APPRESOLVER_H
 #define _PH_APPRESOLVER_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+EXTERN_C_START
 
 _Success_(return)
 BOOLEAN PhAppResolverGetAppIdForProcess(
@@ -29,7 +27,7 @@ BOOLEAN PhAppResolverGetAppIdForWindow(
     );
 
 HRESULT PhAppResolverActivateAppId(
-    _In_ PPH_STRING AppUserModelId,
+    _In_ PPH_STRING ApplicationUserModelId,
     _In_opt_ PWSTR CommandLine,
     _Out_opt_ HANDLE *ProcessId
     );
@@ -60,14 +58,6 @@ PPH_STRING PhGetAppContainerPackageName(
     _In_ PSID Sid
     );
 
-PPH_STRING PhGetProcessPackageFullName(
-    _In_ HANDLE ProcessHandle
-    );
-
-BOOLEAN PhIsTokenFullTrustAppPackage(
-    _In_ HANDLE TokenHandle
-    );
-
 BOOLEAN PhIsPackageCapabilitySid(
     _In_ PSID AppContainerSid,
     _In_ PSID Sid
@@ -79,6 +69,28 @@ PPH_STRING PhGetPackagePath(
 
 PPH_LIST PhGetPackageAssetsFromResourceFile(
     _In_ PWSTR FilePath
+    );
+
+typedef struct _PH_APPUSERMODELID_ENUM_ENTRY
+{
+    PPH_STRING AppUserModelId;
+    PPH_STRING DisplayName;
+    PPH_STRING PackageInstallPath;
+    PPH_STRING PackageFullName;
+    PPH_STRING SmallLogoPath;
+} PH_APPUSERMODELID_ENUM_ENTRY, *PPH_APPUSERMODELID_ENUM_ENTRY;
+
+PPH_LIST PhEnumerateApplicationUserModelIds(
+    VOID
+    );
+
+_Success_(return)
+BOOLEAN PhAppResolverGetPackageIcon(
+    _In_ HANDLE ProcessId,
+    _In_ PPH_STRING PackageFullName,
+    _Out_opt_ HICON* IconLarge,
+    _Out_opt_ HICON* IconSmall,
+    _In_ LONG SystemDpi
     );
 
 // Immersive PLM task support
@@ -97,8 +109,17 @@ HRESULT PhAppResolverEndCrashDumpTask(
     _In_ HANDLE TaskHandle
     );
 
-#ifdef __cplusplus
-}
-#endif
+// Desktop Bridge
+
+HRESULT PhCreateProcessDesktopPackage(
+    _In_ PWSTR ApplicationUserModelId,
+    _In_ PWSTR Executable,
+    _In_ PWSTR Arguments,
+    _In_ BOOLEAN PreventBreakaway,
+    _In_opt_ HANDLE ParentProcessId,
+    _Out_opt_ PHANDLE ProcessHandle
+    );
+
+EXTERN_C_END
 
 #endif

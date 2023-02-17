@@ -1,9 +1,21 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2015-2016
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_SECEDIT_H
 #define _PH_SECEDIT_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+EXTERN_C_START
+
+extern BOOLEAN PhEnableSecurityAdvancedDialog;
 
 typedef struct _PSP *HPROPSHEETPAGE;
 
@@ -179,8 +191,6 @@ PhGetAccessString(
     _In_ ULONG NumberOfAccessEntries
     );
 
-#ifdef __cplusplus
-}
-#endif
+EXTERN_C_END
 
 #endif

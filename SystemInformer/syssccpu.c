@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -59,8 +59,8 @@ static HWND CpuPanelLatencyLabel;
 BOOLEAN PhSipCpuSectionCallback(
     _In_ PPH_SYSINFO_SECTION Section,
     _In_ PH_SYSINFO_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     switch (Message)
@@ -94,7 +94,7 @@ BOOLEAN PhSipCpuSectionCallback(
 
             if (view == SysInfoSummaryView || section != Section)
                 return TRUE;
-            
+
             if (OneGraphPerCpu)
             {
                 for (ULONG i = 0; i < NumberOfProcessors; i++)
@@ -122,9 +122,6 @@ BOOLEAN PhSipCpuSectionCallback(
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = Parameter1;
 
-            if (!createDialog)
-                break;
-
             createDialog->Instance = PhInstanceHandle;
             createDialog->Template = MAKEINTRESOURCE(IDD_SYSINFO_CPU);
             createDialog->DialogProc = PhSipCpuDialogProc;
@@ -134,11 +131,8 @@ BOOLEAN PhSipCpuSectionCallback(
         {
             PPH_GRAPH_DRAW_INFO drawInfo = Parameter1;
 
-            if (!drawInfo)
-                break;
-
-            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_USE_LINE_2 | (PhCsEnableScaleCpuGraph ? PH_GRAPH_LABEL_MAX_Y : 0);
-            Section->Parameters->ColorSetupFunction(drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser);
+            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_USE_LINE_2 | PH_GRAPH_LABEL_MAX_Y;
+            Section->Parameters->ColorSetupFunction(drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser, Section->Parameters->WindowDpi);
             PhGetDrawInfoGraphBuffers(&Section->GraphState.Buffers, drawInfo, PhCpuKernelHistory.Count);
 
             if (!Section->GraphState.Valid)
@@ -146,7 +140,7 @@ BOOLEAN PhSipCpuSectionCallback(
                 PhCopyCircularBuffer_FLOAT(&PhCpuKernelHistory, Section->GraphState.Data1, drawInfo->LineDataCount);
                 PhCopyCircularBuffer_FLOAT(&PhCpuUserHistory, Section->GraphState.Data2, drawInfo->LineDataCount);
 
-                if (PhCsEnableScaleCpuGraph)
+                if (PhCsEnableGraphMaxScale)
                 {
                     FLOAT max = 0;
 
@@ -167,6 +161,11 @@ BOOLEAN PhSipCpuSectionCallback(
                     drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
                     drawInfo->LabelYFunctionParameter = max;
                 }
+                else
+                {
+                    drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
+                    drawInfo->LabelYFunctionParameter = 1.0f;
+                }
 
                 Section->GraphState.Valid = TRUE;
             }
@@ -177,7 +176,7 @@ BOOLEAN PhSipCpuSectionCallback(
             PPH_SYSINFO_GRAPH_GET_TOOLTIP_TEXT getTooltipText = Parameter1;
             FLOAT cpuKernel;
             FLOAT cpuUser;
-            PH_FORMAT format[5];
+            PH_FORMAT format[9];
 
             if (!getTooltipText)
                 break;
@@ -185,12 +184,16 @@ BOOLEAN PhSipCpuSectionCallback(
             cpuKernel = PhGetItemCircularBuffer_FLOAT(&PhCpuKernelHistory, getTooltipText->Index);
             cpuUser = PhGetItemCircularBuffer_FLOAT(&PhCpuUserHistory, getTooltipText->Index);
 
-            // %.2f%%%s\n%s
+            // %.2f%% (K: %.2f%%, U: %.2f%%)\n%s\n%s
             PhInitFormatF(&format[0], ((DOUBLE)cpuKernel + cpuUser) * 100, PhMaxPrecisionUnit);
-            PhInitFormatC(&format[1], L'%');
-            PhInitFormatSR(&format[2], PH_AUTO_T(PH_STRING, PhSipGetMaxCpuString(getTooltipText->Index))->sr);
-            PhInitFormatC(&format[3], L'\n');
-            PhInitFormatSR(&format[4], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
+            PhInitFormatS(&format[1], L"% (K: ");
+            PhInitFormatF(&format[2], (DOUBLE)cpuKernel * 100, PhMaxPrecisionUnit);
+            PhInitFormatS(&format[3], L"%, U: ");
+            PhInitFormatF(&format[4], (DOUBLE)cpuUser * 100, PhMaxPrecisionUnit);
+            PhInitFormatS(&format[5], L"%)");
+            PhInitFormatSR(&format[6], PH_AUTO_T(PH_STRING, PhSipGetMaxCpuString(getTooltipText->Index))->sr);
+            PhInitFormatC(&format[7], L'\n');
+            PhInitFormatSR(&format[8], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
 
             PhMoveReference(&Section->GraphState.TooltipText, PhFormat(format, RTL_NUMBER_OF(format), 160));
             getTooltipText->Text = Section->GraphState.TooltipText->sr;
@@ -504,6 +507,36 @@ INT_PTR CALLBACK PhSipCpuDialogProc(
             PhDeleteLayoutManager(&CpuLayoutManager);
         }
         break;
+    case WM_DPICHANGED_AFTERPARENT:
+        {
+            if (CpuSection->Parameters->LargeFont)
+            {
+                SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), CpuSection->Parameters->LargeFont, FALSE);
+            }
+
+            if (CpuSection->Parameters->MediumFont)
+            {
+                SetWindowFont(GetDlgItem(hwndDlg, IDC_CPUNAME), CpuSection->Parameters->MediumFont, FALSE);
+            }
+
+            if (OneGraphPerCpu)
+            {
+                for (ULONG i = 0; i < NumberOfProcessors; i++)
+                {
+                    CpusGraphState[i].Valid = FALSE;
+                    CpusGraphState[i].TooltipIndex = ULONG_MAX;
+                }
+            }
+            else
+            {
+                CpuGraphState.Valid = FALSE;
+                CpuGraphState.TooltipIndex = ULONG_MAX;
+            }
+
+            PhLayoutManagerLayout(&CpuLayoutManager);
+            PhSipLayoutCpuGraphs();
+        }
+        break;
     case WM_SIZE:
         {
             if (OneGraphPerCpu)
@@ -601,6 +634,21 @@ INT_PTR CALLBACK PhSipCpuPanelDialogProc(
             }
         }
         break;
+    case WM_DPICHANGED_AFTERPARENT:
+        {
+            if (CpuSection->Parameters->MediumFont)
+            {
+                SetWindowFont(CpuPanelUtilizationLabel, CpuSection->Parameters->MediumFont, FALSE);
+            }
+
+            if (CpuSection->Parameters->MediumFont)
+            {
+                SetWindowFont(CpuPanelSpeedLabel, CpuSection->Parameters->MediumFont, FALSE);
+            }
+
+            PhSipLayoutCpuGraphs();
+        }
+        break;
     case WM_CTLCOLORBTN:
         return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     case WM_CTLCOLORDLG:
@@ -655,7 +703,11 @@ VOID PhSipLayoutCpuGraphs(
     )
 {
     RECT clientRect;
+    RECT rect;
     HDWP deferHandle;
+
+    rect = CpuGraphMargin;
+    PhGetSizeDpiValue(&rect, CpuSection->Parameters->WindowDpi, TRUE);
 
     GetClientRect(CpuDialog, &clientRect);
     deferHandle = BeginDeferWindowPos(OneGraphPerCpu ? NumberOfProcessors : 1);
@@ -666,10 +718,10 @@ VOID PhSipLayoutCpuGraphs(
             deferHandle,
             CpuGraphHandle,
             NULL,
-            CpuGraphMargin.left,
-            CpuGraphMargin.top,
-            clientRect.right - CpuGraphMargin.left - CpuGraphMargin.right,
-            clientRect.bottom - CpuGraphMargin.top - CpuGraphMargin.bottom,
+            rect.left,
+            rect.top,
+            clientRect.right - rect.left - rect.right,
+            clientRect.bottom - rect.top - rect.bottom,
             SWP_NOACTIVATE | SWP_NOZORDER
             );
     }
@@ -696,8 +748,8 @@ VOID PhSipLayoutCpuGraphs(
         ULONG numberOfYPaddings = numberOfRows - 1;
         ULONG numberOfXPaddings = numberOfColumns - 1;
 
-        ULONG cellHeight = (clientRect.bottom - CpuGraphMargin.top - CpuGraphMargin.bottom - CpuSection->Parameters->CpuPadding * numberOfYPaddings) / numberOfRows;
-        ULONG y = CpuGraphMargin.top;
+        ULONG cellHeight = (clientRect.bottom - rect.top - rect.bottom - CpuSection->Parameters->CpuPadding * numberOfYPaddings) / numberOfRows;
+        ULONG y = rect.top;
         ULONG cellWidth;
         ULONG x;
         ULONG i = 0;
@@ -707,17 +759,17 @@ VOID PhSipLayoutCpuGraphs(
             // Give the last row the remaining space; the height we calculated might be off by a few
             // pixels due to integer division.
             if (row == numberOfRows - 1)
-                cellHeight = clientRect.bottom - CpuGraphMargin.bottom - y;
+                cellHeight = clientRect.bottom - rect.bottom - y;
 
-            cellWidth = (clientRect.right - CpuGraphMargin.left - CpuGraphMargin.right - CpuSection->Parameters->CpuPadding * numberOfXPaddings) / numberOfColumns;
-            x = CpuGraphMargin.left;
+            cellWidth = (clientRect.right - rect.left - rect.right - CpuSection->Parameters->CpuPadding * numberOfXPaddings) / numberOfColumns;
+            x = rect.left;
 
             for (ULONG column = 0; column < numberOfColumns; column++)
             {
                 // Give the last cell the remaining space; the width we calculated might be off by a few
                 // pixels due to integer division.
                 if (column == numberOfColumns - 1)
-                    cellWidth = clientRect.right - CpuGraphMargin.right - x;
+                    cellWidth = clientRect.right - rect.right - x;
 
                 if (i < NumberOfProcessors)
                 {
@@ -768,8 +820,8 @@ VOID PhSipNotifyCpuGraph(
             PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)Header;
             PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
 
-            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_USE_LINE_2 | (PhCsEnableScaleCpuGraph ? PH_GRAPH_LABEL_MAX_Y : 0);
-            PhSiSetColorsGraphDrawInfo(drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser);
+            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_USE_LINE_2 | (PhCsEnableGraphMaxText ? PH_GRAPH_LABEL_MAX_Y : 0);
+            PhSiSetColorsGraphDrawInfo(drawInfo, PhCsColorCpuKernel, PhCsColorCpuUser, CpuSection->Parameters->WindowDpi);
 
             if (Index == ULONG_MAX)
             {
@@ -784,7 +836,7 @@ VOID PhSipNotifyCpuGraph(
                     PhCopyCircularBuffer_FLOAT(&PhCpuKernelHistory, CpuGraphState.Data1, drawInfo->LineDataCount);
                     PhCopyCircularBuffer_FLOAT(&PhCpuUserHistory, CpuGraphState.Data2, drawInfo->LineDataCount);
 
-                    if (PhCsEnableScaleCpuGraph)
+                    if (PhCsEnableGraphMaxScale)
                     {
                         FLOAT max = 0;
 
@@ -805,6 +857,11 @@ VOID PhSipNotifyCpuGraph(
                         drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
                         drawInfo->LabelYFunctionParameter = max;
                     }
+                    else
+                    {
+                        drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
+                        drawInfo->LabelYFunctionParameter = 1.0f;
+                    }
 
                     CpuGraphState.Valid = TRUE;
                 }
@@ -822,7 +879,7 @@ VOID PhSipNotifyCpuGraph(
                     PhCopyCircularBuffer_FLOAT(&PhCpusKernelHistory[Index], CpusGraphState[Index].Data1, drawInfo->LineDataCount);
                     PhCopyCircularBuffer_FLOAT(&PhCpusUserHistory[Index], CpusGraphState[Index].Data2, drawInfo->LineDataCount);
 
-                    if (PhCsEnableScaleCpuGraph)
+                    if (PhCsEnableGraphMaxScale)
                     {
                         FLOAT max = 0;
 
@@ -842,6 +899,11 @@ VOID PhSipNotifyCpuGraph(
 
                         drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
                         drawInfo->LabelYFunctionParameter = max;
+                    }
+                    else
+                    {
+                        drawInfo->LabelYFunction = PhSiDoubleLabelYFunction;
+                        drawInfo->LabelYFunctionParameter = 1.0f;
                     }
 
                     CpusGraphState[Index].Valid = TRUE;
@@ -896,17 +958,21 @@ VOID PhSipNotifyCpuGraph(
                     {
                         FLOAT cpuKernel;
                         FLOAT cpuUser;
-                        PH_FORMAT format[5];
+                        PH_FORMAT format[9];
 
                         cpuKernel = PhGetItemCircularBuffer_FLOAT(&PhCpuKernelHistory, getTooltipText->Index);
                         cpuUser = PhGetItemCircularBuffer_FLOAT(&PhCpuUserHistory, getTooltipText->Index);
 
-                        // %.2f%%%s\n%s
+                        // %.2f%% (K: %.2f%%, U: %.2f%%)\n%s\n%s
                         PhInitFormatF(&format[0], ((DOUBLE)cpuKernel + cpuUser) * 100, PhMaxPrecisionUnit);
-                        PhInitFormatC(&format[1], L'%');
-                        PhInitFormatSR(&format[2], PH_AUTO_T(PH_STRING, PhSipGetMaxCpuString(getTooltipText->Index))->sr);
-                        PhInitFormatC(&format[3], L'\n');
-                        PhInitFormatSR(&format[4], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
+                        PhInitFormatS(&format[1], L"% (K: ");
+                        PhInitFormatF(&format[2], (DOUBLE)cpuKernel * 100, PhMaxPrecisionUnit);
+                        PhInitFormatS(&format[3], L"%, U: ");
+                        PhInitFormatF(&format[4], (DOUBLE)cpuUser * 100, PhMaxPrecisionUnit);
+                        PhInitFormatS(&format[5], L"%)");
+                        PhInitFormatSR(&format[6], PH_AUTO_T(PH_STRING, PhSipGetMaxCpuString(getTooltipText->Index))->sr);
+                        PhInitFormatC(&format[7], L'\n');
+                        PhInitFormatSR(&format[8], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
 
                         PhMoveReference(&CpuGraphState.TooltipText, PhFormat(format, RTL_NUMBER_OF(format), 160));
                     }
@@ -1054,12 +1120,14 @@ VOID PhSipUpdateCpuPanel(
     SYSTEM_TIMEOFDAY_INFORMATION timeOfDayInfo;
     ULONG logicalInformationLength = 0;
     PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX logicalInformation = NULL;
-#ifndef _ARM64_
     LARGE_INTEGER performanceCounterStart;
     LARGE_INTEGER performanceCounterEnd;
     LARGE_INTEGER performanceCounterTicks;
     ULONG64 timeStampCounterStart;
     ULONG64 timeStampCounterEnd;
+#ifdef _ARM64_
+    ULONG64 currentExceptionLevel;
+#else
     INT cpubrand[4];
 #endif
     PH_FORMAT format[5];
@@ -1086,15 +1154,12 @@ VOID PhSipUpdateCpuPanel(
         PhSetWindowText(CpuPanelUtilizationLabel, formatBuffer);
     else
     {
-        PhSetWindowText(CpuPanelUtilizationLabel, PhaFormatString(
-            L"%.2f%%",
-            ((DOUBLE)PhCpuUserUsage + PhCpuKernelUsage) * 100
-            )->Buffer);
+        PhSetWindowText(CpuPanelUtilizationLabel, PH_AUTO_T(PH_STRING, PhFormat(format, 2, 0))->Buffer);
     }
 
-    PhInitFormatF(&format[0], cpuGhz, 2);
+    PhInitFormatF(&format[0], cpuGhz, PhMaxPrecisionUnit);
     PhInitFormatS(&format[1], L" / ");
-    PhInitFormatF(&format[2], (DOUBLE)CpuMaxMhz / 1000, 2);
+    PhInitFormatF(&format[2], (DOUBLE)CpuMaxMhz / 1000, PhMaxPrecisionUnit);
     PhInitFormatS(&format[3], L" GHz");
 
     // %.2f / %.2f GHz
@@ -1102,11 +1167,7 @@ VOID PhSipUpdateCpuPanel(
         PhSetWindowText(CpuPanelSpeedLabel, formatBuffer);
     else
     {
-        PhSetWindowText(CpuPanelSpeedLabel, PhaFormatString(
-            L"%.2f / %.2f GHz",
-            cpuGhz,
-            (DOUBLE)CpuMaxMhz / 1000)->Buffer
-            );
+        PhSetWindowText(CpuPanelSpeedLabel, PH_AUTO_T(PH_STRING, PhFormat(format, 4, 0))->Buffer);
     }
 
     PhInitFormatI64UGroupDigits(&format[0], PhTotalProcesses);
@@ -1262,20 +1323,32 @@ VOID PhSipUpdateCpuPanel(
             PhSetWindowText(CpuPanelLogicalLabel, PhaFormatUInt64(processorLogicalCount, TRUE)->Buffer);
     }
 
-#ifndef _ARM64_
     // Do not optimize (dmex)
-    PhQueryPerformanceCounter(&performanceCounterStart, NULL);
+    PhQueryPerformanceCounter(&performanceCounterStart);
     timeStampCounterStart = PhReadTimeStampCounter();
     MemoryBarrier();
+#ifdef _ARM64_
+    // 0b11    0b000    0b0100    0b0010    0b010    CurrentEL     Current Exception Level
+    currentExceptionLevel = _ReadStatusReg(ARM64_SYSREG(3, 0, 4, 2, 2));
+#else
     CpuIdEx(cpubrand, 0, 0);
+#endif
     MemoryBarrier();
     timeStampCounterEnd = PhReadTimeStampCounter();
     MemoryBarrier();
-    PhQueryPerformanceCounter(&performanceCounterEnd, NULL);
+    PhQueryPerformanceCounter(&performanceCounterEnd);
     performanceCounterTicks.QuadPart = performanceCounterEnd.QuadPart - performanceCounterStart.QuadPart;
 
-    if (timeStampCounterStart == 0 && timeStampCounterEnd == 0 && cpubrand[0] == 0 && cpubrand[3] == 0)
+    if (timeStampCounterStart == 0 && timeStampCounterEnd == 0 &&
+#ifdef _ARM64_
+        currentExceptionLevel == MAXULONG64
+#else
+        cpubrand[0] == 0 && cpubrand[3] == 0
+#endif
+        )
+    {
         performanceCounterTicks.QuadPart = 0;
+    }
 
     PhInitFormatI64UGroupDigits(&format[0], performanceCounterTicks.QuadPart);
     PhInitFormatS(&format[1], L" | ");
@@ -1285,9 +1358,6 @@ VOID PhSipUpdateCpuPanel(
         PhSetWindowText(CpuPanelLatencyLabel, formatBuffer);
     else
         PhSetWindowText(CpuPanelLatencyLabel, PhaFormatUInt64(performanceCounterTicks.QuadPart, TRUE)->Buffer);
-#else
-    PhSetWindowText(CpuPanelLatencyLabel, PhaFormatUInt64(PhTotalCpuQueueLength, TRUE)->Buffer);
-#endif
 }
 
 PPH_PROCESS_RECORD PhSipReferenceMaxCpuRecord(
@@ -1612,7 +1682,7 @@ ULONG PhSipGetProcessorRelationshipIndex(
         PROCESSOR_RELATIONSHIP processor = processorInfo->Processor;
         //BOOLEAN hyperThreaded = processor.Flags & LTP_PC_SMT;
 
-        if (processor.GroupMask[0].Mask & ((KAFFINITY)1 << Index))
+        if (processor.GroupMask[0].Mask & AFFINITY_MASK(Index))
         {
             PhFree(logicalInformation);
             return index;
@@ -1703,7 +1773,7 @@ BOOLEAN PhInitializeHybridProcessorTypeCache(
             GROUP_AFFINITY threadGroup = { 0 };
             CPUID_HYBRID_INFORMATION hybridInfo = { 0 };
 
-            threadGroup.Mask = ((KAFFINITY)1 << i);
+            threadGroup.Mask = AFFINITY_MASK(i);
             threadGroup.Group = processorGroup;
 
             if (NT_SUCCESS(PhSetThreadGroupAffinity(NtCurrentThread(), threadGroup)))

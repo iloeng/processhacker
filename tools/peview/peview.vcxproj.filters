@@ -153,11 +153,20 @@
     <ClCompile Include="pdb.c">
       <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
-    <ClCompile Include="clrtableimports.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="volatileprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="clrprptables.c">
+      <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
     <ClCompile Include="clrtableimportprp.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="clrtableimports.cpp">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="versioninfoprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -179,9 +188,15 @@
     <ClInclude Include="include\dia2.h">
       <Filter>Header Files\DIA-SDK</Filter>
     </ClInclude>
+    <ClInclude Include="include\dia3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="peview.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+    <ResourceCompile Include="version.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>

@@ -6,18 +6,28 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2011-2022
+ *     dmex    2011-2023
  *
  */
 
 #include "dn.h"
 #include <appresolver.h>
 #include <mapimg.h>
+#include <mapldr.h>
 #include <symprv.h>
 #include <verify.h>
 #include <json.h>
 #include "clrsup.h"
-#include "corsym.h"
+
+#ifdef __has_include
+#if __has_include (<corsym.h>)
+#include <corsym.h>
+#else
+#include "clr/corsym.h"
+#endif
+#else
+#include "clr/corsym.h"
+#endif
 
 static ICLRDataTargetVtbl DnCLRDataTarget_VTable =
 {
@@ -76,7 +86,7 @@ VOID FreeClrProcessSupport(
 {
     if (Support->DataProcess) IXCLRDataProcess_Release(Support->DataProcess);
     // Free the library here so we can cleanup in ICLRDataTarget_Release. (dmex)
-    if (Support->DacDllBase) FreeLibrary(Support->DacDllBase);
+    if (Support->DacDllBase) PhFreeLibrary(Support->DacDllBase);
     if (Support->DataTarget) ICLRDataTarget_Release(Support->DataTarget);
 
     PhFree(Support);
@@ -994,7 +1004,7 @@ VOID DnGetProcessDotNetRuntimes(
 
     context.RuntimeList = PhCreateList(1);
 
-    PhInitializeStringRefLongHint(&context.ImageName, L"coreclr.dll");
+    PhInitializeStringRef(&context.ImageName, L"coreclr.dll");
     PhEnumProcessModules(dataTarget->ProcessHandle, DnpGetClrRuntimeCallback, &context);
 
 #ifdef _WIN64
@@ -1002,7 +1012,7 @@ VOID DnGetProcessDotNetRuntimes(
         PhEnumProcessModules32(dataTarget->ProcessHandle, DnpGetClrRuntimeCallback, &context);
 #endif
 
-    PhInitializeStringRefLongHint(&context.ImageName, L"clr.dll");
+    PhInitializeStringRef(&context.ImageName, L"clr.dll");
     PhEnumProcessModules(dataTarget->ProcessHandle, DnpGetClrRuntimeCallback, &context);
 
 #ifdef _WIN64
@@ -1014,12 +1024,12 @@ VOID DnGetProcessDotNetRuntimes(
     {
         PDN_PROCESS_CLR_RUNTIME_ENTRY entry = context.RuntimeList->Items[i];
 
-        dprintf(
-            "Runtime version: %S @ 0x%I64x [%S]\n",
-            entry->RuntimeVersion->Buffer,
-            entry->DllBase,
-            entry->FileName->Buffer
-            );
+        //dprintf(
+        //    "Runtime version: %S @ 0x%I64x [%S]\n",
+        //    entry->RuntimeVersion->Buffer,
+        //    entry->DllBase,
+        //    entry->FileName->Buffer
+        //    );
 
         PhClearReference(&entry->FileName);
         PhClearReference(&entry->RuntimeVersion);
@@ -1090,7 +1100,7 @@ BOOLEAN DnGetProcessCoreClrPath(
     DNP_GET_IMAGE_BASE_CONTEXT context = { 0 };
     PH_ENUM_PROCESS_MODULES_PARAMETERS parameters;
 
-    PhInitializeStringRefLongHint(&context.ImageName, L"coreclr.dll");
+    PhInitializeStringRef(&context.ImageName, L"coreclr.dll");
     parameters.Callback = DnpGetCoreClrPathCallback;
     parameters.Context = &context;
     parameters.Flags = PH_ENUM_PROCESS_MODULES_TRY_MAPPED_FILE_NAME;
@@ -1103,7 +1113,7 @@ BOOLEAN DnGetProcessCoreClrPath(
 
     if (!context.FileName)
     {
-        PhInitializeStringRefLongHint(&context.ImageName, L"clr.dll");
+        PhInitializeStringRef(&context.ImageName, L"clr.dll");
         PhEnumProcessModulesEx(dataTarget->ProcessHandle, &parameters);
 
 #ifdef _WIN64
@@ -1128,7 +1138,7 @@ BOOLEAN DnGetProcessCoreClrPath(
                 PhDereferenceObject(processItem);
                 return TRUE;
             }
-        
+
             PhDereferenceObject(processItem);
         }
 #else
@@ -1165,7 +1175,8 @@ static VOID DnCleanupDacAuxiliaryProvider(
 
         if (directoryPath = PhGetBaseDirectory(dataTarget->DaccorePath))
         {
-            PhDeleteDirectory(directoryPath);
+            PhDeleteDirectoryWin32(&directoryPath->sr);
+
             PhDereferenceObject(directoryPath);
         }
         else
@@ -1204,8 +1215,8 @@ PVOID DnLoadMscordaccore(
     )
 {
     // \dotnet\shared\Microsoft.NETCore.App\ is the same path used by the CLR for DAC detection. (dmex)
-    static PH_STRINGREF mscordaccorePathSr = PH_STRINGREF_INIT(L"%ProgramFiles%\\dotnet\\shared\\Microsoft.NETCore.App\\");
-    static PH_STRINGREF mscordaccoreNameSr = PH_STRINGREF_INIT(L"\\mscordaccore.dll");
+    static PH_STRINGREF mscordaccorePath = PH_STRINGREF_INIT(L"%ProgramFiles%\\dotnet\\shared\\Microsoft.NETCore.App\\");
+    static PH_STRINGREF mscordaccoreName = PH_STRINGREF_INIT(L"\\mscordaccore.dll");
     DnCLRDataTarget* dataTarget = (DnCLRDataTarget*)DataTarget;
     PVOID mscordacBaseAddress = NULL;
     HANDLE directoryHandle;
@@ -1220,7 +1231,7 @@ PVOID DnLoadMscordaccore(
     {
         PVOID imageBaseAddress;
 
-        if (NT_SUCCESS(PhLoadLibraryAsImageResource(dataTargetFileName, &imageBaseAddress)))
+        if (NT_SUCCESS(PhLoadLibraryAsImageResource(&dataTargetFileName->sr, &imageBaseAddress)))
         {
             PCLR_DEBUG_RESOURCE debugVersionInfo;
 
@@ -1248,7 +1259,7 @@ PVOID DnLoadMscordaccore(
         dataTargetDirectory = PhGetBaseDirectory(dataTargetFileName);
     }
 
-    if (!(directoryPath = PhExpandEnvironmentStrings(&mscordaccorePathSr)))
+    if (!(directoryPath = PhExpandEnvironmentStrings(&mscordaccorePath)))
         goto TryAppLocal;
 
     directoryList = PhCreateList(2);
@@ -1275,10 +1286,10 @@ PVOID DnLoadMscordaccore(
         fileName = PhConcatStringRef3(
             &directoryPath->sr,
             &directoryName->sr,
-            &mscordaccoreNameSr
+            &mscordaccoreName
             );
 
-        if (PhDoesFileExistsWin32(PhGetString(fileName)))
+        if (PhDoesFileExistWin32(PhGetString(fileName)))
         {
             PH_MAPPED_IMAGE mappedImage;
 
@@ -1319,7 +1330,7 @@ TryAppLocal:
 
         fileName = PhConcatStringRef2(
             &dataTargetDirectory->sr,
-            &mscordaccoreNameSr
+            &mscordaccoreName
             );
 
         PhMoveReference(&fileName, PhGetFileName(fileName));
@@ -1383,7 +1394,7 @@ TryAppLocal:
         PVOID mscordacResourceBuffer;
         ULONG mscordacResourceLength;
 
-        if (NT_SUCCESS(PhLoadLibraryAsImageResource(dataTargetFileName, &imageBaseAddress)))
+        if (NT_SUCCESS(PhLoadLibraryAsImageResource(&dataTargetFileName->sr, &imageBaseAddress)))
         {
             if (PhLoadResource(
                 imageBaseAddress,
@@ -1544,7 +1555,7 @@ HRESULT CreateXCLRDataProcess(
 
     if (!ClrDataCreateInstance)
     {
-        FreeLibrary(dllBase);
+        PhFreeLibrary(dllBase);
         return E_FAIL;
     }
 
@@ -1556,7 +1567,7 @@ HRESULT CreateXCLRDataProcess(
 
     if (status != S_OK)
     {
-        FreeLibrary(dllBase);
+        PhFreeLibrary(dllBase);
         return status;
     }
 
@@ -1830,7 +1841,7 @@ HRESULT STDMETHODCALLTYPE DnCLRDataTarget_ReadVirtual(
     {
         ULONG result;
 
-        result = RtlNtStatusToDosError(status);
+        result = PhNtStatusToDosError(status);
 
         return HRESULT_FROM_WIN32(result);
     }
@@ -1912,7 +1923,7 @@ HRESULT STDMETHODCALLTYPE DnCLRDataTarget_GetThreadContext(
     {
         ULONG result;
 
-        result = RtlNtStatusToDosError(status);
+        result = PhNtStatusToDosError(status);
 
         return HRESULT_FROM_WIN32(result);
     }

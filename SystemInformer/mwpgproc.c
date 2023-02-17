@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -39,6 +39,7 @@ static PH_CALLBACK_REGISTRATION ProcessRemovedRegistration;
 static PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
 
 static ULONG NeedsSelectPid = 0;
+static ULONG ProcessEndToScrollTo = 0;
 static PPH_PROCESS_NODE ProcessToScrollTo = NULL;
 static PPH_TN_FILTER_ENTRY CurrentUserFilterEntry = NULL;
 static PPH_TN_FILTER_ENTRY SignedFilterEntry = NULL;
@@ -147,7 +148,7 @@ BOOLEAN PhMwpProcessesPageCallback(
                     {
                         PPH_COLUMN_SET_ENTRY entry = columnSetList->Items[index];
 
-                        menuItem = PhCreateEMenuItem(PH_EMENU_TEXT_OWNED, ID_VIEW_LOADCOLUMNSET, 
+                        menuItem = PhCreateEMenuItem(PH_EMENU_TEXT_OWNED, ID_VIEW_LOADCOLUMNSET,
                             PhAllocateCopy(entry->Name->Buffer, entry->Name->Length + sizeof(UNICODE_NULL)), NULL, NULL);
                         PhInsertEMenuItem(columnSetMenuItem, menuItem, ULONG_MAX);
                     }
@@ -363,15 +364,14 @@ VOID PhMwpSetProcessMenuPriorityChecks(
     _In_ HANDLE ProcessId,
     _In_ BOOLEAN SetPriority,
     _In_ BOOLEAN SetIoPriority,
-    _In_ BOOLEAN SetPagePriority,
-    _In_ BOOLEAN SetPriorityBoost
+    _In_ BOOLEAN SetPagePriority
     )
 {
     HANDLE processHandle;
-    PROCESS_PRIORITY_CLASS priorityClass = { 0 };
+    UCHAR priorityClass = PROCESS_PRIORITY_CLASS_UNKNOWN;
     IO_PRIORITY_HINT ioPriority = ULONG_MAX;
     ULONG pagePriority = ULONG_MAX;
-    BOOLEAN priorityBoost = FALSE;
+    BOOLEAN priorityBoostDisabled = FALSE;
     ULONG id = 0;
 
     if (NT_SUCCESS(PhOpenProcess(
@@ -382,7 +382,13 @@ VOID PhMwpSetProcessMenuPriorityChecks(
     {
         if (SetPriority)
         {
-            PhGetProcessPriority(processHandle, &priorityClass);
+            if (!NT_SUCCESS(PhGetProcessPriority(
+                processHandle,
+                &priorityClass
+                )))
+            {
+                priorityClass = PROCESS_PRIORITY_CLASS_UNKNOWN;
+            }
         }
 
         if (SetIoPriority)
@@ -407,17 +413,12 @@ VOID PhMwpSetProcessMenuPriorityChecks(
             }
         }
 
-        if (SetPriorityBoost)
-        {
-            PhGetProcessPriorityBoost(processHandle, &priorityBoost);
-        }
-
         NtClose(processHandle);
     }
 
-    if (SetPriority)
+    if (SetPriority && priorityClass != PROCESS_PRIORITY_CLASS_UNKNOWN)
     {
-        switch (priorityClass.PriorityClass)
+        switch (priorityClass)
         {
         case PROCESS_PRIORITY_CLASS_REALTIME:
             id = ID_PRIORITY_REALTIME;
@@ -505,12 +506,6 @@ VOID PhMwpSetProcessMenuPriorityChecks(
                 PH_EMENU_CHECKED | PH_EMENU_RADIOCHECK);
         }
     }
-
-    if (SetPriorityBoost && priorityBoost)
-    {
-        PhSetFlagsEMenuItem(Menu, ID_PROCESS_BOOST,
-            PH_EMENU_CHECKED, PH_EMENU_CHECKED);
-    }
 }
 
 VOID PhMwpInitializeProcessMenu(
@@ -531,7 +526,7 @@ VOID PhMwpInitializeProcessMenu(
 
         // If the user selected a fake process, disable all but a few menu items.
         if (
-            PH_IS_FAKE_PROCESS_ID(Processes[0]->ProcessId) || 
+            PH_IS_FAKE_PROCESS_ID(Processes[0]->ProcessId) ||
             Processes[0]->ProcessId == SYSTEM_IDLE_PROCESS_ID
             //Processes[0]->ProcessId == SYSTEM_PROCESS_ID // (dmex)
             )
@@ -559,10 +554,10 @@ VOID PhMwpInitializeProcessMenu(
 
         if (
             PhIsNullOrEmptyString(Processes[0]->FileName) ||
-            !PhDoesFileExists(Processes[0]->FileName)
+            !PhDoesFileExist(&Processes[0]->FileName->sr)
             )
         {
-            PhEnableEMenuItem(Menu, ID_PROCESS_OPENFILELOCATION, FALSE);  
+            PhEnableEMenuItem(Menu, ID_PROCESS_OPENFILELOCATION, FALSE);
         }
 
         // Critical
@@ -722,7 +717,7 @@ VOID PhMwpInitializeProcessMenu(
     // Priority
     if (NumberOfProcesses == 1)
     {
-        PhMwpSetProcessMenuPriorityChecks(Menu, Processes[0]->ProcessId, TRUE, TRUE, TRUE, TRUE);
+        PhMwpSetProcessMenuPriorityChecks(Menu, Processes[0]->ProcessId, TRUE, TRUE, TRUE);
     }
 
     item = PhFindEMenuItem(Menu, 0, 0, ID_PROCESS_WINDOW);
@@ -779,10 +774,8 @@ PPH_EMENU PhpCreateProcessMenu(
     PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_PROCESS_CREATEDUMPFILE, L"Create dump fi&le...", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_PROCESS_DEBUG, L"De&bug", NULL, NULL), ULONG_MAX);
-    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_PROCESS_VIRTUALIZATION, L"Virtuali&zation", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_PROCESS_AFFINITY, L"&Affinity", NULL, NULL), ULONG_MAX);
-    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_PROCESS_BOOST, L"&Boost", NULL, NULL), ULONG_MAX);
 
     menuItem = PhCreateEMenuItem(0, ID_PROCESS_PRIORITY, L"&Priority", NULL, NULL);
     PhInsertEMenuItem(menuItem, PhCreateEMenuItem(0, ID_PRIORITY_REALTIME, L"&Real time", NULL, NULL), ULONG_MAX);
@@ -817,6 +810,7 @@ PPH_EMENU PhpCreateProcessMenu(
     PhInsertEMenuItem(menuItem, PhCreateEMenuItem(0, ID_MISCELLANEOUS_REDUCEWORKINGSET, L"Reduce working &set", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menuItem, PhCreateEMenuItem(0, ID_MISCELLANEOUS_RUNAS, L"&Run as...", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menuItem, PhCreateEMenuItem(0, ID_MISCELLANEOUS_RUNASTHISUSER, L"Run &as this user...", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(menuItem, PhCreateEMenuItem(0, ID_PROCESS_VIRTUALIZATION, L"Virtuali&zation", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menu, menuItem, ULONG_MAX);
 
     menuItem = PhCreateEMenuItem(0, ID_PROCESS_WINDOW, L"&Window", NULL, NULL);
@@ -897,8 +891,8 @@ VOID PhShowProcessContextMenu(
 }
 
 VOID NTAPI PhMwpProcessAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PROCESS_ITEM processItem = (PPH_PROCESS_ITEM)Parameter;
@@ -910,8 +904,8 @@ VOID NTAPI PhMwpProcessAddedHandler(
 }
 
 VOID NTAPI PhMwpProcessModifiedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PROCESS_ITEM processItem = (PPH_PROCESS_ITEM)Parameter;
@@ -920,8 +914,8 @@ VOID NTAPI PhMwpProcessModifiedHandler(
 }
 
 VOID NTAPI PhMwpProcessRemovedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PROCESS_ITEM processItem = (PPH_PROCESS_ITEM)Parameter;
@@ -932,8 +926,8 @@ VOID NTAPI PhMwpProcessRemovedHandler(
 }
 
 VOID NTAPI PhMwpProcessesUpdatedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     ProcessHacker_Invoke(PhMwpOnProcessesUpdated, PhGetRunIdProvider(&PhMwpProcessProviderRegistration));
@@ -1034,6 +1028,7 @@ VOID PhMwpOnProcessRemoved(
     )
 {
     PPH_PROCESS_NODE processNode;
+    ULONG processNodeIndex = 0;
     ULONG exitStatus = 0;
 
     if (ProcessItem->QueryHandle)
@@ -1080,10 +1075,16 @@ VOID PhMwpOnProcessRemoved(
     }
 
     processNode = PhFindProcessNode(ProcessItem->ProcessId);
+    processNodeIndex = processNode->Node.Index;
     PhRemoveProcessNode(processNode);
 
     if (ProcessToScrollTo == processNode) // shouldn't happen, but just in case
         ProcessToScrollTo = NULL;
+
+    if (PhCsScrollToRemovedProcesses)
+    {
+        ProcessEndToScrollTo = processNodeIndex;
+    }
 }
 
 VOID PhMwpOnProcessesUpdated(
@@ -1152,5 +1153,16 @@ VOID PhMwpOnProcessesUpdated(
     {
         TreeNew_EnsureVisible(PhMwpProcessTreeNewHandle, &ProcessToScrollTo->Node);
         ProcessToScrollTo = NULL;
+    }
+
+    if (ProcessEndToScrollTo)
+    {
+        ULONG count = TreeNew_GetFlatNodeCount(PhMwpProcessTreeNewHandle);
+
+        if (ProcessEndToScrollTo > count)
+            ProcessEndToScrollTo = count;
+
+        TreeNew_EnsureVisibleIndex(PhMwpProcessTreeNewHandle, ProcessEndToScrollTo);
+        ProcessEndToScrollTo = 0;
     }
 }

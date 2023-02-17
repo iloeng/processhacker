@@ -6,12 +6,11 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
 #include <phapp.h>
-#include <appresolver.h>
 #include <modprv.h>
 
 #include <mapimg.h>
@@ -67,7 +66,7 @@ PPH_MODULE_PROVIDER PhCreateModuleProvider(
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
     NTSTATUS status;
     PPH_MODULE_PROVIDER moduleProvider;
-    PPH_STRING fileName;
+    PPH_PROCESS_ITEM processItem;
 
     if (PhBeginInitOnce(&initOnce))
     {
@@ -128,57 +127,45 @@ PPH_MODULE_PROVIDER PhCreateModuleProvider(
         moduleProvider->RunStatus = status;
     }
 
-    if (NT_SUCCESS(PhGetProcessImageFileNameByProcessId(ProcessId, &fileName)))
+    if (processItem = PhReferenceProcessItem(ProcessId))
     {
-        PhMoveReference(&moduleProvider->ProcessFileName, fileName);
+        PhSetReference(&moduleProvider->ProcessFileName, processItem->FileName);
+        PhSetReference(&moduleProvider->PackageFullName, processItem->PackageFullName);
+        moduleProvider->IsSubsystemProcess = !!processItem->IsSubsystemProcess;
+        PhDereferenceObject(processItem);
     }
 
-    if (WindowsVersion >= WINDOWS_8 && moduleProvider->ProcessHandle)
+    if (WindowsVersion >= WINDOWS_8_1 && moduleProvider->ProcessHandle)
     {
-        moduleProvider->PackageFullName = PhGetProcessPackageFullName(moduleProvider->ProcessHandle);
+        BOOLEAN cfguardEnabled;
 
-        if (WindowsVersion >= WINDOWS_8_1)
+        if (NT_SUCCESS(PhGetProcessIsCFGuardEnabled(moduleProvider->ProcessHandle, &cfguardEnabled)))
         {
-            BOOLEAN cfguardEnabled;
-
-            if (NT_SUCCESS(PhGetProcessIsCFGuardEnabled(moduleProvider->ProcessHandle, &cfguardEnabled)))
-            {
-                moduleProvider->ControlFlowGuardEnabled = cfguardEnabled;
-            }
+            moduleProvider->ControlFlowGuardEnabled = cfguardEnabled;
         }
     }
 
-    if (WindowsVersion >= WINDOWS_10 && moduleProvider->ProcessHandle)
+    if (WindowsVersion >= WINDOWS_10_20H1 && moduleProvider->ProcessHandle)
     {
-        PROCESS_EXTENDED_BASIC_INFORMATION basicInfo;
-
-        if (NT_SUCCESS(PhGetProcessExtendedBasicInformation(moduleProvider->ProcessHandle, &basicInfo)))
+        if (moduleProvider->ProcessId == SYSTEM_PROCESS_ID)
         {
-            moduleProvider->IsSubsystemProcess = !!basicInfo.IsSubsystemProcess;
-        }
+            SYSTEM_SHADOW_STACK_INFORMATION shadowStackInformation;
 
-        if (WindowsVersion >= WINDOWS_10_20H1)
-        {
-            if (moduleProvider->ProcessId == SYSTEM_PROCESS_ID)
+            if (NT_SUCCESS(PhGetSystemShadowStackInformation(&shadowStackInformation)))
             {
-                SYSTEM_SHADOW_STACK_INFORMATION shadowStackInformation;
-
-                if (NT_SUCCESS(PhGetSystemShadowStackInformation(&shadowStackInformation)))
-                {
-                    moduleProvider->CetEnabled = !!shadowStackInformation.KernelCetEnabled;
-                    moduleProvider->CetStrictModeEnabled = TRUE; // Kernel CET is always strict (TheEragon)
-                }
+                moduleProvider->CetEnabled = !!shadowStackInformation.KernelCetEnabled;
+                moduleProvider->CetStrictModeEnabled = TRUE; // Kernel CET is always strict (TheEragon)
             }
-            else
-            {
-                BOOLEAN cetEnabled;
-                BOOLEAN cetStrictModeEnabled;
+        }
+        else
+        {
+            BOOLEAN cetEnabled;
+            BOOLEAN cetStrictModeEnabled;
 
-                if (NT_SUCCESS(PhGetProcessIsCetEnabled(moduleProvider->ProcessHandle, &cetEnabled, &cetStrictModeEnabled)))
-                {
-                    moduleProvider->CetEnabled = cetEnabled;
-                    moduleProvider->CetStrictModeEnabled = cetStrictModeEnabled;
-                }
+            if (NT_SUCCESS(PhGetProcessIsCetEnabled(moduleProvider->ProcessHandle, &cetEnabled, &cetStrictModeEnabled)))
+            {
+                moduleProvider->CetEnabled = cetEnabled;
+                moduleProvider->CetStrictModeEnabled = cetStrictModeEnabled;
             }
         }
     }
@@ -385,9 +372,9 @@ NTSTATUS PhpModuleQueryWorker(
     }
 
     {
-        // Note: .NET Core and Mono don't set the LDRP_COR_IMAGE flag in the loader required for 
+        // Note: .NET Core and Mono don't set the LDRP_COR_IMAGE flag in the loader required for
         // highlighting .NET images so check images for a CLR section and set the flag. (dmex)
-        if (NT_SUCCESS(PhLoadMappedImageEx(data->ModuleItem->FileName, NULL, &mappedImage)))
+        if (NT_SUCCESS(PhLoadMappedImageEx(&data->ModuleItem->FileName->sr, NULL, &mappedImage)))
         {
             PH_MAPPED_IMAGE_CFG cfgConfig = { 0 };
 
@@ -433,7 +420,7 @@ NTSTATUS PhpModuleQueryWorker(
             data->ModuleItem->Type == PH_MODULE_TYPE_MAPPED_IMAGE ||
             data->ModuleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE)
         {
-            if (data->ModuleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE && !KphIsVerified())
+            if (data->ModuleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE && (KphLevel() < KphLevelMax))
             {
                 // The driver wasn't available or we failed verification preventing
                 // us from checking driver coherency. Pass a special value so we
@@ -644,9 +631,20 @@ VOID PhModuleProviderUpdate(
             if (module->OriginalBaseAddress && module->OriginalBaseAddress != module->BaseAddress)
                 moduleItem->ImageNotAtBase = TRUE;
 
-            PhPrintPointer(moduleItem->BaseAddressString, moduleItem->BaseAddress);
+            if (moduleProvider->ZeroPadAddresses)
+            {
+                PhPrintPointerPadZeros(moduleItem->BaseAddressString, moduleItem->BaseAddress);
+                PhPrintPointerPadZeros(moduleItem->EntryPointAddressString, moduleItem->EntryPoint);
+                PhPrintPointerPadZeros(moduleItem->ParentBaseAddressString, moduleItem->ParentBaseAddress);
+            }
+            else
+            {
+                PhPrintPointer(moduleItem->BaseAddressString, moduleItem->BaseAddress);
+                PhPrintPointer(moduleItem->EntryPointAddressString, moduleItem->EntryPoint);
+                PhPrintPointer(moduleItem->ParentBaseAddressString, moduleItem->ParentBaseAddress);
+            }
 
-            PhInitializeImageVersionInfoEx(&moduleItem->VersionInfo, moduleItem->FileName, PhEnableVersionShortText);
+            PhInitializeImageVersionInfoEx(&moduleItem->VersionInfo, &moduleItem->FileName->sr, PhEnableVersionShortText);
 
             if (moduleProvider->IsSubsystemProcess)
             {
@@ -685,7 +683,8 @@ VOID PhModuleProviderUpdate(
             if (moduleItem->Type == PH_MODULE_TYPE_MODULE ||
                 moduleItem->Type == PH_MODULE_TYPE_WOW64_MODULE ||
                 moduleItem->Type == PH_MODULE_TYPE_MAPPED_IMAGE ||
-                (moduleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE && KphIsVerified()))
+                (moduleItem->Type == PH_MODULE_TYPE_KERNEL_MODULE &&
+                 (KphLevel() == KphLevelMax)))
             {
                 PH_REMOTE_MAPPED_IMAGE remoteMappedImage;
                 PPH_READ_VIRTUAL_MEMORY_CALLBACK readVirtualMemoryCallback;
@@ -783,7 +782,7 @@ VOID PhModuleProviderUpdate(
             if (!moduleProvider->CetEnabled)
                 moduleItem->ImageDllCharacteristicsEx &= ~IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT;
 
-            if (NT_SUCCESS(PhQueryFullAttributesFile(moduleItem->FileName, &networkOpenInfo)))
+            if (NT_SUCCESS(PhQueryFullAttributesFile(&moduleItem->FileName->sr, &networkOpenInfo)))
             {
                 moduleItem->FileLastWriteTime = networkOpenInfo.LastWriteTime;
                 moduleItem->FileEndOfFile = networkOpenInfo.EndOfFile;

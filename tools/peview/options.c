@@ -99,7 +99,7 @@ BOOLEAN PvShellExecuteRestart(
     PPH_STRING filename;
     PPH_STRING parameters;
 
-    if (!(filename = PhGetApplicationFileName()))
+    if (!(filename = PhGetApplicationFileNameWin32()))
         return FALSE;
 
     parameters = PhConcatStringRef3(
@@ -155,7 +155,7 @@ VOID PvGeneralPageSave(
     )
 {
     //PhSetStringSetting2(L"SearchEngine", &PhaGetDlgItemText(WindowHandle, IDC_SEARCHENGINE)->sr);
-    
+
     if (ComboBox_GetCurSel(GetDlgItem(Context->WindowHandle, IDC_MAXSIZEUNIT)) != PhGetIntegerSetting(L"MaxSizeUnit"))
     {
         PhSetIntegerSetting(L"MaxSizeUnit", ComboBox_GetCurSel(GetDlgItem(Context->WindowHandle, IDC_MAXSIZEUNIT)));
@@ -177,8 +177,8 @@ VOID PvGeneralPageSave(
     SetSettingForLvItemCheckRestartRequired(Context->ListViewHandle, PHP_OPTIONS_INDEX_ENABLE_LEGACY_TABS, L"EnableLegacyPropertiesDialog");
     SetSettingForLvItemCheckRestartRequired(Context->ListViewHandle, PHP_OPTIONS_INDEX_ENABLE_THEME_BORDER, L"EnableTreeListBorder");
 
-    PhUpdateCachedSettings();
-    PeSaveSettings();
+    PvUpdateCachedSettings();
+    PvSaveSettings();
 
     if (RestartRequired)
     {
@@ -224,14 +224,12 @@ INT_PTR CALLBACK PvOptionsWndProc(
     {
     case WM_INITDIALOG:
         {
-            HIMAGELIST listViewImageList;
             HICON smallIcon;
             HICON largeIcon;
 
             context->WindowHandle = hwndDlg;
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_SETTINGS);
             context->ComboHandle = GetDlgItem(hwndDlg, IDC_MAXSIZEUNIT);
-            listViewImageList = PhImageListCreate(1, PV_SCALE_DPI(22), ILC_MASK | ILC_COLOR, 1, 1);
 
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
@@ -247,9 +245,9 @@ INT_PTR CALLBACK PvOptionsWndProc(
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDCANCEL), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
             PhSetListViewStyle(context->ListViewHandle, FALSE, TRUE);
             ListView_SetExtendedListViewStyleEx(context->ListViewHandle, LVS_EX_CHECKBOXES, LVS_EX_CHECKBOXES);
-            ListView_SetImageList(context->ListViewHandle, listViewImageList, LVSIL_SMALL);
             PhSetControlTheme(context->ListViewHandle, L"explorer");
 
             for (ULONG i = 0; i < RTL_NUMBER_OF(PhSizeUnitNames); i++)
@@ -267,7 +265,13 @@ INT_PTR CALLBACK PvOptionsWndProc(
         break;
     case WM_DESTROY:
         {
-            NOTHING;
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
         }
         break;
     case WM_COMMAND:
@@ -294,9 +298,9 @@ INT_PTR CALLBACK PvOptionsWndProc(
                         L""
                         ) == IDYES)
                     {
-                        PhResetSettings();
+                        PhResetSettings(hwndDlg);
 
-                        PeSaveSettings();
+                        PvSaveSettings();
 
                         if (PvShellExecuteRestart(hwndDlg))
                         {
@@ -341,7 +345,7 @@ INT_PTR CALLBACK PvOptionsWndProc(
 
                     lvHitInfo.pt = itemActivate->ptAction;
 
-                    if (ListView_HitTest(GetDlgItem(hwndDlg, IDC_SETTINGS), &lvHitInfo) != -1)
+                    if (ListView_HitTest(GetDlgItem(hwndDlg, IDC_SETTINGS), &lvHitInfo) != INT_ERROR)
                     {
                         // Ignore click notifications for the listview checkbox region.
                         if (!(lvHitInfo.flags & LVHT_ONITEMSTATEICON))
@@ -378,10 +382,11 @@ VOID PvShowOptionsWindow(
     _In_ HWND ParentWindow
     )
 {
-    DialogBox(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_OPTIONS),
         ParentWindow,
-        PvOptionsWndProc
+        PvOptionsWndProc,
+        NULL
         );
 }

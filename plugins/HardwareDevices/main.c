@@ -6,12 +6,13 @@
  * Authors:
  *
  *     wj32    2016
- *     dmex    2015-2021
+ *     dmex    2015-2022
  *
  */
 
 #include "devices.h"
 #include <hndlinfo.h>
+#include <secedit.h>
 
 PPH_PLUGIN PluginInstance = NULL;
 BOOLEAN NetAdapterEnableNdis = FALSE;
@@ -27,6 +28,10 @@ PH_QUEUED_LOCK DiskDrivesListLock = PH_QUEUED_LOCK_INIT;
 PPH_OBJECT_TYPE RaplDeviceEntryType = NULL;
 PPH_LIST RaplDevicesList = NULL;
 PH_QUEUED_LOCK RaplDevicesListLock = PH_QUEUED_LOCK_INIT;
+
+PPH_OBJECT_TYPE GraphicsDeviceEntryType = NULL;
+PPH_LIST GraphicsDevicesList = NULL;
+PH_QUEUED_LOCK GraphicsDevicesListLock = PH_QUEUED_LOCK_INIT;
 
 PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginUnloadCallbackRegistration;
@@ -50,10 +55,12 @@ VOID NTAPI LoadCallback(
 {
     LoadSettings();
 
+    GraphicsDeviceInitialize();
     DiskDrivesInitialize();
     NetAdaptersInitialize();
     RaplDeviceInitialize();
 
+    GraphicsDevicesLoadList();
     DiskDrivesLoadList();
     NetAdaptersLoadList();
     RaplDevicesLoadList();
@@ -68,20 +75,25 @@ VOID NTAPI UnloadCallback(
 }
 
 VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
-
-    if (!optionsEntry)
-        return;
 
     optionsEntry->CreateSection(
         L"Disk Devices",
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_DISKDRIVE_OPTIONS),
         DiskDriveOptionsDlgProc,
+        NULL
+        );
+
+    optionsEntry->CreateSection(
+        L"Graphics Devices",
+        PluginInstance->DllBase,
+        MAKEINTRESOURCE(IDD_GPUDEVICE_OPTIONS),
+        GraphicsDeviceOptionsDlgProc,
         NULL
         );
 
@@ -108,6 +120,8 @@ VOID NTAPI MainWindowShowingCallback(
     )
 {
     AddRemoveDeviceChangeCallback();
+    if (PhWindowsVersion >= WINDOWS_10)
+        InitializeDevicesTab();
 }
 
 VOID NTAPI ProcessesUpdatedCallback(
@@ -115,20 +129,39 @@ VOID NTAPI ProcessesUpdatedCallback(
     _In_opt_ PVOID Context
     )
 {
+    GraphicsDevicesUpdate();
     DiskDrivesUpdate();
     NetAdaptersUpdate();
     RaplDevicesUpdate();
 }
 
 VOID NTAPI SystemInformationInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_SYSINFO_POINTERS pluginEntry = (PPH_PLUGIN_SYSINFO_POINTERS)Parameter;
 
-    if (!pluginEntry)
-        return;
+    // GPU Devices
+
+    PhAcquireQueuedLockShared(&GraphicsDevicesListLock);
+
+    for (ULONG i = 0; i < GraphicsDevicesList->Count; i++)
+    {
+        PDV_GPU_ENTRY entry = PhReferenceObjectSafe(GraphicsDevicesList->Items[i]);
+
+        if (!entry)
+            continue;
+
+        if (entry->DevicePresent)
+        {
+            GraphicsDeviceSysInfoInitializing(pluginEntry, entry);
+        }
+
+        PhDereferenceObjectDeferDelete(entry);
+    }
+
+    PhReleaseQueuedLockShared(&GraphicsDevicesListLock);
 
     // Disk Drives
 
@@ -145,6 +178,8 @@ VOID NTAPI SystemInformationInitializingCallback(
         {
             DiskDriveSysInfoInitializing(pluginEntry, entry);
         }
+
+        PhDereferenceObjectDeferDelete(entry);
     }
 
     PhReleaseQueuedLockShared(&DiskDrivesListLock);
@@ -164,6 +199,8 @@ VOID NTAPI SystemInformationInitializingCallback(
         {
             NetAdapterSysInfoInitializing(pluginEntry, entry);
         }
+
+        PhDereferenceObjectDeferDelete(entry);
     }
 
     PhReleaseQueuedLockShared(&NetworkAdaptersListLock);
@@ -183,6 +220,8 @@ VOID NTAPI SystemInformationInitializingCallback(
         {
             RaplDeviceSysInfoInitializing(pluginEntry, entry);
         }
+
+        PhDereferenceObjectDeferDelete(entry);
     }
 
     PhReleaseQueuedLockShared(&RaplDevicesListLock);
@@ -208,7 +247,7 @@ PPH_STRING TrimString(
 
 BOOLEAN HardwareDeviceEnableDisable(
     _In_ HWND ParentWindow,
-    _In_ PPH_STRING DeviceInstance, 
+    _In_ PPH_STRING DeviceInstance,
     _In_ BOOLEAN Enable
     )
 {
@@ -221,16 +260,16 @@ BOOLEAN HardwareDeviceEnableDisable(
         CM_LOCATE_DEVNODE_PHANTOM
         );
 
-    if (result != CR_SUCCESS) 
+    if (result != CR_SUCCESS)
     {
         PhShowStatus(ParentWindow, L"Failed to change the device state.", 0, CM_MapCrToWin32Err(result, ERROR_INVALID_HANDLE_STATE));
         return FALSE;
     }
 
     if (Enable)
-        result = CM_Enable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
+        result = CM_Enable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST
     else
-        result = CM_Disable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
+        result = CM_Disable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST
 
     if (result != CR_SUCCESS)
     {
@@ -320,60 +359,127 @@ BOOLEAN HardwareDeviceUninstall(
     return TRUE;
 }
 
+_Success_(return)
+BOOLEAN HardwareDeviceShowSecurity(
+    _In_ HWND ParentWindow,
+    _In_ PPH_STRING DeviceInstance
+    )
+{
+    DEVINST deviceInstanceHandle;
+    CONFIGRET result;
+    PBYTE buffer;
+    ULONG bufferSize;
+    DEVPROPTYPE propertyType;
+
+    if (CM_Locate_DevNode(
+        &deviceInstanceHandle,
+        DeviceInstance->Buffer,
+        CM_LOCATE_DEVNODE_NORMAL
+        ) != CR_SUCCESS)
+    {
+        return FALSE;
+    }
+
+    bufferSize = 0x80;
+    buffer = PhAllocate(bufferSize);
+    propertyType = DEVPROP_TYPE_EMPTY;
+
+    if ((result = CM_Get_DevNode_Property(
+        deviceInstanceHandle,
+        &DEVPKEY_Device_Security,
+        &propertyType,
+        buffer,
+        &bufferSize,
+        0
+        )) == CR_BUFFER_SMALL)
+    {
+        PhFree(buffer);
+        buffer = PhAllocate(bufferSize);
+
+        result = CM_Get_DevNode_Property(
+            deviceInstanceHandle,
+            &DEVPKEY_Device_Security,
+            &propertyType,
+            buffer,
+            &bufferSize,
+            0
+            );
+    }
+
+    return FALSE;
+}
+
 BOOLEAN HardwareDeviceShowProperties(
     _In_ HWND WindowHandle,
     _In_ PPH_STRING DeviceInstance
     )
 {
-    HMODULE devMgrHandle;
+    PVOID devMgrHandle;
 
     // https://msdn.microsoft.com/en-us/library/ff548181.aspx
-    VOID (WINAPI* DeviceProperties_RunDLL_I)(
-        _In_ HWND hwndStub,
-        _In_ HINSTANCE hAppInstance,
-        _In_ PWSTR lpCmdLine,
-        _In_ INT nCmdShow
+    //VOID (WINAPI* DeviceProperties_RunDLL_I)( // No resources tab (dmex)
+    //    _In_ HWND hwndStub,
+    //    _In_ HINSTANCE hAppInstance,
+    //    _In_ PWSTR lpCmdLine,
+    //    _In_ INT nCmdShow
+    //    );
+
+    INT_PTR (WINAPI* DevicePropertiesW)( // Includes resources tab (dmex)
+        _In_opt_ HWND ParentWindow,
+        _In_opt_ PCWSTR MachineName,
+        _In_opt_ PCWSTR DeviceID,
+        _In_ BOOL ShowDeviceManager
         );
 
-    //ULONG (WINAPI *DeviceAdvancedPropertiesW_I)(
-    //    _In_opt_ HWND hWndParent,
-    //    _In_opt_ PWSTR MachineName,
-    //    _In_ PWSTR DeviceID);
+    //PhShellExecuteEx(
+    //    GetParent(WindowHandle),
+    //    L"DeviceProperties.exe", // auto-elevated (dmex)
+    //    PhGetString(DeviceInstance),
+    //    SW_SHOWDEFAULT,
+    //    0,
+    //    0,
+    //    NULL
+    //    );
 
     if (devMgrHandle = PhLoadLibrary(L"devmgr.dll"))
     {
-        if (DeviceProperties_RunDLL_I = PhGetProcedureAddress(devMgrHandle, "DeviceProperties_RunDLLW", 0))
+        if (DevicePropertiesW = PhGetProcedureAddress(devMgrHandle, "DevicePropertiesW", 0))
         {
-            PH_FORMAT format[2];
-            WCHAR formatBuffer[512];
-
-            // /DeviceID %s
-            PhInitFormatS(&format[0], L"/DeviceID ");
-            PhInitFormatSR(&format[1], DeviceInstance->sr);
-
-            if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), NULL))
-            {
-                // This will sometimes re-throw an RPC error while debugging and can safely be ignored. (dmex)
-                DeviceProperties_RunDLL_I(
-                    GetParent(WindowHandle),
-                    NULL,
-                    formatBuffer,
-                    0
-                    );
-            }
-            else
-            {
-                // This will sometimes re-throw an RPC error while debugging and can safely be ignored. (dmex)
-                DeviceProperties_RunDLL_I(
-                    GetParent(WindowHandle),
-                    NULL,
-                    PhaFormatString(L"/DeviceID %s", DeviceInstance->Buffer)->Buffer,
-                    0
-                    );
-            }
+            DevicePropertiesW(GetParent(WindowHandle), NULL, PhGetString(DeviceInstance), FALSE);
         }
 
-        FreeLibrary(devMgrHandle);
+        //if (DeviceProperties_RunDLL_I = PhGetProcedureAddress(devMgrHandle, "DeviceProperties_RunDLLW", 0))
+        //{
+        //    PH_FORMAT format[2];
+        //    WCHAR formatBuffer[512];
+        //
+        //    // /DeviceID %s
+        //    PhInitFormatS(&format[0], L"/DeviceID ");
+        //    PhInitFormatSR(&format[1], DeviceInstance->sr);
+        //
+        //    if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), NULL))
+        //    {
+        //        // This will sometimes re-throw an RPC error while debugging and can safely be ignored. (dmex)
+        //        DeviceProperties_RunDLL_I(
+        //            GetParent(WindowHandle),
+        //            NULL,
+        //            formatBuffer,
+        //            0
+        //            );
+        //    }
+        //    else
+        //    {
+        //        // This will sometimes re-throw an RPC error while debugging and can safely be ignored. (dmex)
+        //        DeviceProperties_RunDLL_I(
+        //            GetParent(WindowHandle),
+        //            NULL,
+        //            PhaFormatString(L"/DeviceID %s", DeviceInstance->Buffer)->Buffer,
+        //            0
+        //            );
+        //    }
+        //}
+
+        PhFreeLibrary(devMgrHandle);
     }
 
     return FALSE;
@@ -441,9 +547,9 @@ BOOLEAN HardwareDeviceOpenKey(
             );
 
         if (bestObjectName)
-        { 
+        {
             // HKLM\SYSTEM\ControlSet\Control\Class\ += DEVPKEY_Device_Driver
-            PhShellOpenKey(ParentWindow, bestObjectName);
+            PhShellOpenKey2(ParentWindow, bestObjectName);
             PhDereferenceObject(bestObjectName);
         }
 
@@ -472,10 +578,10 @@ VOID ShowDeviceMenu(
     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 3, L"Uninstall", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
     subMenu = PhCreateEMenuItem(0, 0, L"Open key", NULL, NULL);
-    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, 4, L"Hardware", NULL, NULL), ULONG_MAX);
-    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, 5, L"Software", NULL, NULL), ULONG_MAX);
-    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, 6, L"User", NULL, NULL), ULONG_MAX);
-    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, 7, L"Config", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, HW_KEY_INDEX_HARDWARE, L"Hardware", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, HW_KEY_INDEX_SOFTWARE, L"Software", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, HW_KEY_INDEX_USER, L"User", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(subMenu, PhCreateEMenuItem(0, HW_KEY_INDEX_CONFIG, L"Config", NULL, NULL), ULONG_MAX);
     PhInsertEMenuItem(menu, subMenu, ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 10, L"Properties", NULL, NULL), ULONG_MAX);
@@ -508,10 +614,10 @@ VOID ShowDeviceMenu(
                 }
             }
             break;
-        case 4:
-        case 5:
-        case 6:
-        case 7:
+        case HW_KEY_INDEX_HARDWARE:
+        case HW_KEY_INDEX_SOFTWARE:
+        case HW_KEY_INDEX_USER:
+        case HW_KEY_INDEX_CONFIG:
             HardwareDeviceOpenKey(ParentWindow, DeviceInstance, selectedItem->Id);
             break;
         case 10:
@@ -548,6 +654,24 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_DISK_COUNTERS_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_SMART_COUNTERS_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_RAPL_LIST, L"" },
+                { StringSettingType, SETTING_NAME_GRAPHICS_LIST, L"" },
+                { IntegerPairSettingType, SETTING_NAME_GRAPHICS_NODES_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_GRAPHICS_NODES_WINDOW_SIZE, L"@96|850,490" },
+                { IntegerPairSettingType, SETTING_NAME_DEVICE_TREE_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_DEVICE_TREE_WINDOW_SIZE, L"@96|1065,627" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_TREE_AUTO_REFRESH, L"1" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_TREE_SHOW_DISCONNECTED, L"0" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_TREE_HIGHLIGHT_UPPER_FILTERED, L"0" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_TREE_HIGHLIGHT_LOWER_FILTERED, L"0" },
+                { IntegerPairSettingType, SETTING_NAME_DEVICE_TREE_SORT, L"0,0" },
+                { StringSettingType, SETTING_NAME_DEVICE_TREE_COLUMNS, L"" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_PROBLEM_COLOR, L"283cff" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_COLOR, L"6d6d6d" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISCONNECTED_COLOR, L"6d6d6d" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_HIGHLIGHT_COLOR, L"00aaff" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SORT_CHILDREN_BY_NAME, L"1" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_ROOT, L"0" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_SOFTWARE_COMPONENTS, L"1" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -556,9 +680,8 @@ LOGICAL DllMain(
                 return FALSE;
 
             info->DisplayName = L"Hardware Devices";
-            info->Author = L"dmex, wj32";
+            info->Author = L"dmex, wj32, jxy-s";
             info->Description = L"Plugin for monitoring hardware devices like Disk drives and Network adapters via the System Information window.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1820";
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),

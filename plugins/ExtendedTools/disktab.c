@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -117,7 +117,7 @@ BOOLEAN EtpDiskPageCallback(
                 PhInitializeWindowTheme(hwnd, TRUE); // HACK (dmex)
                 TreeNew_ThemeSupport(hwnd, TRUE);
             }
-            
+
             DiskTreeNewCreated = TRUE;
 
             DiskNodeHashtable = PhCreateHashtable(
@@ -456,8 +456,10 @@ VOID EtTickDiskNodes(
     int sortResult = 0;
 
 #define END_SORT_FUNCTION \
-    if (sortResult == 0) \
+    if (sortResult == 0 && diskItem1->FileNameWin32 && diskItem2->FileNameWin32) \
         sortResult = PhCompareString(diskItem1->FileNameWin32, diskItem2->FileNameWin32, TRUE); \
+    if (sortResult == 0) \
+        sortResult = uintptrcmp((ULONG_PTR)diskItem1->FileObject, (ULONG_PTR)diskItem2->FileObject); \
     \
     return PhModifySort(sortResult, DiskTreeNewSortOrder); \
 }
@@ -513,9 +515,9 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI EtpDiskTreeNewCallback(
     _In_ HWND WindowHandle,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PET_DISK_NODE node;
@@ -525,9 +527,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
 
             if (!getChildren->Node)
             {
@@ -564,9 +563,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
 
-            if (!isLeaf)
-                break;
-
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
@@ -574,9 +570,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PET_DISK_ITEM diskItem;
-
-            if (!getCellText)
-                break;
 
             node = (PET_DISK_NODE)getCellText->Node;
             diskItem = node->DiskItem;
@@ -715,9 +708,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
         {
             PPH_TREENEW_GET_NODE_ICON getNodeIcon = Parameter1;
 
-            if (!getNodeIcon)
-                break;
-
             node = (PET_DISK_NODE)getNodeIcon->Node;
             getNodeIcon->Icon = (HICON)node->DiskItem->ProcessIconIndex;
             getNodeIcon->Flags = TN_CACHE;
@@ -727,9 +717,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TOOLTIP getCellTooltip = Parameter1;
             PPH_PROCESS_NODE processNode;
-
-            if (!getCellTooltip)
-                break;
 
             node = (PET_DISK_NODE)getCellTooltip->Node;
 
@@ -815,7 +802,7 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
             data.MouseEvent = Parameter1;
             data.DefaultSortColumn = 0;
             data.DefaultSortOrder = AscendingSortOrder;
-            PhInitializeTreeNewColumnMenu(&data);
+            PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, WindowHandle, PH_EMENU_SHOW_LEFTRIGHT,
                 PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);
@@ -831,9 +818,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
     case TreeNewContextMenu:
         {
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
-
-            if (!contextMenuEvent)
-                break;
 
             EtShowDiskContextMenu(WindowHandle, contextMenuEvent);
         }
@@ -1028,7 +1012,7 @@ VOID EtHandleDiskCommand(
                 fileName = PhReferenceObject(diskItem->FileNameWin32);
                 streamIndex = PhFindLastCharInStringRef(&fileName->sr, L':', FALSE);
 
-                if (streamIndex != -1 && streamIndex != 1)
+                if (streamIndex != SIZE_MAX && streamIndex != 1)
                 {
                     PhMoveReference(&fileName, PhSubstring(fileName, 0, streamIndex));
                 }
@@ -1056,12 +1040,12 @@ VOID EtHandleDiskCommand(
                 fileName = PhReferenceObject(diskItem->FileNameWin32);
                 streamIndex = PhFindLastCharInStringRef(&fileName->sr, L':', FALSE);
 
-                if (streamIndex != -1 && streamIndex != 1)
+                if (streamIndex != SIZE_MAX && streamIndex != 1)
                 {
                     PhMoveReference(&fileName, PhSubstring(fileName, 0, streamIndex));
                 }
 
-                if (PhDoesFileExistsWin32(PhGetString(fileName)))
+                if (PhDoesFileExistWin32(PhGetString(fileName)))
                 {
                     PhShellExecuteUserString(
                         WindowHandle,
@@ -1089,7 +1073,7 @@ VOID EtHandleDiskCommand(
                 fileName = PhReferenceObject(diskItem->FileNameWin32);
                 streamIndex = PhFindLastCharInStringRef(&fileName->sr, L':', FALSE);
 
-                if (streamIndex != -1 && streamIndex != 1)
+                if (streamIndex != SIZE_MAX && streamIndex != 1)
                 {
                     PhMoveReference(&fileName, PhSubstring(fileName, 0, streamIndex));
                 }
@@ -1199,14 +1183,11 @@ VOID EtShowDiskContextMenu(
 }
 
 VOID NTAPI EtpDiskItemAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PET_DISK_ITEM diskItem = (PET_DISK_ITEM)Parameter;
-
-    if (!diskItem)
-        return;
 
     PhReferenceObject(diskItem);
     PhPushProviderEventQueue(&EtpDiskEventQueue, ProviderAddedEvent, Parameter, EtRunCount);
@@ -1297,6 +1278,10 @@ BOOLEAN NTAPI EtpSearchDiskListFilterCallback(
 {
     PET_DISK_NODE diskNode = (PET_DISK_NODE)Node;
     PTOOLSTATUS_WORD_MATCH wordMatch = ToolStatusInterface->WordMatch;
+
+    // Hide nodes without filenames (dmex)
+    //if (PhIsNullOrEmptyString(diskNode->DiskItem->FileName))
+    //    return FALSE;
 
     if (PhIsNullOrEmptyString(ToolStatusInterface->GetSearchboxText()))
         return TRUE;

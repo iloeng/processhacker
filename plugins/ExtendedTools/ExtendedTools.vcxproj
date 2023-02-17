@@ -72,37 +72,37 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <Link>
       <AdditionalDependencies>cfgmgr32.lib;fwpuclnt.lib;pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <DelayLoadDLLs>fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>cfgmgr32.dll;fwpuclnt.dll;oleaut32.dll;tdh.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -111,6 +111,8 @@
     <ClCompile Include="etwdisk.c" />
     <ClCompile Include="etwmini.c" />
     <ClCompile Include="etwmon.c" />
+    <ClCompile Include="firmware.c" />
+    <ClCompile Include="firmware_editor.c" />
     <ClCompile Include="frameprp.c" />
     <ClCompile Include="fwmon.c" />
     <ClCompile Include="fwtab.c" />
@@ -122,10 +124,17 @@
     <ClCompile Include="gpusys.c" />
     <ClCompile Include="iconext.c" />
     <ClCompile Include="framemon.cpp" />
+    <ClCompile Include="namedpipes.c" />
+    <ClCompile Include="objmgr.c" />
+    <ClCompile Include="pooldb.c" />
+    <ClCompile Include="pooldialog.c" />
+    <ClCompile Include="pooldialogbig.c" />
+    <ClCompile Include="pooltree.c" />
     <ClCompile Include="PresentMon\PresentMon.cpp" />
     <ClCompile Include="PresentMon\PresentMonTraceConsumer.cpp" />
     <ClCompile Include="PresentMon\TraceConsumer.cpp" />
     <ClCompile Include="PresentMon\TraceSession.cpp" />
+    <ClCompile Include="reparse.c" />
     <ClCompile Include="svcext.c" />
     <ClCompile Include="treeext.c" />
     <ClCompile Include="etwstat.c" />
@@ -138,17 +147,21 @@
     <ClCompile Include="thrdact.c" />
     <ClCompile Include="unldll.c" />
     <ClCompile Include="utils.c" />
+    <ClCompile Include="waitchain.c" />
     <ClCompile Include="wswatch.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="disktabp.h" />
+    <ClInclude Include="efi_guid_list.h" />
     <ClInclude Include="etwmini.h" />
     <ClInclude Include="etwmon.h" />
     <ClInclude Include="etwsys.h" />
+    <ClInclude Include="extension\plugin.h" />
     <ClInclude Include="exttools.h" />
     <ClInclude Include="gpumini.h" />
     <ClInclude Include="gpumon.h" />
     <ClInclude Include="gpusys.h" />
+    <ClInclude Include="poolmon.h" />
     <ClInclude Include="PresentMon\ETW\Microsoft_Windows_D3D9.h" />
     <ClInclude Include="PresentMon\ETW\Microsoft_Windows_Dwm_Core.h" />
     <ClInclude Include="PresentMon\ETW\Microsoft_Windows_DXGI.h" />
@@ -166,6 +179,22 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ExtendedTools.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resources\pooltag.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\device.ico" />
+    <Image Include="resources\driver.ico" />
+    <Image Include="resources\event.ico" />
+    <Image Include="resources\folder.ico" />
+    <Image Include="resources\key.ico" />
+    <Image Include="resources\link.ico" />
+    <Image Include="resources\mutant.ico" />
+    <Image Include="resources\port.ico" />
+    <Image Include="resources\section.ico" />
+    <Image Include="resources\session.ico" />
+    <Image Include="resources\unknown.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

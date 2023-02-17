@@ -39,34 +39,36 @@ VOID DiskDrivesLoadList(
     PPH_STRING settingsString;
     PH_STRINGREF remaining;
 
-    settingsString = PhaGetStringSetting(SETTING_NAME_DISK_LIST);
+    settingsString = PhGetStringSetting(SETTING_NAME_DISK_LIST);
 
-    if (PhIsNullOrEmptyString(settingsString))
-        return;
-
-    remaining = PhGetStringRef(settingsString);
-
-    while (remaining.Length != 0)
+    if (!PhIsNullOrEmptyString(settingsString))
     {
-        PH_STRINGREF part;
-        DV_DISK_ID id;
-        PDV_DISK_ENTRY entry;
+        remaining = PhGetStringRef(settingsString);
 
-        if (remaining.Length == 0)
-            break;
+        while (remaining.Length != 0)
+        {
+            PH_STRINGREF part;
+            DV_DISK_ID id;
+            PDV_DISK_ENTRY entry;
 
-        PhSplitStringRefAtChar(&remaining, L',', &part, &remaining);
+            if (remaining.Length == 0)
+                break;
 
-        // Convert settings path for compatibility. (dmex)
-        if (part.Length > sizeof(UNICODE_NULL) && part.Buffer[1] == OBJ_NAME_PATH_SEPARATOR)
-            part.Buffer[1] = L'?';
+            PhSplitStringRefAtChar(&remaining, L',', &part, &remaining);
 
-        InitializeDiskId(&id, PhCreateString2(&part));
-        entry = CreateDiskEntry(&id);
-        DeleteDiskId(&id);
+            // Convert settings path for compatibility. (dmex)
+            if (part.Length > sizeof(UNICODE_NULL) && part.Buffer[1] == OBJ_NAME_PATH_SEPARATOR)
+                part.Buffer[1] = L'?';
 
-        entry->UserReference = TRUE;
+            InitializeDiskId(&id, PhCreateString2(&part));
+            entry = CreateDiskEntry(&id);
+            DeleteDiskId(&id);
+
+            entry->UserReference = TRUE;
+        }
     }
+
+    PhClearReference(&settingsString);
 }
 
 VOID DiskDrivesSaveList(
@@ -89,11 +91,8 @@ VOID DiskDrivesSaveList(
 
         if (entry->UserReference)
         {
-            PhAppendFormatStringBuilder(
-                &stringBuilder,
-                L"%s,",
-                entry->Id.DevicePath->Buffer // This value is SAFE and does not change.
-                );
+            PhAppendStringBuilder(&stringBuilder, &entry->Id.DevicePath->sr);
+            PhAppendCharStringBuilder(&stringBuilder, L',');
         }
 
         PhDereferenceObjectDeferDelete(entry);
@@ -213,13 +212,13 @@ VOID FreeListViewDiskDriveEntries(
     _In_ PDV_DISK_OPTIONS_CONTEXT Context
     )
 {
-    ULONG index = ULONG_MAX;
+    INT index = INT_ERROR;
 
     while ((index = PhFindListViewItemByFlags(
         Context->ListViewHandle,
         index,
         LVNI_ALL
-        )) != ULONG_MAX)
+        )) != INT_ERROR)
     {
         PDV_DISK_ID param;
 
@@ -231,6 +230,7 @@ VOID FreeListViewDiskDriveEntries(
     }
 }
 
+_Success_(return)
 BOOLEAN QueryDiskDeviceInterfaceDescription(
     _In_ PWSTR DeviceInterface,
     _Out_ DEVINST *DeviceInstanceHandle,
@@ -383,7 +383,7 @@ VOID FindDiskDrives(
 
         if (NT_SUCCESS(PhCreateFile(
             &deviceHandle,
-            diskEntry->DevicePath,
+            &diskEntry->DevicePath->sr,
             FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -475,7 +475,7 @@ VOID FindDiskDrives(
     PhAcquireQueuedLockShared(&DiskDrivesListLock);
     for (ULONG i = 0; i < DiskDrivesList->Count; i++)
     {
-        ULONG index = ULONG_MAX;
+        INT index = INT_ERROR;
         BOOLEAN found = FALSE;
         PDV_DISK_ENTRY entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
 
@@ -486,7 +486,7 @@ VOID FindDiskDrives(
             Context->ListViewHandle,
             index,
             LVNI_ALL
-            )) != ULONG_MAX)
+            )) != INT_ERROR)
         {
             PDV_DISK_ID param;
 
@@ -602,9 +602,12 @@ VOID LoadDiskDriveImages(
     DEVPROPTYPE devicePropertyType;
     ULONG deviceInstanceIdLength = MAX_DEVICE_ID_LEN;
     WCHAR deviceInstanceId[MAX_DEVICE_ID_LEN + 1] = L"";
+    LONG dpiValue;
 
     bufferSize = 0x40;
     deviceIconPath = PhCreateStringEx(NULL, bufferSize);
+
+    dpiValue = PhGetWindowDpi(Context->ListViewHandle);
 
     if ((result = CM_Get_Class_Property(
         &GUID_DEVCLASS_DISKDRIVE,
@@ -635,11 +638,11 @@ VOID LoadDiskDriveImages(
     PhStringToInteger64(&indexPartSr, 10, &index);
     PhMoveReference(&deviceIconPath, PhExpandEnvironmentStrings(&dllPartSr));
 
-    if (PhExtractIconEx(deviceIconPath, FALSE, (INT)index, &smallIcon, NULL))
+    if (PhExtractIconEx(deviceIconPath, FALSE, (INT)index, &smallIcon, NULL, dpiValue))
     {
         HIMAGELIST imageList = PhImageListCreate(
-            24, // GetSystemMetrics(SM_CXSMICON)
-            24, // GetSystemMetrics(SM_CYSMICON)
+            PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CXSMICON, dpiValue)
+            PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CYSMICON, dpiValue)
             ILC_MASK | ILC_COLOR32,
             1,
             1
@@ -665,9 +668,7 @@ INT_PTR CALLBACK DiskDriveOptionsDlgProc(
 
     if (uMsg == WM_INITDIALOG)
     {
-        context = PhAllocate(sizeof(DV_DISK_OPTIONS_CONTEXT));
-        memset(context, 0, sizeof(DV_DISK_OPTIONS_CONTEXT));
-
+        context = PhAllocateZero(sizeof(DV_DISK_OPTIONS_CONTEXT));
         PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else

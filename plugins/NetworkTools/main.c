@@ -44,12 +44,15 @@ typedef VOID (NTAPI* PNETWORKTOOLS_DRAW_COUNTRYICON)(
     _In_ INT Index
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_PING)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_TRACERT)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_WHOIS)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 
@@ -108,7 +111,7 @@ VOID NTAPI ShowOptionsCallback(
 _Success_(return)
 static BOOLEAN ParseNetworkAddress(
     _In_ PWSTR AddressString,
-    _Out_ PPH_IP_ENDPOINT RemoteEndpoint  
+    _Out_ PPH_IP_ENDPOINT RemoteEndpoint
     )
 {
     NET_ADDRESS_INFO addressInfo;
@@ -204,38 +207,32 @@ static BOOLEAN ParseNetworkAddress(
             );
         RemoteEndpoint->Port = _byteswap_ushort(addressInfo.Ipv6Address.sin6_port);
         RemoteEndpoint->Address.Type = PH_IPV6_NETWORK_TYPE;
-        return TRUE;      
+        return TRUE;
     }
 
     return FALSE;
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = (PPH_PLUGIN_MENU_ITEM)Parameter;
-    PPH_NETWORK_ITEM networkItem;
-
-    if (!menuItem)
-        return;
-
-    networkItem = (PPH_NETWORK_ITEM)menuItem->Context;
 
     switch (menuItem->Id)
     {
     case NETWORK_ACTION_PING:
-        ShowPingWindow(networkItem);
+        ShowPingWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case NETWORK_ACTION_TRACEROUTE:
-        ShowTracertWindow(networkItem);
+        ShowTracertWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case NETWORK_ACTION_WHOIS:
-        ShowWhoisWindow(networkItem);
+        ShowWhoisWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case MAINMENU_ACTION_PING:
-        {           
+        {
             PPH_STRING selectedChoice = NULL;
             PH_IP_ENDPOINT remoteEndpoint = { 0 };
 
@@ -254,7 +251,7 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowPingWindowFromAddress(remoteEndpoint);
+                    ShowPingWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
@@ -280,7 +277,7 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowTracertWindowFromAddress(remoteEndpoint);
+                    ShowTracertWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
@@ -306,33 +303,31 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowWhoisWindowFromAddress(remoteEndpoint);
+                    ShowWhoisWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
         }
         break;
     case MAINMENU_ACTION_GEOIP_UPDATE:
-        ShowGeoIPUpdateDialog();
+        ShowGeoLiteUpdateDialog(menuItem->OwnerWindow);
         break;
     }
 }
 
 VOID NTAPI MainMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_EMENU_ITEM networkToolsMenu;
 
-    if (!menuInfo)
-        return;
     if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_TOOLS)
         return;
-  
-    networkToolsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&Network Tools", NULL);    
-    PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_GEOIP_UPDATE, L"&GeoIP database update...", NULL), ULONG_MAX);
+
+    networkToolsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&Network Tools", NULL);
+    PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_GEOIP_UPDATE, L"&GeoLite database update...", NULL), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_PING, L"&Ping address...", NULL), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_TRACERT, L"&Traceroute address...", NULL), ULONG_MAX);
@@ -341,7 +336,7 @@ VOID NTAPI MainMenuInitializingCallback(
 }
 
 VOID NTAPI NetworkMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -350,9 +345,6 @@ VOID NTAPI NetworkMenuInitializingCallback(
     PPH_EMENU_ITEM whoisMenu;
     PPH_EMENU_ITEM traceMenu;
     PPH_EMENU_ITEM pingMenu;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Network.NumberOfNetworkItems == 1)
         networkItem = menuInfo->u.Network.NetworkItems[0];
@@ -445,15 +437,12 @@ LONG NTAPI NetworkServiceSortFunction(
 }
 
 VOID NTAPI NetworkTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION info = Parameter;
     PH_TREENEW_COLUMN column;
-
-    if (!info)
-        return;
 
     if (Context)
         *(HWND*)Context = info->TreeNewHandle;
@@ -506,7 +495,7 @@ VOID NTAPI NetworkItemCreateCallback(
     _In_ PVOID Object,
     _In_ PH_EM_OBJECT_TYPE ObjectType,
     _In_ PVOID Extension
-)
+    )
 {
     PPH_NETWORK_ITEM networkItem = Object;
     PNETWORK_EXTENSION extension = Extension;
@@ -514,7 +503,7 @@ VOID NTAPI NetworkItemCreateCallback(
     memset(extension, 0, sizeof(NETWORK_EXTENSION));
 
     extension->NetworkItem = networkItem;
-    extension->CountryIconIndex = INT_MAX;
+    extension->CountryIconIndex = INT_ERROR;
 
     if (NetworkExtensionEnabled)
     {
@@ -800,21 +789,21 @@ VOID NTAPI TreeNewMessageCallback(
                 // nothing to draw
                 break;
             }
-            
+
             // Padding
             rect.left += 5;
 
             // Draw the column data
             if (extension->RemoteCountryName)
             {
-                if (extension->CountryIconIndex != INT_MAX)
+                if (extension->CountryIconIndex != INT_ERROR)
                 {
                     DrawCountryIcon(hdc, rect, extension->CountryIconIndex);
                     rect.left += 16 + 2;
                 }
 
                 DrawText(
-                    hdc, 
+                    hdc,
                     extension->RemoteCountryName->Buffer,
                     (INT)extension->RemoteCountryName->Length / sizeof(WCHAR),
                     &rect,
@@ -870,8 +859,8 @@ VOID ProcessesUpdatedCallback(
     }
 
     for (
-        listEntry = NetworkExtensionListHead.Flink; 
-        listEntry != &NetworkExtensionListHead; 
+        listEntry = NetworkExtensionListHead.Flink;
+        listEntry != &NetworkExtensionListHead;
         listEntry = listEntry->Flink
         )
     {
@@ -1003,8 +992,8 @@ LOGICAL DllMain(
                 { IntegerSettingType, SETTING_NAME_TRACERT_MAX_HOPS, L"14" },
                 { IntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_SIZE, L"@96|600,365" },
-                { StringSettingType, SETTING_NAME_DB_LOCATION, L"%APPDATA%\\Process Hacker\\GeoLite2-Country.mmdb" },
-                { IntegerSettingType, SETTING_NAME_EXTENDED_TCP_STATS, L"0" }
+                { IntegerSettingType, SETTING_NAME_EXTENDED_TCP_STATS, L"0" },
+                { StringSettingType, SETTING_NAME_GEOLITE_API_KEY, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -1059,7 +1048,7 @@ LOGICAL DllMain(
                 TreeNewMessageCallback,
                 NULL,
                 &TreeNewMessageCallbackRegistration
-                );     
+                );
 
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackProcessesUpdated),
@@ -1069,8 +1058,8 @@ LOGICAL DllMain(
                 );
 
             PhPluginSetObjectExtension(
-                PluginInstance, 
-                EmNetworkItemType, 
+                PluginInstance,
+                EmNetworkItemType,
                 sizeof(NETWORK_EXTENSION),
                 NetworkItemCreateCallback,
                 NetworkItemDeleteCallback

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *     jxy-s   2020-2021
  *
  */
@@ -44,8 +44,8 @@
 #include <phapp.h>
 #include <phsettings.h>
 #include <procprv.h>
-#include <appresolver.h>
 
+#include <appresolver.h>
 #include <hndlinfo.h>
 #include <kphuser.h>
 #include <lsasup.h>
@@ -77,7 +77,6 @@ typedef struct _PH_PROCESS_QUERY_S1_DATA
     PH_IMAGE_VERSION_INFO VersionInfo;
 
     HANDLE ConsoleHostProcessId;
-    PPH_STRING PackageFullName;
     PPH_STRING UserName;
 
     union
@@ -163,6 +162,9 @@ ULONG PhStatisticsSampleCount = 512;
 BOOLEAN PhEnableProcessExtension = TRUE;
 BOOLEAN PhEnablePurgeProcessRecords = TRUE;
 BOOLEAN PhEnableCycleCpuUsage = TRUE;
+BOOLEAN PhEnablePackageIconSupport = FALSE;
+ULONG PhProcessProviderFlagsMask = 0;
+LONG PhProcessImageListWindowDpi = 96;
 
 PVOID PhProcessInformation = NULL; // only can be used if running on same thread as process provider
 SYSTEM_PERFORMANCE_INFORMATION PhPerfInformation;
@@ -173,8 +175,10 @@ ULONG PhTotalThreads = 0;
 ULONG PhTotalHandles = 0;
 ULONG PhTotalCpuQueueLength = 0;
 
-PSYSTEM_PROCESS_INFORMATION PhDpcsProcessInformation = NULL;
-PSYSTEM_PROCESS_INFORMATION PhInterruptsProcessInformation = NULL;
+UCHAR PhDpcsProcessInformationBuffer[sizeof(SYSTEM_PROCESS_INFORMATION) + sizeof(SYSTEM_PROCESS_INFORMATION_EXTENSION)] = { 0 }; // HACK (dmex)
+UCHAR PhInterruptsProcessInformationBuffer[sizeof(SYSTEM_PROCESS_INFORMATION) + sizeof(SYSTEM_PROCESS_INFORMATION_EXTENSION)] = { 0 };
+PSYSTEM_PROCESS_INFORMATION PhDpcsProcessInformation = (PSYSTEM_PROCESS_INFORMATION)PhDpcsProcessInformationBuffer;
+PSYSTEM_PROCESS_INFORMATION PhInterruptsProcessInformation = (PSYSTEM_PROCESS_INFORMATION)PhInterruptsProcessInformationBuffer;
 
 ULONG64 PhCpuTotalCycleDelta = 0; // real cycle time delta for this period
 PLARGE_INTEGER PhCpuIdleCycleTime = NULL; // cycle time for Idle
@@ -242,45 +246,42 @@ BOOLEAN PhProcessProviderInitialization(
     PhProcessRecordList = PhCreateList(40);
 
     PhEnableProcessExtension = WindowsVersion >= WINDOWS_10_RS3 && !PhIsExecutingInWow64();
-    PhProcessImageListInitialization();
 
     RtlInitializeSListHead(&PhProcessQueryDataListHead);
 
-    PhDpcsProcessInformation = PhAllocateZero(sizeof(SYSTEM_PROCESS_INFORMATION) + sizeof(SYSTEM_PROCESS_INFORMATION_EXTENSION));
     RtlInitUnicodeString(&PhDpcsProcessInformation->ImageName, L"DPCs");
     PhDpcsProcessInformation->UniqueProcessId = DPCS_PROCESS_ID;
     PhDpcsProcessInformation->InheritedFromUniqueProcessId = SYSTEM_IDLE_PROCESS_ID;
 
-    PhInterruptsProcessInformation = PhAllocateZero(sizeof(SYSTEM_PROCESS_INFORMATION) + sizeof(SYSTEM_PROCESS_INFORMATION_EXTENSION));
     RtlInitUnicodeString(&PhInterruptsProcessInformation->ImageName, L"Interrupts");
     PhInterruptsProcessInformation->UniqueProcessId = INTERRUPTS_PROCESS_ID;
     PhInterruptsProcessInformation->InheritedFromUniqueProcessId = SYSTEM_IDLE_PROCESS_ID;
 
-    PhCpuInformation = PhAllocate(
+    PhCpuInformation = PhAllocateZero(
         sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) *
         PhSystemProcessorInformation.NumberOfProcessors
         );
 
-    PhCpuIdleCycleTime = PhAllocate(
+    PhCpuIdleCycleTime = PhAllocateZero(
         sizeof(LARGE_INTEGER) *
         PhSystemProcessorInformation.NumberOfProcessors
         );
-    PhCpuSystemCycleTime = PhAllocate(
+    PhCpuSystemCycleTime = PhAllocateZero(
         sizeof(LARGE_INTEGER) *
         PhSystemProcessorInformation.NumberOfProcessors
         );
 
-    usageBuffer = PhAllocate(
+    usageBuffer = PhAllocateZero(
         sizeof(FLOAT) *
         PhSystemProcessorInformation.NumberOfProcessors *
         2
         );
-    deltaBuffer = PhAllocate(
+    deltaBuffer = PhAllocateZero(
         sizeof(PH_UINT64_DELTA) *
         PhSystemProcessorInformation.NumberOfProcessors *
         3 // 4 for PhCpusIdleCycleDelta
         );
-    historyBuffer = PhAllocate(
+    historyBuffer = PhAllocateZero(
         sizeof(PH_CIRCULAR_BUFFER_FLOAT) *
         PhSystemProcessorInformation.NumberOfProcessors *
         2
@@ -296,8 +297,6 @@ BOOLEAN PhProcessProviderInitialization(
 
     PhCpusKernelHistory = historyBuffer;
     PhCpusUserHistory = PhCpusKernelHistory + PhSystemProcessorInformation.NumberOfProcessors;
-
-    memset(deltaBuffer, 0, sizeof(PH_UINT64_DELTA) * PhSystemProcessorInformation.NumberOfProcessors);
 
     return TRUE;
 }
@@ -470,7 +469,7 @@ FORCEINLINE ULONG PhHashProcessItem(
  * found process item is not incremented.
  */
 PPH_PROCESS_ITEM PhpLookupProcessItem(
-    _In_ HANDLE ProcessId
+    _In_opt_ HANDLE ProcessId
     )
 {
     PH_PROCESS_ITEM lookupProcessItem;
@@ -503,7 +502,7 @@ PPH_PROCESS_ITEM PhpLookupProcessItem(
  * \return The found process item.
  */
 PPH_PROCESS_ITEM PhReferenceProcessItem(
-    _In_ HANDLE ProcessId
+    _In_opt_ HANDLE ProcessId
     )
 {
     PPH_PROCESS_ITEM processItem;
@@ -713,19 +712,31 @@ VOID PhpProcessQueryStage1(
     HANDLE processId = processItem->ProcessId;
     HANDLE processHandleLimited = processItem->QueryHandle;
 
-    if (!PhIsNullOrEmptyString(processItem->FileName) && !processItem->IsSubsystemProcess)
+    // Version info
+    if (!processItem->IsSubsystemProcess)
     {
-        if (PhDoesFileExists(processItem->FileName))
+        if (!PhIsNullOrEmptyString(processItem->FileName) && PhDoesFileExist(&processItem->FileName->sr))
         {
-            Data->IconEntry = PhImageListExtractIcon(processItem->FileName, TRUE);
+            Data->IconEntry = PhImageListExtractIcon(
+                processItem->FileName,
+                TRUE,
+                processItem->ProcessId,
+                processItem->PackageFullName,
+                PhProcessImageListWindowDpi
+                );
 
-            // Version info.
             PhInitializeImageVersionInfoCached(
                 &Data->VersionInfo,
                 processItem->FileName,
                 FALSE,
                 PhEnableVersionShortText
                 );
+        }
+
+        if (PhEnableCycleCpuUsage && processId == INTERRUPTS_PROCESS_ID)
+        {
+            static PH_STRINGREF descriptionText = PH_STRINGREF_INIT(L"Interrupts and DPCs");
+            PhMoveReference(&Data->VersionInfo.FileDescription, PhCreateString2(&descriptionText));
         }
     }
 
@@ -792,7 +803,7 @@ VOID PhpProcessQueryStage1(
     // Job
     if (processHandleLimited)
     {
-        if (KphIsConnected())
+        if (KphLevel() >= KphLevelMed)
         {
             HANDLE jobHandle = NULL;
 
@@ -822,7 +833,7 @@ VOID PhpProcessQueryStage1(
         }
         else
         {
-            // KProcessHacker is not available. We can determine if the process is in a job, but we
+            // KSystemInformer is not available. We can determine if the process is in a job, but we
             // can't get a handle to the job.
 
             status = NtIsProcessInJob(processHandleLimited, NULL);
@@ -839,17 +850,12 @@ VOID PhpProcessQueryStage1(
     }
 
     // Immersive
-    if (processHandleLimited && WindowsVersion >= WINDOWS_8 && !processItem->IsSubsystemProcess)
+    if (processHandleLimited && WindowsVersion >= WINDOWS_8 && processItem->IsPackagedProcess)
     {
         Data->IsImmersive = !!PhIsImmersiveProcess(processHandleLimited);
     }
 
-    // Package full name
-    if (processHandleLimited && ((WindowsVersion >= WINDOWS_8 && Data->IsImmersive) || WindowsVersion >= WINDOWS_10))
-    {
-        Data->PackageFullName = PhGetProcessPackageFullName(processHandleLimited);
-    }
-
+    // Filtered
     if (processHandleLimited && processItem->IsHandleValid)
     {
         OBJECT_BASIC_INFORMATION basicInfo;
@@ -925,7 +931,7 @@ VOID PhpProcessQueryStage1(
         }
     }
 
-    if (processItem->Sid)
+    if (processItem->Sid && FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_USERNAME))
     {
         // Note: We delay resolving the SID name because the local LSA cache might still be
         // initializing for users on domain networks with slow links (e.g. VPNs). This can block
@@ -980,7 +986,7 @@ VOID PhpProcessQueryStage2(
             // If we fail to access the file we could go read from the remote
             // process memory, but for now we only read from the file. (jxy-s)
 
-            if (NT_SUCCESS(PhLoadMappedImageEx(processItem->FileName, NULL, &mappedImage)))
+            if (NT_SUCCESS(PhLoadMappedImageEx(&processItem->FileName->sr, NULL, &mappedImage)))
             {
                 Data->Architecture = (USHORT)mappedImage.NtHeaders->FileHeader.Machine;
                 PhUnloadMappedImage(&mappedImage);
@@ -1115,7 +1121,6 @@ VOID PhpFillProcessItemStage1(
     processItem->IconEntry = Data->IconEntry;
     memcpy(&processItem->VersionInfo, &Data->VersionInfo, sizeof(PH_IMAGE_VERSION_INFO));
     processItem->ConsoleHostProcessId = Data->ConsoleHostProcessId;
-    processItem->PackageFullName = Data->PackageFullName;
     processItem->IsDotNet = Data->IsDotNet;
     processItem->IsInJob = Data->IsInJob;
     processItem->IsInSignificantJob = Data->IsInSignificantJob;
@@ -1132,7 +1137,7 @@ VOID PhpFillProcessItemStage1(
     else if (Data->UserName)
         PhDereferenceObject(Data->UserName);
 
-    // Note: Queue stage 2 processing after filling stage1 process data. 
+    // Note: Queue stage 2 processing after filling stage1 process data.
     PhpQueueProcessQueryStage2(processItem);
 }
 
@@ -1173,7 +1178,7 @@ VOID PhpFillProcessItemExtension(
 
     if (!PhEnableProcessExtension)
         return;
-    
+
     processExtension = PH_PROCESS_EXTENSION(Process);
 
     ProcessItem->DiskCounters = processExtension->DiskCounters;
@@ -1195,7 +1200,7 @@ VOID PhpFillProcessItem(
     if (ProcessItem->ProcessId != SYSTEM_IDLE_PROCESS_ID)
         ProcessItem->ProcessName = PhCreateStringFromUnicodeString(&Process->ImageName);
     else
-        ProcessItem->ProcessName = PhCreateString(SYSTEM_IDLE_PROCESS_NAME);
+        ProcessItem->ProcessName = PhCreateStringFromUnicodeString(&SYSTEM_IDLE_PROCESS_NAME);
 
     if (PH_IS_REAL_PROCESS_ID(ProcessItem->ProcessId))
     {
@@ -1229,6 +1234,7 @@ VOID PhpFillProcessItem(
             ProcessItem->IsSecureProcess = basicInfo.IsSecureProcess;
             ProcessItem->IsSubsystemProcess = basicInfo.IsSubsystemProcess;
             ProcessItem->IsWow64 = basicInfo.IsWow64Process;
+            ProcessItem->IsPackagedProcess = basicInfo.IsStronglyNamed;
             ProcessItem->IsWow64Valid = TRUE;
         }
     }
@@ -1242,37 +1248,32 @@ VOID PhpFillProcessItem(
         {
             if (PH_IS_REAL_PROCESS_ID(ProcessItem->ProcessId))
             {
-                PPH_STRING fileName = NULL;
-                PPH_STRING fileNameWin32 = NULL;
+                PPH_STRING fileName;
 
                 if (NT_SUCCESS(PhGetProcessImageFileNameByProcessId(ProcessItem->ProcessId, &fileName)))
                 {
                     ProcessItem->FileName = fileName;
                 }
 
-                if (ProcessItem->QueryHandle && !ProcessItem->IsSubsystemProcess)
+                if (ProcessItem->QueryHandle)
                 {
-                    PhGetProcessImageFileNameWin32(ProcessItem->QueryHandle, &fileNameWin32); // PhGetProcessImageFileName (dmex)
+                    //if (NT_SUCCESS(PhGetProcessImageFileName(ProcessItem->QueryHandle, &fileName)))
+                    //    ProcessItem->FileName = fileName;
+                    if (NT_SUCCESS(PhGetProcessImageFileNameWin32(ProcessItem->QueryHandle, &fileName)))
+                        ProcessItem->FileNameWin32 = fileName;
                 }
 
-                // Note: Some minimal/pico process (SecureSystem) are using UNICODE_NULL as their filename. Make sure we
-                // clear the string and show N/A instead of the empty string. (dmex)
-                if (ProcessItem->FileName && ProcessItem->FileName->Length == 0)
-                    PhClearReference(&ProcessItem->FileName);
-                if (fileNameWin32 && fileNameWin32->Length == 0)
-                    PhClearReference(&fileNameWin32);
-
-                if (fileNameWin32)
-                    ProcessItem->FileNameWin32 = fileNameWin32;
-                else if (ProcessItem->FileName)
-                    ProcessItem->FileNameWin32 = PhGetFileName(ProcessItem->FileName);
+                if (ProcessItem->FileName && PhIsNullOrEmptyString(ProcessItem->FileNameWin32))
+                {
+                    PhMoveReference(&ProcessItem->FileNameWin32, PhGetFileName(ProcessItem->FileName));
+                }
             }
         }
         else
         {
             PPH_STRING fileName;
 
-            if (fileName = PhGetKernelFileName())
+            if (fileName = PhGetKernelFileName2())
             {
                 ProcessItem->FileName = fileName;
                 ProcessItem->FileNameWin32 = PhGetFileName(fileName);
@@ -1294,25 +1295,28 @@ VOID PhpFillProcessItem(
             &tokenHandle
             )))
         {
-            PTOKEN_USER tokenUser;
+            PH_TOKEN_USER tokenUser;
             TOKEN_ELEVATION_TYPE elevationType;
+            BOOLEAN isElevated;
             MANDATORY_LEVEL integrityLevel;
             PWSTR integrityString;
 
             // User
             if (NT_SUCCESS(PhGetTokenUser(tokenHandle, &tokenUser)))
             {
-                ProcessItem->Sid = PhAllocateCopy(tokenUser->User.Sid, RtlLengthSid(tokenUser->User.Sid));
-                ProcessItem->UserName = PhpGetSidFullNameCached(tokenUser->User.Sid);
-
-                PhFree(tokenUser);
+                ProcessItem->Sid = PhAllocateCopy(tokenUser.User.Sid, RtlLengthSid(tokenUser.User.Sid));
+                ProcessItem->UserName = PhpGetSidFullNameCached(tokenUser.User.Sid);
             }
 
             // Elevation
             if (NT_SUCCESS(PhGetTokenElevationType(tokenHandle, &elevationType)))
             {
                 ProcessItem->ElevationType = elevationType;
-                ProcessItem->IsElevated = elevationType == TokenElevationTypeFull;
+            }
+
+            if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+            {
+                ProcessItem->IsElevated = isElevated;
             }
 
             // Integrity
@@ -1320,6 +1324,12 @@ VOID PhpFillProcessItem(
             {
                 ProcessItem->IntegrityLevel = integrityLevel;
                 ProcessItem->IntegrityString = integrityString;
+            }
+
+            // Package name
+            if (WindowsVersion >= WINDOWS_8 && ProcessItem->IsPackagedProcess)
+            {
+                ProcessItem->PackageFullName = PhGetTokenPackageFullName(tokenHandle);
             }
 
             NtClose(tokenHandle);
@@ -1370,7 +1380,7 @@ VOID PhpFillProcessItem(
     }
 
     // Control Flow Guard
-    if (WindowsVersion >= WINDOWS_8_1 && ProcessItem->QueryHandle)
+    if (WindowsVersion >= WINDOWS_8_1 && ProcessItem->QueryHandle && FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_CFGUARD))
     {
         BOOLEAN cfguardEnabled;
 
@@ -1393,7 +1403,7 @@ VOID PhpFillProcessItem(
     }
 
     // CET
-    if (WindowsVersion >= WINDOWS_10_20H1)
+    if (WindowsVersion >= WINDOWS_10_20H1 && FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_CET))
     {
         if (ProcessItem->ProcessId == SYSTEM_PROCESS_ID)
         {
@@ -1419,7 +1429,7 @@ VOID PhpFillProcessItem(
         }
     }
 
-    // On Windows 8.1 and above, processes without threads are reflected processes 
+    // On Windows 8.1 and above, processes without threads are reflected processes
     // which will not terminate if we have a handle open. (wj32)
     if (Process->NumberOfThreads == 0 && ProcessItem->QueryHandle)
     {
@@ -1437,16 +1447,16 @@ FORCEINLINE VOID PhpUpdateDynamicInfoProcessItem(
 
     if (ProcessItem->QueryHandle)
     {
-        PROCESS_PRIORITY_CLASS priorityClass;
+        UCHAR priorityClass;
 
         if (NT_SUCCESS(PhGetProcessPriority(ProcessItem->QueryHandle, &priorityClass)))
         {
-            ProcessItem->PriorityClass = priorityClass.PriorityClass;
+            ProcessItem->PriorityClass = priorityClass;
         }
     }
     else
     {
-        ProcessItem->PriorityClass = 0;
+        ProcessItem->PriorityClass = PROCESS_PRIORITY_CLASS_UNKNOWN;
     }
 
     ProcessItem->KernelTime = Process->KernelTime;
@@ -1864,6 +1874,7 @@ VOID PhpUpdateSystemHistory(
  * \return TRUE if the function succeeded, otherwise FALSE if \a ProcessItem was specified and
  * \a Index is too far into the past for that process item.
  */
+_Success_(return)
 BOOLEAN PhGetStatisticsTime(
     _In_opt_ PPH_PROCESS_ITEM ProcessItem,
     _In_ ULONG Index,
@@ -2010,6 +2021,99 @@ VOID PhpGetProcessThreadInformation(
         *ProcessorQueueLength = processorQueueLength;
 }
 
+#ifdef _ARM64_
+VOID PhpEstimateIdleCyclesForARM(
+    _Inout_ PULONG64 TotalCycles,
+    _Inout_ PULONG64 IdleCycles
+    )
+{
+    // EXPERIMENTAL (jxy-s)
+    //
+    // The kernel uses PMCCNTR_EL0 for CycleTime in threads and the processor control blocks.
+    // Here is a snippet from ntoskrnl!KiIdleLoop:
+    /*
+00000001`404f45a0 d53b9d0b mrs         x11,PMCCNTR_EL0    // x11 gets current cycle count
+00000001`404f45a4 f947a668 ldr         x8,[x19,#0xF48]    // x8 gets _KPRCB.StartCycles
+00000001`404f45a8 cb08016a sub         x10,x11,x8         // x10 gets relative cycles from StartCycle to current cycle count
+00000001`404f45ac f94026a9 ldr         x9,[x21,#0x48]     // x9 gets _KPRCB.IdleThread.CycleTime
+00000001`404f45b0 8b0a0128 add         x8,x9,x10          // x8 gets idle thread cycle time (x9) plus cycle increment (x10)
+00000001`404f45b4 f90026a8 str         x8,[x21,#0x48]     // stores new idle thread cycle time in _KPRCB.IdleThread.CycleTime
+00000001`404f45b8 f907a66b str         x11,[x19,#0xF48]   // stores the last cycle time fetch in the _KPRCB.StartCycles
+    */
+    // The idle logic in the HAL is here:
+    /*
+ntoskrnl!HalProcessorIdle:
+00000001`4048fbf0 d503237f pacibsp
+00000001`4048fbf4 a9bf7bfd stp         fp,lr,[sp,#-0x10]!
+00000001`4048fbf8 910003fd mov         fp,sp
+00000001`4048fbfc 940013df bl          ntoskrnl!HalpTimerResetProfileAdjustment (00000001`40494b78)
+00000001`4048fc00 d5033f9f dsb         sy
+00000001`4048fc04 d503207f wfi
+00000001`4048fc08 a8c17bfd ldp         fp,lr,[sp],#0x10
+00000001`4048fc0c d50323ff autibsp
+00000001`4048fc10 d65f03c0 ret
+    */
+    // This dictates that the CPU should enter WFI (Wait For Interrupt) mode. In this mode the
+    // CPU clock is disabled and the PMCCNTR register is not being updated, from the docs:
+    /*
+All counters are subject to any changes in clock frequency, including clock stopping caused by
+the WFI and WFE instructions. This means that it is CONSTRAINED UNPREDICTABLE whether or not
+PMCCNTR_EL0 continues to increment when clocks are stopped by WFI and WFE instructions.
+    */
+    // Arguably, the kernel is doing the right thing here, the idle threads are taking less cycle
+    // time and the KTHREAD reflects this accurately. However, due to the way cycle-based CPU
+    // usage is implemented for other architectures it assumes on the idle thread cycles are
+    // the cycles *not* spent using the CPU, this assumption is incorrect for ARM.
+    //
+    // The most accurate represetnation of the utilization of the CPU for ARM would show
+    // the idle process CPU usage *below* what is "not being used" by other processes. Since
+    // this would indicate the idle thread being in the WFI state and not using CPU cycles.
+    // For cycle-based CPU to make sense for ARM, we need a way to get or estimate the amount
+    // of cycles the CPU would have used by the idle threads if WFI was mode was not entered.
+    //
+    // This experimental estimate achieves that. It will show the idle process utilization
+    // accurately (given the estimate and what the kernel tracks/reports), and generally retain
+    // the cycle-based CPU benefits. Arguably, we are in some capacity reverting to the
+    // time-based CPU usage calculation by relying on the time to generate the estimate, but
+    // again it comes with the benefit of more realistically reporting the idle threads given
+    // what is tracked/reported by the kernel.
+    //
+    // let x = Unknown Idle Cycles
+    // let y = "Total" Cycles (missing idle cycles)
+    // let a = Time Idle
+    // let b = Time Kernel
+    // let c = Time User
+    //
+    // x / (y + x) = CycleUsage
+    // a / (a + b + c) = TimeUsage
+    //
+    // Assume: CycleUsage ~= TimeUsage
+    // Then:  x / (y + x) ~= a / (a + b + c)
+    //
+    // We know y, a, b, and c. So we need to solve for x.
+    //
+    // x / (y + x) ~= a / (a + b + c)
+    //
+    // x ~= a * (y + x) / (a + b + c)
+    // x * (a + b + c) ~= a * (y + x)
+    // x * (a + b + c) ~= (a * y) + (a * x)
+    // x * (a + b + c) - (a * x) ~= (a * y)
+    // x * ((a + b + c) - a) ~= (a * y)
+    // x ~= (a * y) / ((a + b + c) - a)
+    //
+    // x ~= (a * y) / (b + c)
+    //
+    ULONG64 delta = PhCpuKernelDelta.Delta + PhCpuUserDelta.Delta;
+    if (delta != 0)
+        *IdleCycles = (PhCpuIdleCycleDelta.Delta * *TotalCycles) / delta;
+    else
+        *IdleCycles = (PhCpuIdleCycleDelta.Delta * *TotalCycles);
+
+    // We still need to add in the idle cycle time to the "total" since it wasn't complete yet.
+    *TotalCycles += *IdleCycles;
+}
+#endif
+
 VOID PhProcessProviderUpdate(
     _In_ PVOID Object
     )
@@ -2128,7 +2232,11 @@ VOID PhProcessProviderUpdate(
         process->UniqueProcessKey = (ULONG_PTR)pidBuckets[bucketIndex];
         pidBuckets[bucketIndex] = process;
 
+#ifdef _ARM64_ // see: PhpEstimateIdleCyclesForARM (jxy-s)
+        if (PhEnableCycleCpuUsage && process->UniqueProcessId != SYSTEM_IDLE_PROCESS_ID)
+#else
         if (PhEnableCycleCpuUsage)
+#endif
         {
             PPH_PROCESS_ITEM processItem;
 
@@ -2277,6 +2385,11 @@ VOID PhProcessProviderUpdate(
             PhDereferenceObject(processesToRemove);
         }
     }
+
+#ifdef _ARM64_
+    if (PhEnableCycleCpuUsage)
+        PhpEstimateIdleCyclesForARM(&sysTotalCycleTime, &sysIdleCycleTime);
+#endif
 
     // Go through the queued process query data.
     PhFlushProcessQueryData();
@@ -2459,6 +2572,23 @@ VOID PhProcessProviderUpdate(
             PhAddItemCircularBuffer_FLOAT(&processItem->CpuKernelHistory, kernelCpuUsage);
             PhAddItemCircularBuffer_FLOAT(&processItem->CpuUserHistory, userCpuUsage);
 
+            // Average
+            if (FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_AVERAGE))
+            {
+                FLOAT value = 0.0f;
+
+                for (ULONG i = 0; i < processItem->CpuKernelHistory.Count; i++)
+                {
+                    value += PhGetItemCircularBuffer_FLOAT(&processItem->CpuKernelHistory, i) +
+                        PhGetItemCircularBuffer_FLOAT(&processItem->CpuUserHistory, i);
+                }
+
+                if (processItem->CpuKernelHistory.Count)
+                    processItem->CpuAverageUsage = (FLOAT)value / processItem->CpuKernelHistory.Count;
+                else
+                    processItem->CpuAverageUsage = 0.0f;
+            }
+
             // Max. values
 
             if (processItem->ProcessId)
@@ -2491,41 +2621,55 @@ VOID PhProcessProviderUpdate(
                     &tokenHandle
                     )))
                 {
-                    PTOKEN_USER tokenUser;
-                    TOKEN_ELEVATION_TYPE elevationType;
+                    PH_TOKEN_USER tokenUser;
+                    //BOOLEAN isElevated;
+                    //TOKEN_ELEVATION_TYPE elevationType;
                     MANDATORY_LEVEL integrityLevel;
                     PWSTR integrityString;
 
-                    // User
-                    if (NT_SUCCESS(PhGetTokenUser(tokenHandle, &tokenUser)))
+                    if (FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_USERNAME))
                     {
-                        if (!processItem->Sid || !RtlEqualSid(processItem->Sid, tokenUser->User.Sid))
+                        // User
+                        if (NT_SUCCESS(PhGetTokenUser(tokenHandle, &tokenUser)))
                         {
-                            PSID processSid;
+                            if (!processItem->Sid || !RtlEqualSid(processItem->Sid, tokenUser.User.Sid))
+                            {
+                                PSID processSid;
 
-                            // HACK (dmex)
-                            processSid = processItem->Sid;
-                            processItem->Sid = PhAllocateCopy(tokenUser->User.Sid, RtlLengthSid(tokenUser->User.Sid));
-                            if (processSid) PhFree(processSid);
+                                // HACK (dmex)
+                                processSid = processItem->Sid;
+                                processItem->Sid = PhAllocateCopy(tokenUser.User.Sid, RtlLengthSid(tokenUser.User.Sid));
+                                if (processSid) PhFree(processSid);
 
-                            PhMoveReference(&processItem->UserName, PhpGetSidFullNameCachedSlow(processItem->Sid));
+                                if (processItem->Sid)
+                                {
+                                    PhMoveReference(&processItem->UserName, PhpGetSidFullNameCachedSlow(processItem->Sid));
+                                }
 
-                            modified = TRUE;
+                                modified = TRUE;
+                            }
                         }
-
-                        PhFree(tokenUser);
                     }
 
                     // Elevation
-                    if (NT_SUCCESS(PhGetTokenElevationType(tokenHandle, &elevationType)))
-                    {
-                        if (processItem->ElevationType != elevationType)
-                        {
-                            processItem->ElevationType = elevationType;
-                            processItem->IsElevated = elevationType == TokenElevationTypeFull;
-                            modified = TRUE;
-                        }
-                    }
+
+                    //if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+                    //{
+                    //    if (processItem->IsElevated != isElevated)
+                    //    {
+                    //        processItem->IsElevated = isElevated;
+                    //        modified = TRUE;
+                    //    }
+                    //}
+                    //
+                    //if (NT_SUCCESS(PhGetTokenElevationType(tokenHandle, &elevationType)))
+                    //{
+                    //    if (processItem->ElevationType != elevationType)
+                    //    {
+                    //        processItem->ElevationType = elevationType;
+                    //        modified = TRUE;
+                    //    }
+                    //}
 
                     // Integrity
                     if (NT_SUCCESS(PhGetTokenIntegrityLevel(tokenHandle, &integrityLevel, &integrityString)))
@@ -2541,6 +2685,92 @@ VOID PhProcessProviderUpdate(
                     NtClose(tokenHandle);
                 }
             }
+            else
+            {
+                if (FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_USERNAME))
+                {
+                    if (processItem->ProcessId == SYSTEM_IDLE_PROCESS_ID ||
+                        processItem->ProcessId == SYSTEM_PROCESS_ID)
+                    {
+                        if (PhIsNullOrEmptyString(processItem->UserName))
+                        {
+                            PhMoveReference(&processItem->UserName, PhpGetSidFullNameCachedSlow(&PhSeLocalSystemSid));
+                            modified = TRUE;
+                        }
+                    }
+                }
+            }
+
+            // Control Flow Guard
+            if (WindowsVersion >= WINDOWS_8_1 && processItem->QueryHandle && FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_CFGUARD))
+            {
+                BOOLEAN cfguardEnabled;
+
+                if (NT_SUCCESS(PhGetProcessIsCFGuardEnabled(processItem->QueryHandle, &cfguardEnabled)))
+                {
+                    if (processItem->IsControlFlowGuardEnabled != cfguardEnabled)
+                    {
+                        processItem->IsControlFlowGuardEnabled = cfguardEnabled;
+                        modified = TRUE;
+                    }
+                }
+
+                if (WindowsVersion >= WINDOWS_11)
+                {
+                    BOOLEAN xfguardEnabled;
+                    BOOLEAN xfguardAuditEnabled;
+
+                    if (NT_SUCCESS(PhGetProcessIsXFGuardEnabled(processItem->QueryHandle, &xfguardEnabled, &xfguardAuditEnabled)))
+                    {
+                        if (processItem->IsXfgEnabled != xfguardEnabled)
+                        {
+                            processItem->IsXfgEnabled = xfguardEnabled;
+                            modified = TRUE;
+                        }
+
+                        if (processItem->IsXfgAuditEnabled != xfguardAuditEnabled)
+                        {
+                            processItem->IsXfgAuditEnabled = xfguardAuditEnabled;
+                            modified = TRUE;
+                        }
+                    }
+                }
+            }
+
+            // CET
+            if (WindowsVersion >= WINDOWS_10_20H1 && FlagOn(PhProcessProviderFlagsMask, PH_PROCESS_PROVIDER_FLAG_CET))
+            {
+                if (processItem->ProcessId == SYSTEM_PROCESS_ID)
+                {
+                    SYSTEM_SHADOW_STACK_INFORMATION shadowStackInformation;
+
+                    if (NT_SUCCESS(PhGetSystemShadowStackInformation(&shadowStackInformation)))
+                    {
+                        if (processItem->IsCetEnabled != shadowStackInformation.KernelCetEnabled)
+                        {
+                            processItem->IsCetEnabled = shadowStackInformation.KernelCetEnabled;
+                            modified = TRUE;
+                        }
+                    }
+                }
+                else
+                {
+                    if (processItem->QueryHandle)
+                    {
+                        BOOLEAN cetEnabled;
+                        BOOLEAN cetStrictModeEnabled;
+
+                        if (NT_SUCCESS(PhGetProcessIsCetEnabled(processItem->QueryHandle, &cetEnabled, &cetStrictModeEnabled)))
+                        {
+                            if (processItem->IsCetEnabled != cetEnabled)
+                            {
+                                processItem->IsCetEnabled = cetEnabled;
+                                modified = TRUE;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Job
             if (processItem->QueryHandle)
@@ -2549,7 +2779,7 @@ VOID PhProcessProviderUpdate(
                 BOOLEAN isInSignificantJob = FALSE;
                 BOOLEAN isInJob = FALSE;
 
-                if (KphIsConnected())
+                if (KphLevel() >= KphLevelMed)
                 {
                     HANDLE jobHandle = NULL;
 
@@ -2650,18 +2880,18 @@ VOID PhProcessProviderUpdate(
             }
 
             // Immersive
-            if (processItem->QueryHandle && WindowsVersion >= WINDOWS_8 && !processItem->IsSubsystemProcess)
-            {
-                BOOLEAN isImmersive;
-
-                isImmersive = PhIsImmersiveProcess(processItem->QueryHandle);
-
-                if (processItem->IsImmersive != isImmersive)
-                {
-                    processItem->IsImmersive = isImmersive;
-                    modified = TRUE;
-                }
-            }
+            // if (processItem->QueryHandle && WindowsVersion >= WINDOWS_8 && !processItem->IsSubsystemProcess)
+            // {
+            //     BOOLEAN isImmersive;
+            //
+            //     isImmersive = PhIsImmersiveProcess(processItem->QueryHandle);
+            //
+            //     if (processItem->IsImmersive != isImmersive)
+            //     {
+            //         processItem->IsImmersive = isImmersive;
+            //         modified = TRUE;
+            //     }
+            // }
 
             if (processItem->QueryHandle && processItem->IsHandleValid)
             {
@@ -2877,6 +3107,9 @@ PPH_PROCESS_RECORD PhpSearchProcessRecordList(
 
     if (found)
     {
+        if (InsertIndex)
+            *InsertIndex = 0;
+
         return processRecord;
     }
     else
@@ -3277,29 +3510,108 @@ VOID PhpImageListItemDeleteProcedure(
 }
 
 VOID PhProcessImageListInitialization(
-    VOID
+    _In_ HWND hwnd
     )
 {
     HICON iconSmall;
     HICON iconLarge;
 
-    PhImageListItemType = PhCreateObjectType(L"ImageListItem", 0, PhpImageListItemDeleteProcedure);
+    if (!PhImageListItemType)
+        PhImageListItemType = PhCreateObjectType(L"ImageListItem", 0, PhpImageListItemDeleteProcedure);
 
-    PhProcessLargeImageList = PhImageListCreate(PhLargeIconSize.X, PhLargeIconSize.Y, ILC_MASK | ILC_COLOR32, 100, 100);
-    PhProcessSmallImageList = PhImageListCreate(PhSmallIconSize.X, PhSmallIconSize.Y, ILC_MASK | ILC_COLOR32, 100, 100);
-    PhImageListSetBkColor(PhProcessLargeImageList, CLR_NONE);
-    PhImageListSetBkColor(PhProcessSmallImageList, CLR_NONE);
+    PhProcessImageListWindowDpi = PhGetWindowDpi(hwnd);
+
+    PH_HASHTABLE_ENUM_CONTEXT enumContext;
+    PPH_IMAGELIST_ITEM* entry;
+    PPH_LIST fileNames = NULL;
+
+    if (PhImageListCacheHashtable)
+    {
+        fileNames = PhCreateList(PhImageListCacheHashtable->Count);
+
+        PhAcquireQueuedLockExclusive(&PhImageListCacheHashtableLock);
+        PhBeginEnumHashtable(PhImageListCacheHashtable, &enumContext);
+
+        while (entry = PhNextEnumHashtable(&enumContext))
+        {
+            PPH_IMAGELIST_ITEM item = *entry;
+            PhAddItemList(fileNames, PhReferenceObject(item->FileName));
+            PhDereferenceObject(item);
+        }
+
+        PhDereferenceObject(PhImageListCacheHashtable);
+        PhImageListCacheHashtable = NULL;
+
+        PhReleaseQueuedLockExclusive(&PhImageListCacheHashtableLock);
+    }
+
+    if (PhProcessLargeImageList) PhImageListDestroy(PhProcessLargeImageList);
+    if (PhProcessSmallImageList) PhImageListDestroy(PhProcessSmallImageList);
+    PhProcessLargeImageList = PhImageListCreate(
+        PhGetSystemMetrics(SM_CXICON, PhProcessImageListWindowDpi),
+        PhGetSystemMetrics(SM_CYICON, PhProcessImageListWindowDpi),
+        ILC_MASK | ILC_COLOR32,
+        100,
+        100);
+    PhProcessSmallImageList = PhImageListCreate(
+        PhGetSystemMetrics(SM_CXSMICON, PhProcessImageListWindowDpi),
+        PhGetSystemMetrics(SM_CYSMICON, PhProcessImageListWindowDpi),
+        ILC_MASK | ILC_COLOR32,
+        100,
+        100);
+
+    //PhImageListSetBkColor(PhProcessLargeImageList, CLR_NONE);
+    //PhImageListSetBkColor(PhProcessSmallImageList, CLR_NONE);
 
     PhGetStockApplicationIcon(&iconSmall, &iconLarge);
     PhImageListAddIcon(PhProcessLargeImageList, iconLarge);
     PhImageListAddIcon(PhProcessSmallImageList, iconSmall);
 
-    iconLarge = PhLoadIcon(PhInstanceHandle, MAKEINTRESOURCE(IDI_COG), PH_LOAD_ICON_SIZE_LARGE, 0, 0);
-    iconSmall = PhLoadIcon(PhInstanceHandle, MAKEINTRESOURCE(IDI_COG), PH_LOAD_ICON_SIZE_SMALL, 0, 0);
+    iconLarge = PhLoadIcon(PhInstanceHandle, MAKEINTRESOURCE(IDI_COG), PH_LOAD_ICON_SIZE_LARGE, 0, 0, PhProcessImageListWindowDpi);
+    iconSmall = PhLoadIcon(PhInstanceHandle, MAKEINTRESOURCE(IDI_COG), PH_LOAD_ICON_SIZE_SMALL, 0, 0, PhProcessImageListWindowDpi);
     PhImageListAddIcon(PhProcessLargeImageList, iconLarge);
     PhImageListAddIcon(PhProcessSmallImageList, iconSmall);
     DestroyIcon(iconLarge);
     DestroyIcon(iconSmall);
+
+    if (fileNames)
+    {
+        for (ULONG i = 0; i < fileNames->Count; i++)
+        {
+            PPH_STRING filename = fileNames->Items[i];
+            PPH_IMAGELIST_ITEM iconEntry;
+
+            iconEntry = PhImageListExtractIcon(filename, TRUE, 0, NULL, PhProcessImageListWindowDpi);
+
+            if (iconEntry)
+            {
+                PPH_PROCESS_ITEM* processes;
+                ULONG numberOfProcesses;
+
+                PhEnumProcessItems(&processes, &numberOfProcesses);
+
+                for (ULONG j = 0; j < numberOfProcesses; j++)
+                {
+                    PPH_PROCESS_ITEM process = processes[j];
+
+                    if (process->FileName && PhEqualString(process->FileName, filename, TRUE))
+                    {
+                        process->IconEntry = PhReferenceObject(iconEntry);
+                        process->SmallIconIndex = iconEntry->SmallIconIndex;
+                        process->LargeIconIndex = iconEntry->LargeIconIndex;
+                    }
+                }
+
+                PhDereferenceObjects(processes, numberOfProcesses);
+                PhFree(processes);
+
+                PhDereferenceObject(iconEntry);
+            }
+        }
+
+        PhDereferenceObjects(fileNames->Items, fileNames->Count);
+        PhDereferenceObject(fileNames);
+    }
 }
 
 BOOLEAN PhImageListCacheHashtableEqualFunction(
@@ -3324,7 +3636,10 @@ ULONG PhImageListCacheHashtableHashFunction(
 
 PPH_IMAGELIST_ITEM PhImageListExtractIcon(
     _In_ PPH_STRING FileName,
-    _In_ BOOLEAN NativeFileName
+    _In_ BOOLEAN NativeFileName,
+    _In_opt_ HANDLE ProcessId,
+    _In_opt_ PPH_STRING PackageFullName,
+    _In_ LONG SystemDpi
     )
 {
     HICON largeIcon = NULL;
@@ -3357,13 +3672,37 @@ PPH_IMAGELIST_ITEM PhImageListExtractIcon(
 
     PhReleaseQueuedLockShared(&PhImageListCacheHashtableLock);
 
-    PhExtractIconEx(
-        FileName,
-        NativeFileName,
-        0,
-        &largeIcon,
-        &smallIcon
-        );
+    if (PhEnablePackageIconSupport && ProcessId && PackageFullName)
+    {
+        if (!PhAppResolverGetPackageIcon(
+            ProcessId,
+            PackageFullName,
+            &largeIcon,
+            &smallIcon,
+            SystemDpi
+            ))
+        {
+            PhExtractIconEx(
+                FileName,
+                NativeFileName,
+                0,
+                &largeIcon,
+                &smallIcon,
+                SystemDpi
+                );
+        }
+    }
+    else
+    {
+        PhExtractIconEx(
+            FileName,
+            NativeFileName,
+            0,
+            &largeIcon,
+            &smallIcon,
+            SystemDpi
+            );
+    }
 
     PhAcquireQueuedLockExclusive(&PhImageListCacheHashtableLock);
 

@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     wj32    2019
+ *     dmex    2019
  *
  */
 
@@ -181,7 +181,7 @@ INT_PTR CALLBACK PvpExlfDynamicDlgProc(
 
             PvpProcessElfDynamic(lvHandle);
             ExtendedListView_SortItems(lvHandle);
-            
+
             PhInitializeWindowTheme(hwndDlg, PeEnableThemeSupport);
         }
         break;

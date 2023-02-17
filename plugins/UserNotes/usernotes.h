@@ -39,6 +39,7 @@ typedef enum _USERNOTES_COMMAND_ID
     PROCESS_IO_PRIORITY_SAVE_IFEO,
     PROCESS_HIGHLIGHT_ID,
     PROCESS_COLLAPSE_ID,
+    PROCESS_AFFINITY_ID,
     PROCESS_AFFINITY_SAVE_ID,
     PROCESS_AFFINITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
     PROCESS_PAGE_PRIORITY_SAVE_ID,
@@ -58,8 +59,21 @@ typedef struct _PROCESS_EXTENSION
 {
     LIST_ENTRY ListEntry;
     PPH_PROCESS_ITEM ProcessItem;
-    BOOLEAN Valid;
     PPH_STRING Comment;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN Valid : 1;
+            BOOLEAN SkipAffinity : 1;
+            BOOLEAN SkipPriority : 1;
+            BOOLEAN SkipPagePriority : 1;
+            BOOLEAN SkipIoPriority : 1;
+            BOOLEAN SkipBoostPriority : 1;
+            BOOLEAN Spare : 2;
+        };
+    };
 } PROCESS_EXTENSION, *PPROCESS_EXTENSION;
 
 typedef struct _PROCESS_COMMENT_PAGE_CONTEXT
@@ -82,6 +96,15 @@ typedef struct _SERVICE_COMMENT_PAGE_CONTEXT
     PPH_SERVICE_ITEM ServiceItem;
     PH_LAYOUT_MANAGER LayoutManager;
 } SERVICE_COMMENT_PAGE_CONTEXT, *PSERVICE_COMMENT_PAGE_CONTEXT;
+
+VOID DeleteDbObjectForProcessIfUnused(
+    _In_ PDB_OBJECT Object
+    );
+
+VOID SearchChangedHandler(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    );
 
 INT_PTR CALLBACK OptionsDlgProc(
     _In_ HWND hwndDlg,

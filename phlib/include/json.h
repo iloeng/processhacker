@@ -12,9 +12,7 @@
 #ifndef _PH_PHJSON_H
 #define _PH_PHJSON_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+EXTERN_C_START
 
 typedef struct _JSON_ARRAY_LIST_OBJECT
 {
@@ -229,14 +227,14 @@ PHLIBAPI
 PVOID
 NTAPI
 PhLoadJsonObjectFromFile(
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF FileName
     );
 
 PHLIBAPI
 VOID
 NTAPI
 PhSaveJsonObjectToFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PVOID Object
     );
 
@@ -253,7 +251,7 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhLoadXmlObjectFromFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _Out_opt_ PVOID* XmlRootNode
     );
 
@@ -261,7 +259,7 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhSaveXmlObjectToFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PVOID XmlRootObject,
     _In_opt_ PVOID XmlSaveCallback
     );
@@ -374,12 +372,12 @@ typedef PVOID (NTAPI* PH_XML_LOAD_OBJECT_FROM_STRING)(
     );
 
 typedef NTSTATUS (NTAPI* PH_XML_LOAD_OBJECT_FROM_FILE)(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _Out_opt_ PVOID* XmlRootNode
     );
 
 typedef NTSTATUS (NTAPI* PH_XML_SAVE_OBJECT_TO_FILE)(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PVOID XmlRootObject,
     _In_opt_ PVOID XmlSaveCallback
     );
@@ -475,8 +473,6 @@ PPH_XML_INTERFACE PhGetXmlInterface(
     _In_ ULONG Version
     );
 
-#ifdef __cplusplus
-}
-#endif
+EXTERN_C_END
 
 #endif

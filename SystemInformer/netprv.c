@@ -7,15 +7,15 @@
  *
  *     wj32    2010
  *     evilpie 2010
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
 #include <phapp.h>
 #include <phplug.h>
 #include <phsettings.h>
-#include <apiimport.h>
 #include <extmgri.h>
+#include <mapldr.h>
 #include <netprv.h>
 #include <procprv.h>
 #include <svcsup.h>
@@ -110,7 +110,7 @@ BOOLEAN PhNetworkProviderInitialization(
     RtlInitializeSListHead(&PhNetworkItemQueryListHead);
 
     PhpResolveCacheHashtable = PhCreateHashtable(
-        sizeof(PHP_RESOLVE_CACHE_ITEM),
+        sizeof(PPHP_RESOLVE_CACHE_ITEM),
         PhpResolveCacheHashtableEqualFunction,
         PhpResolveCacheHashtableHashFunction,
         20

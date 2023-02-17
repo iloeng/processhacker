@@ -7,6 +7,8 @@ extern BOOLEAN PhMainWndExiting;
 // begin_phapppub
 #define WM_PH_FIRST (WM_APP + 99)
 #define WM_PH_ACTIVATE (WM_APP + 99)
+#define WM_PH_SHOW_DIALOG (WM_APP + 100) // unused (plugins only)
+#define WM_PH_UPDATE_DIALOG (WM_APP + 101) // unused (plugins only)
 #define PH_ACTIVATE_REPLY 0x1119
 #define WM_PH_NOTIFY_ICON_MESSAGE (WM_APP + 126)
 #define WM_PH_UPDATE_FONT (WM_APP + 136)
@@ -29,12 +31,6 @@ PhGetWindowsVersion(
     VOID
     );
 
-PHAPPAPI
-BOOLEAN
-NTAPI
-PhGetKernelDriverSystemStart(
-    VOID
-    );
 // plugin macros (dmex)
 #define PhWindowsVersion PhGetWindowsVersion()
 #define PhMainWindowHandle PhGetMainWindowHandle()
@@ -108,8 +104,8 @@ PhPluginInvokeWindowCallback(
     ((HFONT)PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_GET_FONT, 0, 0))
 #define ProcessHacker_Invoke(Function, Parameter) \
     PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_INVOKE, (PVOID)(ULONG_PTR)(Parameter), (PVOID)(ULONG_PTR)(Function))
-#define ProcessHacker_CreateTabPage(Template) \
-    PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_CREATE_TAB_PAGE, 0, (PVOID)(ULONG_PTR)(Template))
+//#define ProcessHacker_CreateTabPage(Template) \
+//    PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_CREATE_TAB_PAGE, 0, (PVOID)(ULONG_PTR)(Template))
 #define ProcessHacker_Refresh() \
     PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_REFRESH, 0, 0)
 #define ProcessHacker_GetUpdateAutomatically() \
@@ -168,6 +164,7 @@ typedef enum _PH_MAIN_TAB_PAGE_MESSAGE
     MainTabPageExportContent, // PPH_MAIN_TAB_PAGE_EXPORT_CONTENT Parameter1
     MainTabPageFontChanged, // HFONT Parameter1 (Font)
     MainTabPageUpdateAutomaticallyChanged, // BOOLEAN Parameter1 (UpdateAutomatically)
+    MainTabPageDpiChanged,
 
     MaxMainTabPageMessage
 } PH_MAIN_TAB_PAGE_MESSAGE;

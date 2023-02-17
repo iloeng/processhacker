@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -76,6 +76,14 @@ PPH_HANDLE_PROVIDER PhCreateHandleProvider(
         PROCESS_QUERY_INFORMATION | PROCESS_DUP_HANDLE,
         ProcessId
         );
+    if (!NT_SUCCESS(handleProvider->RunStatus))
+    {
+        handleProvider->RunStatus = PhOpenProcess(
+            &handleProvider->ProcessHandle,
+            PROCESS_QUERY_INFORMATION,
+            ProcessId
+            );
+    }
 
     handleProvider->TempListHashtable = PhCreateSimpleHashtable(512);
 
@@ -133,6 +141,12 @@ PPH_HANDLE_ITEM PhCreateHandleItem(
         handleItem->Attributes = Handle->HandleAttributes;
         handleItem->GrantedAccess = (ACCESS_MASK)Handle->GrantedAccess;
         handleItem->TypeIndex = Handle->ObjectTypeIndex;
+
+        PhPrintPointer(handleItem->HandleString, (PVOID)handleItem->Handle);
+        PhPrintPointer(handleItem->GrantedAccessString, UlongToPtr(handleItem->GrantedAccess));
+
+        if (handleItem->Object)
+            PhPrintPointer(handleItem->ObjectString, handleItem->Object);
     }
 
     PhEmCallObjectOperation(EmHandleItemType, handleItem, EmObjectCreate);
@@ -297,13 +311,13 @@ NTSTATUS PhEnumHandlesGeneric(
     // * On Windows XP and later, NtQuerySystemInformation with SystemExtendedHandleInformation.
     // * Otherwise, NtQuerySystemInformation with SystemHandleInformation can be used.
 
-    if (KphIsConnected() && ProcessHandle)
+    if ((KphLevel() >= KphLevelMed) && ProcessHandle)
     {
         PKPH_PROCESS_HANDLE_INFORMATION handles;
         PSYSTEM_HANDLE_INFORMATION_EX convertedHandles;
         ULONG i;
 
-        // Enumerate handles using KProcessHacker. Unlike with NtQuerySystemInformation,
+        // Enumerate handles using KSystemInformer. Unlike with NtQuerySystemInformation,
         // this only enumerates handles for a single process and saves a lot of processing.
 
         if (NT_SUCCESS(status = KphEnumerateProcessHandles2(ProcessHandle, &handles)))
@@ -439,6 +453,7 @@ VOID PhHandleProviderUpdate(
     PPH_KEY_VALUE_PAIR handlePair;
     BOOLEAN useWorkQueue = FALSE;
     PH_WORK_QUEUE workQueue;
+    KPH_LEVEL level;
 
     if (!NT_SUCCESS(handleProvider->RunStatus = PhEnumHandlesGeneric(
         handleProvider->ProcessId,
@@ -448,17 +463,16 @@ VOID PhHandleProviderUpdate(
         )))
         goto UpdateExit;
 
-    if (!KphIsConnected())
+    level = KphLevel();
+
+    if ((level >= KphLevelMed))
     {
         useWorkQueue = TRUE;
         PhInitializeWorkQueue(&workQueue, 1, 20, 1000);
 
         if (PhBeginInitOnce(&initOnce))
         {
-            static PH_STRINGREF fileTypeName = PH_STRINGREF_INIT(L"File");
-
-            fileObjectTypeIndex = PhGetObjectTypeNumber(&fileTypeName);
-
+            fileObjectTypeIndex = PhGetObjectTypeNumberZ(L"File");
             PhEndInitOnce(&initOnce);
         }
     }
@@ -626,7 +640,7 @@ VOID PhHandleProviderUpdate(
                 }
             }
 
-            if (handleItem->TypeName && PhEqualString2(handleItem->TypeName, L"File", TRUE) && KphIsConnected())
+            if (handleItem->TypeName && PhEqualString2(handleItem->TypeName, L"File", TRUE) && (level >= KphLevelMed))
             {
                 KPH_FILE_OBJECT_INFORMATION objectInfo;
 
@@ -645,6 +659,12 @@ VOID PhHandleProviderUpdate(
                         handleItem->FileFlags |= PH_HANDLE_FILE_SHARED_WRITE;
                     if (objectInfo.SharedDelete)
                         handleItem->FileFlags |= PH_HANDLE_FILE_SHARED_DELETE;
+
+                    // TODO add extra info from file objects here (jxy-s)
+                    // objectInfo.HasActiveTransaction;
+                    // objectInfo.UserWritableReferences;
+                    // objectInfo.IsIgnoringSharing;
+                    // ... more
                 }
             }
 

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2015-2021
+ *     dmex    2015-2022
  *
  */
 
@@ -61,8 +61,8 @@ VOID EtEtwSystemInformationInitializing(
 BOOLEAN EtpDiskSysInfoSectionCallback(
     _In_ PPH_SYSINFO_SECTION Section,
     _In_ PH_SYSINFO_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     switch (Message)
@@ -89,9 +89,6 @@ BOOLEAN EtpDiskSysInfoSectionCallback(
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = Parameter1;
 
-            if (!createDialog)
-                break;
-
             createDialog->Instance = PluginInstance->DllBase;
             createDialog->Template = MAKEINTRESOURCE(IDD_SYSINFO_DISK);
             createDialog->DialogProc = EtpDiskDialogProc;
@@ -101,11 +98,8 @@ BOOLEAN EtpDiskSysInfoSectionCallback(
         {
             PPH_GRAPH_DRAW_INFO drawInfo = Parameter1;
 
-            if (!drawInfo)
-                break;
-
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), Section->Parameters->WindowDpi);
             PhGetDrawInfoGraphBuffers(&Section->GraphState.Buffers, drawInfo, EtDiskReadHistory.Count);
 
             if (!Section->GraphState.Valid)
@@ -243,6 +237,7 @@ INT_PTR CALLBACK EtpDiskDialogProc(
             graphItem = PhAddLayoutItem(&DiskLayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
             panelItem = PhAddLayoutItem(&DiskLayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
             DiskGraphMargin = graphItem->Margin;
+            PhGetSizeDpiValue(&DiskGraphMargin, DiskSection->Parameters->WindowDpi, TRUE);
 
             SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), DiskSection->Parameters->LargeFont, FALSE);
 
@@ -263,6 +258,11 @@ INT_PTR CALLBACK EtpDiskDialogProc(
     case WM_SIZE:
         {
             PhLayoutManagerLayout(&DiskLayoutManager);
+
+            DiskGraphState.Valid = FALSE;
+            DiskGraphState.TooltipIndex = ULONG_MAX;
+            if (DiskGraphHandle)
+                Graph_Draw(DiskGraphHandle);
         }
         break;
     case WM_NOTIFY:
@@ -326,7 +326,7 @@ VOID EtpNotifyDiskGraph(
             PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
 
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-            DiskSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+            DiskSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), DiskSection->Parameters->WindowDpi);
 
             PhGraphStateGetDrawInfo(
                 &DiskGraphState,
@@ -543,8 +543,8 @@ PPH_STRING EtpGetMaxDiskString(
 BOOLEAN EtpNetworkSysInfoSectionCallback(
     _In_ PPH_SYSINFO_SECTION Section,
     _In_ PH_SYSINFO_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     switch (Message)
@@ -571,9 +571,6 @@ BOOLEAN EtpNetworkSysInfoSectionCallback(
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = Parameter1;
 
-            if (!createDialog)
-                break;
-
             createDialog->Instance = PluginInstance->DllBase;
             createDialog->Template = MAKEINTRESOURCE(IDD_SYSINFO_NET);
             createDialog->DialogProc = EtpNetworkDialogProc;
@@ -583,11 +580,8 @@ BOOLEAN EtpNetworkSysInfoSectionCallback(
         {
             PPH_GRAPH_DRAW_INFO drawInfo = Parameter1;
 
-            if (!drawInfo)
-                break;
-
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), Section->Parameters->WindowDpi);
             PhGetDrawInfoGraphBuffers(&Section->GraphState.Buffers, drawInfo, EtNetworkReceiveHistory.Count);
 
             if (!Section->GraphState.Valid)
@@ -717,6 +711,7 @@ INT_PTR CALLBACK EtpNetworkDialogProc(
         {
             PPH_LAYOUT_ITEM graphItem;
             PPH_LAYOUT_ITEM panelItem;
+            RECT margin;
 
             PhInitializeGraphState(&NetworkGraphState);
 
@@ -725,12 +720,16 @@ INT_PTR CALLBACK EtpNetworkDialogProc(
             graphItem = PhAddLayoutItem(&NetworkLayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
             panelItem = PhAddLayoutItem(&NetworkLayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
             NetworkGraphMargin = graphItem->Margin;
+            PhGetSizeDpiValue(&NetworkGraphMargin, NetworkSection->Parameters->WindowDpi, TRUE);
 
             SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), NetworkSection->Parameters->LargeFont, FALSE);
 
             NetworkPanel = PhCreateDialog(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_SYSINFO_NETPANEL), hwndDlg, EtpNetworkPanelDialogProc, NULL);
             ShowWindow(NetworkPanel, SW_SHOW);
-            PhAddLayoutItemEx(&NetworkLayoutManager, NetworkPanel, NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM, panelItem->Margin);
+
+            margin = panelItem->Margin;
+            PhGetSizeDpiValue(&margin, NetworkSection->Parameters->WindowDpi, TRUE);
+            PhAddLayoutItemEx(&NetworkLayoutManager, NetworkPanel, NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM, margin);
 
             EtpCreateNetworkGraph();
             EtpUpdateNetworkGraph();
@@ -745,6 +744,11 @@ INT_PTR CALLBACK EtpNetworkDialogProc(
     case WM_SIZE:
         {
             PhLayoutManagerLayout(&NetworkLayoutManager);
+
+            NetworkGraphState.Valid = FALSE;
+            NetworkGraphState.TooltipIndex = ULONG_MAX;
+            if (NetworkGraphHandle)
+                Graph_Draw(NetworkGraphHandle);
         }
         break;
     case WM_NOTIFY:
@@ -808,7 +812,7 @@ VOID EtpNotifyNetworkGraph(
             PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
 
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-            NetworkSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+            NetworkSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), NetworkSection->Parameters->WindowDpi);
 
             PhGraphStateGetDrawInfo(
                 &NetworkGraphState,

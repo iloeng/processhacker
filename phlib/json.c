@@ -18,7 +18,7 @@
 #include "..\tools\thirdparty\mxml\mxml.h"
 
 static json_object_ptr json_get_object(
-    _In_ json_object_ptr rootObj, 
+    _In_ json_object_ptr rootObj,
     _In_ PSTR key
     )
 {
@@ -339,7 +339,7 @@ PVOID PhGetJsonObjectAsArrayList(
     json_object_object_foreachC(Object, json_array_ptr)
     {
         PJSON_ARRAY_LIST_OBJECT object;
-        
+
         object = PhAllocateZero(sizeof(JSON_ARRAY_LIST_OBJECT));
         object->Key = json_array_ptr.key;
         object->Entry = json_array_ptr.val;
@@ -351,18 +351,18 @@ PVOID PhGetJsonObjectAsArrayList(
 }
 
 PVOID PhLoadJsonObjectFromFile(
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF FileName
     )
 {
-    return json_object_from_file(FileName);
+    return json_object_from_file(FileName->Buffer);
 }
 
 VOID PhSaveJsonObjectToFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PVOID Object
     )
 {
-    json_object_to_file(FileName, Object);
+    json_object_to_file(FileName->Buffer, Object);
 }
 
 // XML support
@@ -391,7 +391,7 @@ PVOID PhLoadXmlObjectFromString(
 }
 
 NTSTATUS PhLoadXmlObjectFromFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _Out_opt_ PVOID* XmlRootObject
     )
 {
@@ -402,7 +402,7 @@ NTSTATUS PhLoadXmlObjectFromFile(
 
     status = PhCreateFileWin32(
         &fileHandle,
-        FileName,
+        PhGetStringRefZ(FileName),
         FILE_GENERIC_READ,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -445,42 +445,24 @@ NTSTATUS PhLoadXmlObjectFromFile(
 }
 
 NTSTATUS PhSaveXmlObjectToFile(
-    _In_ PWSTR FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PVOID XmlRootObject,
     _In_opt_ PVOID XmlSaveCallback
     )
 {
     NTSTATUS status;
     HANDLE fileHandle;
-    PPH_STRING fullPath;
-    ULONG indexOfFileName;
 
-    // Create the directory if it does not exist.  
-    if (fullPath = PhGetFullPath(FileName, &indexOfFileName))
-    {
-        if (indexOfFileName != ULONG_MAX)
-        {
-            PPH_STRING directoryName;
+    // Create the directory if it does not exist.
 
-            directoryName = PhSubstring(fullPath, 0, indexOfFileName);
-            status = PhCreateDirectory(directoryName);
+    status = PhCreateDirectoryFullPathWin32(FileName);
 
-            if (!NT_SUCCESS(status))
-            {
-                PhDereferenceObject(directoryName);
-                PhDereferenceObject(fullPath);
-                return status;
-            }
-
-            PhDereferenceObject(directoryName);
-        }
-
-        PhDereferenceObject(fullPath);
-    }  
+    if (!NT_SUCCESS(status))
+        return status;
 
     status = PhCreateFileWin32(
         &fileHandle,
-        FileName,
+        PhGetStringRefZ(FileName),
         FILE_GENERIC_WRITE,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ,
@@ -491,7 +473,7 @@ NTSTATUS PhSaveXmlObjectToFile(
     if (!NT_SUCCESS(status))
         return status;
 
-    if (mxmlSaveFd(XmlRootObject, fileHandle, XmlSaveCallback) == -1)
+    if (mxmlSaveFd(XmlRootObject, fileHandle, XmlSaveCallback) == INT_ERROR)
     {
         status = STATUS_UNSUCCESSFUL;
     }

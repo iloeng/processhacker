@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2012-2022
+ *     dmex    2012-2023
  *
  */
 
@@ -18,14 +18,12 @@
 #include <phappresource.h>
 #include <settings.h>
 #include <workqueue.h>
-
-#include <icmpapi.h>
-#include <shlobj.h>
+#include <mapldr.h>
+#include <phnet.h>
 
 #include "resource.h"
 
 #define PLUGIN_NAME L"ProcessHacker.NetworkTools"
-#define SETTING_NAME_DB_LOCATION (PLUGIN_NAME L".GeoDbPath")
 #define SETTING_NAME_ADDRESS_HISTORY (PLUGIN_NAME L".AddressHistory")
 #define SETTING_NAME_PING_WINDOW_POSITION (PLUGIN_NAME L".PingWindowPosition")
 #define SETTING_NAME_PING_WINDOW_SIZE (PLUGIN_NAME L".PingWindowSize")
@@ -35,14 +33,16 @@
 #define SETTING_NAME_TRACERT_WINDOW_POSITION (PLUGIN_NAME L".TracertWindowPosition")
 #define SETTING_NAME_TRACERT_WINDOW_SIZE (PLUGIN_NAME L".TracertWindowSize")
 #define SETTING_NAME_TRACERT_TREE_LIST_COLUMNS (PLUGIN_NAME L".TracertTreeColumns")
-#define SETTING_NAME_TRACERT_TREE_LIST_SORT (PLUGIN_NAME L".TracertTreeSort") 
+#define SETTING_NAME_TRACERT_TREE_LIST_SORT (PLUGIN_NAME L".TracertTreeSort")
 #define SETTING_NAME_TRACERT_MAX_HOPS (PLUGIN_NAME L".TracertMaxHops")
 #define SETTING_NAME_WHOIS_WINDOW_POSITION (PLUGIN_NAME L".WhoisWindowPosition")
 #define SETTING_NAME_WHOIS_WINDOW_SIZE (PLUGIN_NAME L".WhoisWindowSize")
 #define SETTING_NAME_EXTENDED_TCP_STATS (PLUGIN_NAME L".EnableExtendedTcpStats")
+#define SETTING_NAME_GEOLITE_API_KEY (PLUGIN_NAME L".MaxMindApiKey")
 
 extern PPH_PLUGIN PluginInstance;
 extern BOOLEAN GeoDbInitialized;
+extern PH_STRINGREF GeoDbFileName;
 extern PPH_STRING SearchboxText;
 
 // ICMP Packet Length: (msdn: IcmpSendEcho2/Icmp6SendEcho2)
@@ -95,20 +95,21 @@ typedef enum _PH_NETWORK_ACTION
 typedef struct _NETWORK_PING_CONTEXT
 {
     HWND WindowHandle;
+    HWND ParentWindowHandle;
     HWND StatusHandle;
     HWND PingGraphHandle;
     HFONT FontHandle;
 
     ULONG Timeout;
-    FLOAT CurrentPingMs;
     ULONG MinPingScaling;
-    ULONG HashFailCount;
-    ULONG UnknownAddrCount;
+    volatile LONG HashFailCount;
+    volatile LONG UnknownAddrCount;
+    volatile LONG PingSentCount;
+    volatile LONG PingRecvCount;
+    volatile LONG PingLossCount;
+    FLOAT CurrentPingMs;
     FLOAT PingMinMs;
     FLOAT PingMaxMs;
-    ULONG PingSentCount;
-    ULONG PingRecvCount;
-    ULONG PingLossCount;
 
     PH_NETWORK_ACTION Action;
     PH_LAYOUT_MANAGER LayoutManager;
@@ -118,16 +119,19 @@ typedef struct _NETWORK_PING_CONTEXT
     PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
 
     PH_IP_ENDPOINT RemoteEndpoint;
-    WCHAR IpAddressString[INET6_ADDRSTRLEN + 1];
+    ULONG RemoteAddressStringLength;
+    WCHAR RemoteAddressString[INET6_ADDRSTRLEN];
 } NETWORK_PING_CONTEXT, *PNETWORK_PING_CONTEXT;
 
 // ping.c
 
 VOID ShowPingWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PPH_NETWORK_ITEM NetworkItem
     );
 
 VOID ShowPingWindowFromAddress(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     );
 
@@ -136,6 +140,7 @@ VOID ShowPingWindowFromAddress(
 typedef struct _NETWORK_WHOIS_CONTEXT
 {
     HWND WindowHandle;
+    HWND ParentWindowHandle;
     HWND RichEditHandle;
     HFONT FontHandle;
 
@@ -143,20 +148,23 @@ typedef struct _NETWORK_WHOIS_CONTEXT
     PH_LAYOUT_MANAGER LayoutManager;
 
     PH_IP_ENDPOINT RemoteEndpoint;
-    WCHAR IpAddressString[INET6_ADDRSTRLEN + sizeof(UNICODE_NULL)];
+    ULONG RemoteAddressStringLength;
+    WCHAR RemoteAddressString[INET6_ADDRSTRLEN];
 } NETWORK_WHOIS_CONTEXT, *PNETWORK_WHOIS_CONTEXT;
 
-// TDM_NAVIGATE_PAGE can not be called from other threads without comctl32.dll throwing access violations 
+// TDM_NAVIGATE_PAGE can not be called from other threads without comctl32.dll throwing access violations
 // after navigating to the page and you press keys such as ctrl, alt, home and insert. (dmex)
 #define TaskDialogNavigatePage(WindowHandle, Config) \
-    assert(HandleToUlong(NtCurrentThreadId()) == GetWindowThreadProcessId(WindowHandle, NULL)); \
-    SendMessage(WindowHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)Config);
+    assert(HandleToUlong(NtCurrentThreadId()) == GetWindowThreadProcessId((WindowHandle), NULL)); \
+    SendMessage((WindowHandle), TDM_NAVIGATE_PAGE, 0, (LPARAM)(Config));
 
 VOID ShowWhoisWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PPH_NETWORK_ITEM NetworkItem
     );
 
 VOID ShowWhoisWindowFromAddress(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     );
 
@@ -165,6 +173,7 @@ VOID ShowWhoisWindowFromAddress(
 typedef struct _NETWORK_TRACERT_CONTEXT
 {
     HWND WindowHandle;
+    HWND ParentWindowHandle;
     HWND SearchboxHandle;
     HWND TreeNewHandle;
     HFONT FontHandle;
@@ -183,14 +192,17 @@ typedef struct _NETWORK_TRACERT_CONTEXT
     PPH_LIST NodeRootList;
 
     PH_IP_ENDPOINT RemoteEndpoint;
-    WCHAR IpAddressString[INET6_ADDRSTRLEN + 1];
+    ULONG RemoteAddressStringLength;
+    WCHAR RemoteAddressString[INET6_ADDRSTRLEN];
 } NETWORK_TRACERT_CONTEXT, *PNETWORK_TRACERT_CONTEXT;
 
 VOID ShowTracertWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PPH_NETWORK_ITEM NetworkItem
     );
 
 VOID ShowTracertWindowFromAddress(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     );
 
@@ -253,10 +265,6 @@ typedef enum _NETWORK_COLUMN_ID
 
 // country.c
 
-PPH_STRING NetToolsGetGeoLiteDbPath(
-    _In_ PWSTR SettingName
-    );
-
 VOID FreeGeoLiteDb(
     VOID
     );
@@ -299,21 +307,21 @@ VOID NetworkToolsGeoDbFlushCache(
 typedef struct _PH_UPDATER_CONTEXT
 {
     HWND DialogHandle;
+    HWND ParentWindowHandle;
     WNDPROC DefaultWindowProc;
-
-    PPH_STRING FileDownloadUrl;
+    ULONG ErrorCode;
 } PH_UPDATER_CONTEXT, *PPH_UPDATER_CONTEXT;
 
-VOID TaskDialogLinkClicked(
+BOOLEAN GeoLiteCheckUpdatePlatformSupported(
+    VOID
+    );
+
+NTSTATUS GeoLiteUpdateThread(
     _In_ PPH_UPDATER_CONTEXT Context
     );
 
-NTSTATUS GeoIPUpdateThread(
-    _In_ PVOID Parameter
-    );
-
-VOID ShowGeoIPUpdateDialog(
-    VOID
+VOID ShowGeoLiteUpdateDialog(
+    _In_opt_ HWND ParentWindowHandle
     );
 
 // pages.c

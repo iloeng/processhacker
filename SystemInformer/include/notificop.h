@@ -24,9 +24,12 @@ typedef struct _PH_NF_BITMAP
 {
     BOOLEAN Initialized;
     HDC Hdc;
-    BITMAPINFOHEADER Header;
     HBITMAP Bitmap;
     PVOID Bits;
+    LONG Width;
+    LONG Height;
+    LONG TaskbarDpi;
+    HFONT FontHandle;
 } PH_NF_BITMAP, *PPH_NF_BITMAP;
 
 HICON PhNfpGetBlackIcon(

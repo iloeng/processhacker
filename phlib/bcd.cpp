@@ -5,12 +5,13 @@
  *
  * Authors:
  *
- *     dmex    2021-2022
+ *     dmex    2021-2023
  *
  */
 
 #include <ph.h>
 #include <bcd.h>
+#include <mapldr.h>
 
 static PVOID BcdDllBaseAddress = nullptr;
 static decltype(&BcdOpenSystemStore) BcdOpenSystemStore_I = nullptr;
@@ -468,7 +469,7 @@ NTSTATUS PhBcdSetBootApplicationOneTime(
     {
         HANDLE objectFirmwareHandle;
 
-        // The user might have a third party boot loader where the Windows NT {bootmgr} 
+        // The user might have a third party boot loader where the Windows NT {bootmgr}
         // is NOT the default {fwbootmgr} entry. So make the reboot seemless/effortless by
         // synchronizing the {fwbootmgr} one-time option to the Windows NT {bootmgr}.
         // This is a QOL optimization so you don't have to manually select Windows
@@ -480,8 +481,11 @@ NTSTATUS PhBcdSetBootApplicationOneTime(
             &objectFirmwareHandle
             )))
         {
-            BCD_ELEMENT_OBJECT_LIST objectFirmwareList[32] = { 0 }; // dynamic?
-            ULONG objectFirmwareListLength = sizeof(objectFirmwareList);
+            BCD_ELEMENT_OBJECT_LIST objectFirmwareList[32]; // dynamic?
+            ULONG objectFirmwareListLength;
+
+            memset(objectFirmwareList, 0, sizeof(objectFirmwareList));
+            objectFirmwareListLength = sizeof(objectFirmwareList);
 
             if (NT_SUCCESS(PhBcdGetElementData(
                 objectFirmwareHandle,
@@ -491,7 +495,7 @@ NTSTATUS PhBcdSetBootApplicationOneTime(
                 )))
             {
                 // Check if the default entry is some third party application.
-                if (!IsEqualGUID(GUID_WINDOWS_BOOTMGR, objectFirmwareList->ObjectList[0]))
+                if (!IsEqualGUID(objectFirmwareList->ObjectList[0], GUID_WINDOWS_BOOTMGR))
                 {
                     BCD_ELEMENT_OBJECT_LIST firmwareOneTimeBootEntry[1];
 

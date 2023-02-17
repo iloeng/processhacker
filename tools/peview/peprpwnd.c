@@ -81,7 +81,6 @@ static HWND PvPropertiesWindowHandle = NULL;
 static HWND PvTabTreeControl = NULL;
 static HWND PvTabContainerControl = NULL;
 static INT PvPropertiesWindowShowCommand = SW_SHOW;
-static HIMAGELIST PvTabTreeImageList = NULL;
 static PH_LAYOUT_MANAGER PvTabWindowLayoutManager;
 static PPH_LIST PvTabSectionList = NULL;
 static PPV_WINDOW_SECTION PvTabCurrentSection = NULL;
@@ -160,7 +159,7 @@ VOID PvAddTreeViewSections(
         );
 
     // Load Config page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &entry)))
     {
         PvCreateTabSection(
             L"Load Config",
@@ -215,7 +214,7 @@ VOID PvAddTreeViewSections(
     }
 
     // Resources page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_RESOURCE, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_RESOURCE, &entry)))
     {
         PvCreateTabSection(
             L"Resources",
@@ -228,7 +227,6 @@ VOID PvAddTreeViewSections(
 
     // CLR page
     if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR, &entry)) &&
-        entry->VirtualAddress &&
         (PvImageCor20Header = PhMappedImageRvaToVa(&PvMappedImage, entry->VirtualAddress, NULL)))
     {
         NTSTATUS status = STATUS_SUCCESS;
@@ -265,6 +263,14 @@ VOID PvAddTreeViewSections(
                 PvpPeClrImportsDlgProc,
                 NULL
                 );
+
+            PvCreateTabSection(
+                L"CLR Tables",
+                PhInstanceHandle,
+                MAKEINTRESOURCE(IDD_PECLRTABLES),
+                PvpPeClrTablesDlgProc,
+                NULL
+                );
         }
     }
 
@@ -281,7 +287,7 @@ VOID PvAddTreeViewSections(
     }
 
     // TLS page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_TLS, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_TLS, &entry)))
     {
         PvCreateTabSection(
             L"TLS",
@@ -292,17 +298,20 @@ VOID PvAddTreeViewSections(
             );
     }
 
-    // RICH header page
-    // .NET executables don't include a RICH header.
-    if (!(PvImageCor20Header && (PvImageCor20Header->Flags & COMIMAGE_FLAGS_NATIVE_ENTRYPOINT) == 0))
+    // ProdId page
     {
-        PvCreateTabSection(
-            L"ProdID",
-            PhInstanceHandle,
-            MAKEINTRESOURCE(IDD_PEPRODID),
-            PvpPeProdIdDlgProc,
-            NULL
-            );
+        ULONG imageDosStubLength = ((PIMAGE_DOS_HEADER)PvMappedImage.ViewBase)->e_lfanew - RTL_SIZEOF_THROUGH_FIELD(IMAGE_DOS_HEADER, e_lfanew);
+
+        if (imageDosStubLength != 0 && imageDosStubLength != 64)
+        {
+            PvCreateTabSection(
+                L"ProdID",
+                PhInstanceHandle,
+                MAKEINTRESOURCE(IDD_PEPRODID),
+                PvpPeProdIdDlgProc,
+                NULL
+                );
+        }
     }
 
     // Exceptions page
@@ -320,7 +329,7 @@ VOID PvAddTreeViewSections(
         }
         else
         {
-            if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_EXCEPTION, &entry)) && entry->VirtualAddress)
+            if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_EXCEPTION, &entry)))
             {
                 has_exceptions = TRUE;
             }
@@ -339,7 +348,7 @@ VOID PvAddTreeViewSections(
     }
 
     // Relocations page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_BASERELOC, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_BASERELOC, &entry)))
     {
         PvCreateTabSection(
             L"Relocations",
@@ -351,7 +360,7 @@ VOID PvAddTreeViewSections(
     }
 
     // Certificates page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_SECURITY, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_SECURITY, &entry)))
     {
         PvCreateTabSection(
             L"Certificates",
@@ -363,7 +372,7 @@ VOID PvAddTreeViewSections(
     }
 
     // Debug page
-    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_DEBUG, &entry)) && entry->VirtualAddress)
+    if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_DEBUG, &entry)))
     {
         PvCreateTabSection(
             L"Debug",
@@ -372,6 +381,41 @@ VOID PvAddTreeViewSections(
             PvpPeDebugDlgProc,
             NULL
             );
+    }
+
+    // Volatile page
+    {
+        BOOLEAN valid = FALSE;
+
+        if (PvMappedImage.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+        {
+            if (NT_SUCCESS(PhGetMappedImageLoadConfig32(&PvMappedImage, &config32)) &&
+                RTL_CONTAINS_FIELD(config32, config32->Size, VolatileMetadataPointer))
+            {
+                if (config32->VolatileMetadataPointer)
+                    valid = TRUE;
+            }
+        }
+        else
+        {
+            if (NT_SUCCESS(PhGetMappedImageLoadConfig64(&PvMappedImage, &config64)) &&
+                RTL_CONTAINS_FIELD(config64, config64->Size, VolatileMetadataPointer))
+            {
+                if (config64->VolatileMetadataPointer)
+                    valid = TRUE;
+            }
+        }
+
+        if (valid)
+        {
+            PvCreateTabSection(
+                L"Volatile Metadata",
+                PhInstanceHandle,
+                MAKEINTRESOURCE(IDD_PEVOLATILE),
+                PvpPeVolatileDlgProc,
+                NULL
+                );
+        }
     }
 
     // EH continuation page
@@ -525,6 +569,15 @@ VOID PvAddTreeViewSections(
         NULL
         );
 
+    // VS_VERSIONINFO page
+    PvCreateTabSection(
+        L"VersionInfo",
+        PhInstanceHandle,
+        MAKEINTRESOURCE(IDD_PEPREVIEW),
+        PvpPeVersionInfoDlgProc,
+        NULL
+        );
+
     if (PhGetIntegerSetting(L"MainWindowPageRestoreEnabled"))
     {
         PPH_STRING startPage;
@@ -572,15 +625,14 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
         {
             PvTabTreeControl = GetDlgItem(hwndDlg, IDC_SECTIONTREE);
             PvTabContainerControl = GetDlgItem(hwndDlg, IDD_CONTAINER);
-            PvTabTreeImageList = PhImageListCreate(2, PV_SCALE_DPI(24), ILC_MASK | ILC_COLOR32, 1, 1);
 
             PhSetWindowText(hwndDlg, PhaFormatString(L"%s Properties", PhGetString(PvFileName))->Buffer);
 
             //PhSetWindowStyle(GetDlgItem(hwndDlg, IDC_SEPARATOR), SS_OWNERDRAW, SS_OWNERDRAW);
             PhSetControlTheme(PvTabTreeControl, L"explorer");
             TreeView_SetExtendedStyle(PvTabTreeControl, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
-            TreeView_SetImageList(PvTabTreeControl, PvTabTreeImageList, TVSIL_NORMAL);
             TreeView_SetBkColor(PvTabTreeControl, GetSysColor(COLOR_3DFACE));
+            PvSetTreeViewImageList(hwndDlg, PvTabTreeControl);
 
             PhInitializeLayoutManager(&PvTabWindowLayoutManager, hwndDlg);
             PhAddLayoutItem(&PvTabWindowLayoutManager, PvTabTreeControl, NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_BOTTOM);
@@ -656,7 +708,7 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
             PvSaveWindowState(hwndDlg);
 
             if (PhGetIntegerSetting(L"MainWindowPageRestoreEnabled"))
-                PhSetStringSetting(L"MainWindowPage", PvTabCurrentSection->Name.Buffer);
+                PhSetStringSetting2(L"MainWindowPage", &PvTabCurrentSection->Name);
 
             PhDeleteLayoutManager(&PvTabWindowLayoutManager);
 
@@ -669,10 +721,12 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
             PhDereferenceObject(PvTabSectionList);
             PvTabSectionList = NULL;
 
-            if (PvTabTreeImageList)
-                PhImageListDestroy(PvTabTreeImageList);
-
             PostQuitMessage(0);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvSetTreeViewImageList(hwndDlg, PvTabTreeControl);
         }
         break;
     case WM_SIZE:
@@ -766,27 +820,37 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
                     }
                 }
                 break;
-            //case NM_SETCURSOR:
-            //    {
-            //        if (header->hwndFrom == OptionsTreeControl)
-            //        {
-            //            HCURSOR cursor = (HCURSOR)LoadImage(
-            //                NULL,
-            //                IDC_ARROW,
-            //                IMAGE_CURSOR,
-            //                0,
-            //                0,
-            //                LR_SHARED
-            //                );
-            //            if (cursor != GetCursor())
-            //            {
-            //                SetCursor(cursor);
-            //            }
-            //            SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
-            //            return TRUE;
-            //        }
-            //    }
-            //    break;
+            case NM_SETCURSOR:
+                {
+                    if (header->hwndFrom == PvTabTreeControl)
+                    {
+                        static PH_INITONCE initOnce = PH_INITONCE_INIT;
+                        static HCURSOR cursorHandle = NULL;
+
+                        if (PhBeginInitOnce(&initOnce))
+                        {
+                            cursorHandle = (HCURSOR)LoadImage(
+                                NULL,
+                                IDC_ARROW,
+                                IMAGE_CURSOR,
+                                0,
+                                0,
+                                LR_SHARED
+                                );
+
+                            PhEndInitOnce(&initOnce);
+                        }
+
+                        if (cursorHandle)
+                        {
+                            SetCursor(cursorHandle);
+                        }
+
+                        SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
+                        return TRUE;
+                    }
+                }
+                break;
             }
         }
         break;

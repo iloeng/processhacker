@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017-2021
+ *     dmex    2017-2023
  *
  */
 
@@ -18,6 +18,7 @@
 #include <svcsup.h>
 #include <settings.h>
 #include <verify.h>
+#include <mapldr.h>
 
 #include <colmgr.h>
 #include <extmgri.h>
@@ -51,8 +52,8 @@ LONG PhpServiceTreeNewPostSortFunction(
 BOOLEAN NTAPI PhpServiceTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     );
 
@@ -360,11 +361,10 @@ static VOID PhpUpdateServiceNodeDescription(
 {
     if (!(ServiceNode->ValidMask & PHSN_DESCRIPTION))
     {
-        static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
         HANDLE keyHandle;
         PPH_STRING keyName;
 
-        keyName = PhConcatStringRef2(&servicesKeyName, &ServiceNode->ServiceItem->Name->sr);
+        keyName = PhGetServiceKeyName(&ServiceNode->ServiceItem->Name->sr);
 
         if (NT_SUCCESS(PhOpenKey(
             &keyHandle,
@@ -379,7 +379,7 @@ static VOID PhpUpdateServiceNodeDescription(
 
             if (descriptionString = PhQueryRegistryString(keyHandle, L"Description"))
             {
-                if (serviceDescriptionString = PhLoadIndirectString(descriptionString->Buffer))
+                if (serviceDescriptionString = PhLoadIndirectString(&descriptionString->sr))
                     PhMoveReference(&ServiceNode->Description, serviceDescriptionString);
                 else
                     PhSwapReference(&ServiceNode->Description, descriptionString);
@@ -411,11 +411,10 @@ static VOID PhpUpdateServiceNodeKey(
 {
     if (!(ServiceNode->ValidMask & PHSN_KEY))
     {
-        static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
         HANDLE keyHandle;
         PPH_STRING keyName;
 
-        keyName = PhConcatStringRef2(&servicesKeyName, &ServiceNode->ServiceItem->Name->sr);
+        keyName = PhGetServiceKeyName(&ServiceNode->ServiceItem->Name->sr);
 
         if (NT_SUCCESS(PhOpenKey(
             &keyHandle,
@@ -425,22 +424,11 @@ static VOID PhpUpdateServiceNodeKey(
             0
             )))
         {
-            NTSTATUS status;
-            KEY_BASIC_INFORMATION basicInfo = { 0 };
-            ULONG bufferLength = 0;
+            LARGE_INTEGER lastWriteTime;
 
-            status = NtQueryKey(
-                keyHandle,
-                KeyBasicInformation,
-                &basicInfo,
-                UFIELD_OFFSET(KEY_BASIC_INFORMATION, Name),
-                &bufferLength
-                );
-
-            // We can query the write time without allocating the key name. (dmex)
-            if (status == STATUS_SUCCESS || status == STATUS_BUFFER_OVERFLOW)
+            if (NT_SUCCESS(PhQueryKeyLastWriteTime(keyHandle, &lastWriteTime)))
             {
-                ServiceNode->KeyLastWriteTime = basicInfo.LastWriteTime;
+                ServiceNode->KeyLastWriteTime = lastWriteTime;
             }
             else
             {
@@ -610,8 +598,8 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI PhpServiceTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     )
 {
@@ -625,9 +613,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
 
             if (!getChildren->Node)
             {
@@ -679,9 +664,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
 
-            if (!isLeaf)
-                break;
-
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
@@ -689,9 +671,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PPH_SERVICE_ITEM serviceItem;
-
-            if (!getCellText)
-                break;
 
             node = (PPH_SERVICE_NODE)getCellText->Node;
             serviceItem = node->ServiceItem;
@@ -818,10 +797,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
     case TreeNewGetNodeIcon:
         {
             PPH_TREENEW_GET_NODE_ICON getNodeIcon = Parameter1;
-
-            if (!getNodeIcon)
-                break;
-
             node = (PPH_SERVICE_NODE)getNodeIcon->Node;
 
             if (node->ServiceItem->IconEntry)
@@ -836,16 +811,13 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
                     getNodeIcon->Icon = (HICON)(ULONG_PTR)0;//ServiceApplicationIcon;
             }
 
-            getNodeIcon->Flags = TN_CACHE;
+            //getNodeIcon->Flags = TN_CACHE;
         }
         return TRUE;
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
             PPH_SERVICE_ITEM serviceItem;
-
-            if (!getNodeColor)
-                break;
 
             node = (PPH_SERVICE_NODE)getNodeColor->Node;
             serviceItem = node->ServiceItem;
@@ -875,10 +847,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
     case TreeNewGetCellTooltip:
         {
             PPH_TREENEW_GET_CELL_TOOLTIP getCellTooltip = Parameter1;
-
-            if (!getCellTooltip)
-                break;
-
             node = (PPH_SERVICE_NODE)getCellTooltip->Node;
 
             if (getCellTooltip->Column->Id != 0)
@@ -904,9 +872,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
             PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
             PPH_SERVICE_ITEM serviceItem;
             RECT rect;
-
-            if (!customDraw)
-                break;
 
             node = (PPH_SERVICE_NODE)customDraw->Node;
             serviceItem = node->ServiceItem;
@@ -947,9 +912,6 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
 
-            if (!keyEvent)
-                break;
-
             switch (keyEvent->VirtualKey)
             {
             case 'C':
@@ -980,7 +942,7 @@ BOOLEAN NTAPI PhpServiceTreeNewCallback(
             data.MouseEvent = Parameter1;
             data.DefaultSortColumn = 0;
             data.DefaultSortOrder = AscendingSortOrder;
-            PhInitializeTreeNewColumnMenu(&data);
+            PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
                 PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);

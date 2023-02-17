@@ -347,7 +347,7 @@ INT_PTR CALLBACK PvPeLoadConfigDlgProc(
                 { \
                     ADD_VALUE(L"CFG guard flags", PH_AUTO_T(PH_STRING, PvpGetPeGuardFlagsText((Config)->GuardFlags))->Buffer); \
                     ADD_VALUE(L"CFG check-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFCheckFunctionPointer)->Buffer); \
-                    ADD_VALUE(L"CFG check-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFDispatchFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"CFG dispatch-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFDispatchFunctionPointer)->Buffer); \
                     ADD_VALUE(L"CFG function table", PhaFormatString(L"0x%Ix", (Config)->GuardCFFunctionTable)->Buffer); \
                     ADD_VALUE(L"CFG function table count", PhaFormatUInt64((Config)->GuardCFFunctionCount, TRUE)->Buffer); \
                     if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardAddressTakenIatEntryTable)) \
@@ -371,7 +371,7 @@ INT_PTR CALLBACK PvPeLoadConfigDlgProc(
                 \
                 if (RTL_CONTAINS_FIELD((Config), (Config)->Size, DynamicValueRelocTable)) \
                 { \
-                    ADD_VALUE(L"Dynamic value relocation table", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTable)->Buffer); \
+                    ADD_VALUE(L"DynamicValue relocation table", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTable)->Buffer); \
                     ADD_VALUE(L"Hybrid metadata pointer", PhaFormatString(L"0x%Ix", (Config)->CHPEMetadataPointer)->Buffer); \
                     ADD_VALUE(L"GuardRF failure-function routine", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutine)->Buffer); \
                     ADD_VALUE(L"GuardRF failure-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutineFunctionPointer)->Buffer); \
@@ -454,6 +454,8 @@ INT_PTR CALLBACK PvPeLoadConfigDlgProc(
     case WM_DESTROY:
         {
             PhSaveListViewColumnsToSetting(L"ImageLoadCfgListViewColumns", context->ListViewHandle);
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
         }
         break;
     case WM_SHOWWINDOW:

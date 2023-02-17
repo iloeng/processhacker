@@ -123,6 +123,36 @@
     <ClCompile Include="PresentMon\TraceConsumer.cpp">
       <Filter>Source Files\PresentMon</Filter>
     </ClCompile>
+    <ClCompile Include="waitchain.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="reparse.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="namedpipes.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="firmware.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="firmware_editor.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="objmgr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pooldb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pooldialog.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pooldialogbig.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pooltree.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
@@ -182,6 +212,15 @@
     <ClInclude Include="PresentMon\TraceConsumer.hpp">
       <Filter>Header Files\PresentMon</Filter>
     </ClInclude>
+    <ClInclude Include="extension\plugin.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="efi_guid_list.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="poolmon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="CHANGELOG.txt" />
@@ -190,5 +229,45 @@
     <ResourceCompile Include="ExtendedTools.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resources\pooltag.txt">
+      <Filter>Resource Files</Filter>
+    </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\folder.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\mutant.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\driver.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\section.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\link.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\key.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\port.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\session.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\event.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\device.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\unknown.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
   </ItemGroup>
 </Project>

@@ -49,8 +49,8 @@ LONG PhpNetworkTreeNewPostSortFunction(
 BOOLEAN NTAPI PhpNetworkTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     );
 
@@ -286,7 +286,7 @@ VOID PhpRemoveNetworkNode(
 
     // Remove from list and cleanup.
 
-    if ((index = PhFindItemList(NetworkNodeList, NetworkNode)) != -1)
+    if ((index = PhFindItemList(NetworkNodeList, NetworkNode)) != ULONG_MAX)
         PhRemoveItemList(NetworkNodeList, index);
 
     if (NetworkNode->ProcessNameText) PhDereferenceObject(NetworkNode->ProcessNameText);
@@ -367,18 +367,28 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddress)
 {
-    if (networkItem1->ProtocolType & PH_IPV4_NETWORK_TYPE && networkItem2->ProtocolType & PH_IPV4_NETWORK_TYPE)
+    SOCKADDR_IN6 localAddress1 = { 0 };
+    SOCKADDR_IN6 localAddress2 = { 0 };
+
+    if (networkItem1->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
     {
-        sortResult = uintcmp(networkItem1->LocalEndpoint.Address.InAddr.s_addr, networkItem2->LocalEndpoint.Address.InAddr.s_addr);
+        IN6ADDR_SETV4MAPPED(&localAddress1, &networkItem1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (networkItem1->ProtocolType & PH_IPV6_NETWORK_TYPE && networkItem2->ProtocolType & PH_IPV6_NETWORK_TYPE)
+    else if (networkItem1->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
-        sortResult = memcmp(networkItem1->LocalEndpoint.Address.In6Addr.s6_addr, networkItem2->LocalEndpoint.Address.In6Addr.s6_addr, sizeof(IN6_ADDR));
+        IN6ADDR_SETSOCKADDR(&localAddress1, &networkItem1->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = networkItem1->LocalScopeId }, 0);
     }
-    else
+
+    if (networkItem2->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
     {
-        sortResult = PhCompareStringZ(networkItem1->LocalAddressString, networkItem2->LocalAddressString, FALSE);
+        IN6ADDR_SETV4MAPPED(&localAddress2, &networkItem2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
+    else if (networkItem2->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&localAddress2, &networkItem2->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = networkItem2->LocalScopeId }, 0);
+    }
+
+    sortResult = memcmp(&localAddress1, &localAddress2, sizeof(SOCKADDR_IN6));
 }
 END_SORT_FUNCTION
 
@@ -396,18 +406,28 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddress)
 {
-    if (networkItem1->ProtocolType & PH_IPV4_NETWORK_TYPE && networkItem2->ProtocolType & PH_IPV4_NETWORK_TYPE)
+    SOCKADDR_IN6 remoteAddress1 = { 0 };
+    SOCKADDR_IN6 remoteAddress2 = { 0 };
+
+    if (networkItem1->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
     {
-        sortResult = uintcmp(networkItem1->RemoteEndpoint.Address.InAddr.s_addr, networkItem2->RemoteEndpoint.Address.InAddr.s_addr);
+        IN6ADDR_SETV4MAPPED(&remoteAddress1, &networkItem1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (networkItem1->ProtocolType & PH_IPV6_NETWORK_TYPE && networkItem2->ProtocolType & PH_IPV6_NETWORK_TYPE)
+    else if (networkItem1->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
-        sortResult = memcmp(networkItem1->RemoteEndpoint.Address.In6Addr.s6_addr, networkItem2->RemoteEndpoint.Address.In6Addr.s6_addr, sizeof(IN6_ADDR));
+        IN6ADDR_SETSOCKADDR(&remoteAddress1, &networkItem1->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = networkItem1->RemoteScopeId }, 0);
     }
-    else
+
+    if (networkItem2->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
     {
-        sortResult = PhCompareStringZ(networkItem1->RemoteAddressString, networkItem2->RemoteAddressString, FALSE);
+        IN6ADDR_SETV4MAPPED(&remoteAddress2, &networkItem2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
+    else if (networkItem2->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    {
+        IN6ADDR_SETSOCKADDR(&remoteAddress2, &networkItem2->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = networkItem2->RemoteScopeId }, 0);
+    }
+
+    sortResult = memcmp(&remoteAddress1, &remoteAddress2, sizeof(SOCKADDR_IN6));
 }
 END_SORT_FUNCTION
 
@@ -456,8 +476,8 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI PhpNetworkTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     )
 {
@@ -471,9 +491,6 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
 
             if (!getChildren->Node)
             {
@@ -523,9 +540,6 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
 
-            if (!isLeaf)
-                break;
-
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
@@ -533,9 +547,6 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
             PPH_NETWORK_ITEM networkItem;
-
-            if (!getCellText)
-                break;
 
             node = (PPH_NETWORK_NODE)getCellText->Node;
             networkItem = node->NetworkItem;
@@ -661,21 +672,15 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
         {
             PPH_TREENEW_GET_NODE_ICON getNodeIcon = Parameter1;
 
-            if (!getNodeIcon)
-                break;
-
             node = (PPH_NETWORK_NODE)getNodeIcon->Node;
             getNodeIcon->Icon = (HICON)(ULONG_PTR)node->NetworkItem->ProcessIconIndex;
-            getNodeIcon->Flags = TN_CACHE;
+            //getNodeIcon->Flags = TN_CACHE;
         }
         return TRUE;
     case TreeNewGetCellTooltip:
         {
             PPH_TREENEW_GET_CELL_TOOLTIP getCellTooltip = Parameter1;
             PPH_PROCESS_ITEM processItem;
-
-            if (!getCellTooltip)
-                break;
 
             node = (PPH_NETWORK_NODE)getCellTooltip->Node;
 
@@ -708,9 +713,6 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
             PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
             PPH_NETWORK_ITEM networkItem;
             RECT rect;
-
-            if (!customDraw)
-                break;
 
             node = (PPH_NETWORK_NODE)customDraw->Node;
             networkItem = node->NetworkItem;
@@ -749,9 +751,6 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
 
-            if (!keyEvent)
-                break;
-
             switch (keyEvent->VirtualKey)
             {
             case 'C':
@@ -776,7 +775,7 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
             data.MouseEvent = Parameter1;
             data.DefaultSortColumn = 0;
             data.DefaultSortOrder = AscendingSortOrder;
-            PhInitializeTreeNewColumnMenu(&data);
+            PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
                 PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);
@@ -793,19 +792,12 @@ BOOLEAN NTAPI PhpNetworkTreeNewCallback(
         {
             PPH_TREENEW_CONTEXT_MENU contextMenu = Parameter1;
 
-            if (!contextMenu)
-                break;
-
             PhShowNetworkContextMenu(contextMenu);
         }
         return TRUE;
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
-
-            if (!getNodeColor)
-                break;
-
             node = (PPH_NETWORK_NODE)getNodeColor->Node;
 
             if (!node->NetworkItem)

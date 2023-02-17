@@ -175,7 +175,7 @@ INT_PTR CALLBACK PhpProcessVdmHostProcessDlgProc(
     );
 #endif
 
-extern PH_STRINGREF PhpLoadingText;
+extern PH_STRINGREF PhProcessPropPageLoadingText;
 
 #define WM_PH_THREADS_UPDATED (WM_APP + 200)
 #define WM_PH_THREAD_SELECTION_CHANGED (WM_APP + 201)
@@ -413,7 +413,7 @@ typedef struct _PH_ENVIRONMENT_CONTEXT
         };
     };
 
-    PPH_PROCESS_ITEM ProcessItem;   
+    PPH_PROCESS_ITEM ProcessItem;
     PPH_STRING SearchboxText;
     PPH_STRING StatusMessage;
 

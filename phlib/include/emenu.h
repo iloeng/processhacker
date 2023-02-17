@@ -1,9 +1,19 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2016
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_EMENU_H
 #define _PH_EMENU_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+EXTERN_C_START
 
 #define PH_EMENU_DISABLED 0x1
 #define PH_EMENU_CHECKED 0x2
@@ -72,7 +82,10 @@ PPH_EMENU_ITEM PhFindEMenuItem(
     );
 
 PHLIBAPI
-PPH_EMENU_ITEM PhFindEMenuItemEx(
+_Success_(return != NULL)
+PPH_EMENU_ITEM
+NTAPI
+PhFindEMenuItemEx(
     _In_ PPH_EMENU_ITEM Item,
     _In_ ULONG Flags,
     _In_opt_ PWSTR Text,
@@ -159,7 +172,7 @@ VOID PhLoadResourceEMenuItem(
     _Inout_ PPH_EMENU_ITEM MenuItem,
     _In_ HINSTANCE InstanceHandle,
     _In_ PWSTR Resource,
-    _In_ ULONG SubMenuIndex
+    _In_ INT SubMenuIndex
     );
 
 #define PH_EMENU_SHOW_SEND_COMMAND 0x1
@@ -212,7 +225,15 @@ PPH_EMENU_ITEM PhCreateEMenuSeparator(
     return PhCreateEMenuItem(PH_EMENU_SEPARATOR, 0, NULL, NULL, NULL);
 }
 
-FORCEINLINE 
+FORCEINLINE
+PPH_EMENU_ITEM PhCreateEMenuItemEmpty(
+    VOID
+    )
+{
+    return PhCreateEMenuItem(0, USHRT_MAX, NULL, NULL, NULL);
+}
+
+FORCEINLINE
 BOOLEAN PhEnableEMenuItem(
     _Inout_ PPH_EMENU_ITEM Item,
     _In_ ULONG Id,
@@ -222,7 +243,7 @@ BOOLEAN PhEnableEMenuItem(
     return PhSetFlagsEMenuItem(Item, Id, PH_EMENU_DISABLED, Enable ? 0 : PH_EMENU_DISABLED);
 }
 
-FORCEINLINE 
+FORCEINLINE
 VOID PhSetDisabledEMenuItem(
     _In_ PPH_EMENU_ITEM Item
     )
@@ -242,8 +263,6 @@ VOID PhSetEnabledEMenuItem(
         Item->Flags |= PH_EMENU_DISABLED;
 }
 
-#ifdef __cplusplus
-}
-#endif
+EXTERN_C_END
 
 #endif

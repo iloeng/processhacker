@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2016
+ *     dmex    2017-2022
+ *
+ */
+
 #ifndef PHAPP_H
 #define PHAPP_H
 
@@ -34,8 +46,6 @@ typedef struct _PH_STARTUP_PARAMETERS
             ULONG ShowVisible : 1;
             ULONG ShowHidden : 1;
             ULONG NoKph : 1;
-            ULONG InstallKph : 1;
-            ULONG UninstallKph : 1;
             ULONG Debug : 1;
             ULONG ShowOptions : 1;
             ULONG PhSvc : 1;
@@ -44,12 +54,13 @@ typedef struct _PH_STARTUP_PARAMETERS
             ULONG Elevate : 1;
             ULONG Silent : 1;
             ULONG Help : 1;
+            ULONG KphStartupHigh : 1;
+            ULONG KphStartupMax : 1;
             ULONG Spare : 18;
         };
         ULONG Flags;
     };
 
-    PPH_STRING SettingsFileName;
     PPH_STRING RunAsServiceMode;
 
     HWND WindowHandle;
@@ -70,8 +81,6 @@ extern PH_STARTUP_PARAMETERS PhStartupParameters;
 extern PH_PROVIDER_THREAD PhPrimaryProviderThread;
 extern PH_PROVIDER_THREAD PhSecondaryProviderThread;
 extern PH_PROVIDER_THREAD PhTertiaryProviderThread;
-
-#define PH_SCALE_DPI(Value) PhMultiplyDivide(Value, PhGlobalDpi, 96) // phapppub
 
 // begin_phapppub
 PHAPPAPI
@@ -114,10 +123,6 @@ PhUnregisterMessageLoopFilter(
     _In_ PPH_MESSAGE_LOOP_FILTER_ENTRY FilterEntry
     );
 // end_phapppub
-
-VOID PhInitializeFont(
-    VOID
-    );
 
 // plugin
 
@@ -334,7 +339,7 @@ NTSTATUS
 NTAPI
 PhSetProcessItemPriority(
     _In_ PPH_PROCESS_ITEM ProcessItem,
-    _In_ PROCESS_PRIORITY_CLASS PriorityClass
+    _In_ UCHAR PriorityClass
     );
 
 PHAPPAPI
@@ -474,6 +479,12 @@ HPROPSHEETPAGE PhCreateJobPage(
 
 VOID PhShowLiveDumpDialog(
     _In_ HWND ParentWindowHandle
+    );
+
+// ksyscall
+
+PPH_STRING PhGetSystemCallNumberName(
+    _In_ USHORT SystemCallNumber
     );
 
 // logwnd
@@ -684,126 +695,6 @@ PhCreateSearchControl(
     _In_ HWND WindowHandle,
     _In_opt_ PWSTR BannerText
     );
-
-PHAPPAPI
-HBITMAP 
-NTAPI
-PhLoadPngImageFromResource(
-    _In_ PVOID DllBase,
-    _In_ UINT Width,
-    _In_ UINT Height,
-    _In_ PCWSTR Name,
-    _In_ BOOLEAN RGBAImage
-    );
-
-PHAPPAPI
-HBITMAP
-NTAPI
-PhLoadPngImageFromFile(
-    _In_ PWSTR FileName,
-    _In_ UINT Width,
-    _In_ UINT Height,
-    _In_ BOOLEAN RGBAImage
-    );
-
-FORCEINLINE
-HFONT 
-PhCreateFont(
-    _In_ PWSTR Name,
-    _In_ ULONG Size,
-    _In_ ULONG Weight
-    )
-{
-    return CreateFont(
-        -(LONG)PhMultiplyDivide(Size, PhGlobalDpi, 72),
-        0,
-        0,
-        0,
-        Weight,
-        FALSE,
-        FALSE,
-        FALSE,
-        ANSI_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY,
-        DEFAULT_PITCH,
-        Name
-        );
-}
-
-FORCEINLINE
-HFONT
-PhCreateCommonFont(
-    _In_ LONG Size,
-    _In_ INT Weight,
-    _In_opt_ HWND hwnd
-    )
-{
-    HFONT fontHandle;
-    LOGFONT logFont;
-
-    if (!SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &logFont, 0))
-        return NULL;
-
-    fontHandle = CreateFont(
-        -PhMultiplyDivideSigned(Size, PhGlobalDpi, 72),
-        0,
-        0,
-        0,
-        Weight,
-        FALSE,
-        FALSE,
-        FALSE,
-        ANSI_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH,
-        logFont.lfFaceName
-        );
-
-    if (!fontHandle)
-        return NULL;
-
-    if (hwnd)
-        SetWindowFont(hwnd, fontHandle, TRUE);
-
-    return fontHandle;
-}
-
-FORCEINLINE
-HFONT
-PhDuplicateFont(
-    _In_ HFONT Font
-    )
-{
-    LOGFONT logFont;
-
-    if (GetObject(Font, sizeof(LOGFONT), &logFont))
-        return CreateFontIndirect(&logFont);
-
-    return NULL;
-}
-
-FORCEINLINE
-HFONT
-PhDuplicateFontWithNewWeight(
-    _In_ HFONT Font,
-    _In_ LONG NewWeight
-    )
-{
-    LOGFONT logFont;
-
-    if (GetObject(Font, sizeof(LOGFONT), &logFont))
-    {
-        logFont.lfWeight = NewWeight;
-        return CreateFontIndirect(&logFont);
-    }
-
-    return NULL;
-}
-
 // end_phapppub
 
 // sessmsg

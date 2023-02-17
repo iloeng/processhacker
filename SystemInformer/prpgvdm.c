@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2021-2022
+ *     dmex    2021-2023
  *
  */
 
@@ -17,6 +17,7 @@
 #include <procprv.h>
 #include <settings.h>
 #include <emenu.h>
+#include <mapldr.h>
 
 #include <vdmdbg.h>
 
@@ -66,7 +67,7 @@ PVOID PhpGetVdmDbgDllBase(
         {
             if (systemFileName = PhConcatStringRefZ(&systemDirectory->sr, L"\\vdmdbg.dll"))
             {
-                if (!(imageBaseAddress = PhGetLoaderEntryStringRefDllBase(&systemFileName->sr, NULL)))
+                if (!(imageBaseAddress = PhGetLoaderEntryDllBase(&systemFileName->sr, NULL)))
                     imageBaseAddress = PhLoadLibrary(PhGetString(systemFileName));
 
                 PhDereferenceObject(systemFileName);
@@ -220,7 +221,7 @@ VOID PhpRefreshVdmHostProcess(
 
             lvItemIndex = PhAddListViewItem(
                 Context->ListViewHandle,
-                MAXINT, 
+                MAXINT,
                 PhGetStringOrEmpty(entry->ModuleName),
                 UlongToPtr(Context->VdmHostProcessList->Count + 1)
                 );
@@ -401,7 +402,7 @@ INT_PTR CALLBACK PhpProcessVdmHostProcessDlgProc(
                             break;
                         case 4:
                             {
-                                if (!PhIsNullOrEmptyString(entry->FileName) && PhDoesFileExistsWin32(PhGetString(entry->FileName)))
+                                if (!PhIsNullOrEmptyString(entry->FileName) && PhDoesFileExistWin32(PhGetString(entry->FileName)))
                                 {
                                     PhShellExecuteUserString(
                                         hwndDlg,
@@ -415,7 +416,7 @@ INT_PTR CALLBACK PhpProcessVdmHostProcessDlgProc(
                             break;
                         case 5:
                             {
-                                if (!PhIsNullOrEmptyString(entry->FileName) && PhDoesFileExistsWin32(PhGetString(entry->FileName)))
+                                if (!PhIsNullOrEmptyString(entry->FileName) && PhDoesFileExistWin32(PhGetString(entry->FileName)))
                                 {
                                     PhShellExecuteUserString(
                                         hwndDlg,

@@ -186,8 +186,6 @@ INT_PTR CALLBACK PvpPeStreamsDlgProc(
     {
     case WM_INITDIALOG:
         {
-            HIMAGELIST listViewImageList;
-
             context->WindowHandle = hwndDlg;
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
 
@@ -200,12 +198,10 @@ INT_PTR CALLBACK PvpPeStreamsDlgProc(
             PhSetExtendedListView(context->ListViewHandle);
             PhLoadListViewColumnsFromSetting(L"ImageStreamsListViewColumns", context->ListViewHandle);
             PvConfigTreeBorders(context->ListViewHandle);
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, context->ListViewHandle, NULL, PH_ANCHOR_ALL);
-
-            if (listViewImageList = PhImageListCreate(2, 20, ILC_MASK | ILC_COLOR, 1, 1))
-                ListView_SetImageList(context->ListViewHandle, listViewImageList, LVSIL_SMALL);
 
             PvpPeEnumerateFileStreams(context->ListViewHandle);
 
@@ -216,7 +212,13 @@ INT_PTR CALLBACK PvpPeStreamsDlgProc(
         {
             PhSaveListViewColumnsToSetting(L"ImageStreamsListViewColumns", context->ListViewHandle);
             PhDeleteLayoutManager(&context->LayoutManager);
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvSetListViewImageList(context->WindowHandle, context->ListViewHandle);
         }
         break;
     case WM_SHOWWINDOW:

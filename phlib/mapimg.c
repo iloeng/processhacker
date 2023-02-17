@@ -139,7 +139,7 @@ NTSTATUS PhLoadMappedImage(
 }
 
 NTSTATUS PhLoadMappedImageEx(
-    _In_opt_ PPH_STRING FileName,
+    _In_opt_ PPH_STRINGREF FileName,
     _In_opt_ HANDLE FileHandle,
     _Out_ PPH_MAPPED_IMAGE MappedImage
     )
@@ -274,7 +274,7 @@ NTSTATUS PhMapViewOfEntireFile(
         0,
         NULL,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         );
@@ -295,7 +295,7 @@ CleanupExit:
 }
 
 NTSTATUS PhMapViewOfEntireFileEx(
-    _In_opt_ PPH_STRING FileName,
+    _In_opt_ PPH_STRINGREF FileName,
     _In_opt_ HANDLE FileHandle,
     _Out_ PVOID *ViewBase,
     _Out_ PSIZE_T Size
@@ -363,7 +363,7 @@ NTSTATUS PhMapViewOfEntireFileEx(
         0,
         NULL,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         );
@@ -415,6 +415,7 @@ PIMAGE_SECTION_HEADER PhMappedImageRvaToSection(
 
 _Must_inspect_result_
 _Ret_maybenull_
+_Success_(return != NULL)
 PVOID PhMappedImageRvaToVa(
     _In_ PPH_MAPPED_IMAGE MappedImage,
     _In_ ULONG Rva,
@@ -512,31 +513,41 @@ NTSTATUS PhGetMappedImageDataEntry(
     if (MappedImage->Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
     {
         PIMAGE_OPTIONAL_HEADER32 optionalHeader;
+        PIMAGE_DATA_DIRECTORY dataDirectory;
 
         optionalHeader = (PIMAGE_OPTIONAL_HEADER32)&MappedImage->NtHeaders32->OptionalHeader;
 
         if (Index >= optionalHeader->NumberOfRvaAndSizes)
             return STATUS_INVALID_PARAMETER_2;
 
-        *Entry = &optionalHeader->DataDirectory[Index];
+        dataDirectory = &optionalHeader->DataDirectory[Index];
+
+        if (dataDirectory->VirtualAddress && dataDirectory->Size)
+        {
+            *Entry = dataDirectory;
+            return STATUS_SUCCESS;
+        }
     }
     else if (MappedImage->Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
     {
         PIMAGE_OPTIONAL_HEADER64 optionalHeader;
+        PIMAGE_DATA_DIRECTORY dataDirectory;
 
         optionalHeader = (PIMAGE_OPTIONAL_HEADER64)&MappedImage->NtHeaders->OptionalHeader;
 
         if (Index >= optionalHeader->NumberOfRvaAndSizes)
             return STATUS_INVALID_PARAMETER_2;
 
-        *Entry = &optionalHeader->DataDirectory[Index];
-    }
-    else
-    {
-        return STATUS_INVALID_PARAMETER;
+        dataDirectory = &optionalHeader->DataDirectory[Index];
+
+        if (dataDirectory->VirtualAddress && dataDirectory->Size)
+        {
+            *Entry = dataDirectory;
+            return STATUS_SUCCESS;
+        }
     }
 
-    return STATUS_SUCCESS;
+    return STATUS_NOT_FOUND;
 }
 
 PVOID PhGetMappedImageDirectoryEntry(
@@ -577,12 +588,20 @@ FORCEINLINE NTSTATUS PhpGetMappedImageLoadConfig(
     if (MappedImage->Magic != Magic)
         return STATUS_INVALID_PARAMETER;
 
-    status = PhGetMappedImageDataEntry(MappedImage, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &entry);
+    status = PhGetMappedImageDataEntry(
+        MappedImage,
+        IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG,
+        &entry
+        );
 
     if (!NT_SUCCESS(status))
         return status;
 
-    loadConfig = PhMappedImageRvaToVa(MappedImage, entry->VirtualAddress, NULL);
+    loadConfig = PhMappedImageRvaToVa(
+        MappedImage,
+        entry->VirtualAddress,
+        NULL
+        );
 
     if (!loadConfig)
         return STATUS_INVALID_PARAMETER;
@@ -1820,7 +1839,7 @@ NTSTATUS PhGetMappedImageCfg32(
 
     if (!NT_SUCCESS(status = PhGetMappedImageLoadConfig32(MappedImage, &config32)))
         return status;
-    
+
     // Not every load configuration defines CFG characteristics
     if (!RTL_CONTAINS_FIELD(config32, config32->Size, GuardFlags))
         return STATUS_INVALID_VIEW_SIZE;
@@ -1844,7 +1863,7 @@ NTSTATUS PhGetMappedImageCfg32(
         config32->GuardCFFunctionTable,
         NULL
         );
-    
+
     if (CfgConfig->GuardFunctionTable && CfgConfig->NumberOfGuardFunctionEntries)
     {
         __try
@@ -2777,7 +2796,7 @@ NTSTATUS PhGetMappedImageProdIdHeader(
                 continue;
             }
 
-            // The prodid header can include 3 extra checksum values. Ignore these for now (dmex) 
+            // The prodid header can include 3 extra checksum values. Ignore these for now (dmex)
             if ((item->dwCount ^ richHeaderKey) != richHeaderKey)
             {
                 PH_MAPPED_IMAGE_PRODID_ENTRY entry;
@@ -3000,7 +3019,7 @@ NTSTATUS PhGetMappedImageDebug(
         PhpMappedImageProbe(MappedImage, debugDirectory, sizeof(IMAGE_DEBUG_DIRECTORY));
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
-    {   
+    {
         return GetExceptionCode();
     }
 
@@ -3085,7 +3104,7 @@ NTSTATUS PhGetMappedImageDebugEntryByType(
         PhpMappedImageProbe(MappedImage, debugDirectory, sizeof(IMAGE_DEBUG_DIRECTORY));
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
-    {   
+    {
         return GetExceptionCode();
     }
 
@@ -3222,65 +3241,66 @@ BOOLEAN PhGetMappedImagePogoEntryByName(
 {
     ULONG debugEntryLength;
     PIMAGE_DEBUG_POGO_SIGNATURE debugEntry;
+    PIMAGE_DEBUG_POGO_ENTRY debugPogoEntry;
 
-    if (NT_SUCCESS(PhGetMappedImageDebugEntryByType(
+    if (!NT_SUCCESS(PhGetMappedImageDebugEntryByType(
         MappedImage,
         IMAGE_DEBUG_TYPE_POGO,
         &debugEntryLength,
         &debugEntry
         )))
     {
-        PIMAGE_DEBUG_POGO_ENTRY debugPogoEntry;
+        return FALSE;
+    }
 
+    __try
+    {
+        PhpMappedImageProbe(MappedImage, debugEntry, sizeof(IMAGE_DEBUG_POGO_SIGNATURE));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return FALSE;
+    }
+
+    if (debugEntry->Signature != IMAGE_DEBUG_POGO_SIGNATURE_LTCG && debugEntry->Signature != IMAGE_DEBUG_POGO_SIGNATURE_PGU)
+    {
+        // The signature can be zero but still contain valid entries.
+        if (!(debugEntry->Signature == 0 && debugEntryLength > sizeof(IMAGE_DEBUG_POGO_SIGNATURE)))
+            return FALSE;
+    }
+
+    debugPogoEntry = PTR_ADD_OFFSET(debugEntry, sizeof(IMAGE_DEBUG_POGO_SIGNATURE));
+
+    while ((ULONG_PTR)debugPogoEntry < (ULONG_PTR)PTR_ADD_OFFSET(debugEntry, debugEntryLength))
+    {
         __try
         {
-            PhpMappedImageProbe(MappedImage, debugEntry, sizeof(IMAGE_DEBUG_POGO_SIGNATURE));
+            PhpMappedImageProbe(MappedImage, debugPogoEntry, sizeof(IMAGE_DEBUG_POGO_ENTRY));
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return FALSE;
         }
 
-        if (debugEntry->Signature != IMAGE_DEBUG_POGO_SIGNATURE_LTCG && debugEntry->Signature != IMAGE_DEBUG_POGO_SIGNATURE_PGU)
+        if (!(debugPogoEntry->Rva && debugPogoEntry->Size))
+            break;
+
+        if (PhEqualBytesZ(debugPogoEntry->Name, Name, TRUE))
         {
-            // The signature can be zero but still contain valid entries.
-            if (!(debugEntry->Signature == 0 && debugEntryLength > sizeof(IMAGE_DEBUG_POGO_SIGNATURE)))
-                return FALSE;
+            if (DataLength)
+            {
+                *DataLength = debugPogoEntry->Size;
+            }
+
+            if (DataBuffer)
+            {
+                *DataBuffer = PTR_ADD_OFFSET(MappedImage->ViewBase, debugPogoEntry->Rva);
+            }
+
+            return TRUE;
         }
 
-        debugPogoEntry = PTR_ADD_OFFSET(debugEntry, sizeof(IMAGE_DEBUG_POGO_SIGNATURE));
-
-        while ((ULONG_PTR)debugPogoEntry < (ULONG_PTR)PTR_ADD_OFFSET(debugEntry, debugEntryLength))
-        {
-            __try
-            {
-                PhpMappedImageProbe(MappedImage, debugPogoEntry, sizeof(IMAGE_DEBUG_POGO_ENTRY));
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return FALSE;
-            }
-
-            if (!(debugPogoEntry->Rva && debugPogoEntry->Size))
-                break;
-
-            if (PhEqualBytesZ(debugPogoEntry->Name, Name, TRUE))
-            {
-                if (DataLength)
-                {
-                    *DataLength = debugPogoEntry->Size;
-                }
-
-                if (DataBuffer)
-                {
-                    *DataBuffer = PTR_ADD_OFFSET(MappedImage->ViewBase, debugPogoEntry->Rva);
-                }
-
-                return TRUE;
-            }
-
-            debugPogoEntry = PTR_ADD_OFFSET(debugPogoEntry, ALIGN_UP(UFIELD_OFFSET(IMAGE_DEBUG_POGO_ENTRY, Name) + strlen(debugPogoEntry->Name) + sizeof(ANSI_NULL), ULONG));
-        }
+        debugPogoEntry = PTR_ADD_OFFSET(debugPogoEntry, ALIGN_UP(UFIELD_OFFSET(IMAGE_DEBUG_POGO_ENTRY, Name) + strlen(debugPogoEntry->Name) + sizeof(ANSI_NULL), ULONG));
     }
 
     return FALSE;
@@ -3423,7 +3443,7 @@ NTSTATUS PhGetMappedImageRelocations(
         PhpMappedImageProbe(MappedImage, relocationDirectory, sizeof(IMAGE_BASE_RELOCATION));
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
-    {   
+    {
         return GetExceptionCode();
     }
 
@@ -3667,6 +3687,181 @@ NTSTATUS PhGetMappedImageExceptions(
 
     Exceptions->NumberOfEntries = (ULONG)exceptionArray.Count;
     Exceptions->ExceptionEntries = PhFinalArrayItems(&exceptionArray);
+
+    return status;
+}
+
+NTSTATUS PhGetMappedImageVolatileMetadata(
+    _In_ PPH_MAPPED_IMAGE MappedImage,
+    _Out_ PPH_MAPPED_IMAGE_VOLATILE_METADATA VolatileMetadata
+    )
+{
+    NTSTATUS status;
+    PIMAGE_VOLATILE_METADATA metadata;
+    ULONG metadataAccessTotal = 0;
+    ULONG metadataRangeTotal = 0;
+    PH_ARRAY metadataAccessArray = { 0 };
+    PH_ARRAY metadataRangeArray = { 0 };
+
+    if (MappedImage->Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+    {
+        PIMAGE_LOAD_CONFIG_DIRECTORY32 config32;
+
+        status = PhGetMappedImageLoadConfig32(MappedImage, &config32);
+
+        if (!NT_SUCCESS(status))
+            return status;
+        if (!RTL_CONTAINS_FIELD(config32, config32->Size, VolatileMetadataPointer))
+            return STATUS_INVALID_VIEW_SIZE;
+        if (config32->VolatileMetadataPointer == 0)
+            return STATUS_INVALID_FILE_FOR_SECTION;
+
+        metadata = PhMappedImageVaToVa(
+            MappedImage,
+            (ULONG)config32->VolatileMetadataPointer,
+            NULL
+            );
+    }
+    else if (MappedImage->Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+    {
+        PIMAGE_LOAD_CONFIG_DIRECTORY64 config64;
+
+        status = PhGetMappedImageLoadConfig64(MappedImage, &config64);
+
+        if (!NT_SUCCESS(status))
+            return status;
+        if (!RTL_CONTAINS_FIELD(config64, config64->Size, VolatileMetadataPointer))
+            return STATUS_INVALID_VIEW_SIZE;
+        if (config64->VolatileMetadataPointer == 0)
+            return STATUS_INVALID_FILE_FOR_SECTION;
+
+        metadata = PhMappedImageVaToVa(
+            MappedImage,
+            (ULONG)config64->VolatileMetadataPointer,
+            NULL
+            );
+    }
+
+    if (!metadata)
+        return STATUS_INVALID_PARAMETER;
+
+    __try
+    {
+        PhpMappedImageProbe(MappedImage, metadata, sizeof(IMAGE_VOLATILE_METADATA));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return GetExceptionCode();
+    }
+
+    if (metadata->Size != sizeof(IMAGE_VOLATILE_METADATA))
+        return STATUS_NOT_IMPLEMENTED;
+
+    //USHORT metadataVersionMin = HIWORD(metadata->Version) & 0xff;
+    //USHORT metadataVersionMax = LOWORD(metadata->Version) & 0xff;
+    //if (metadataVersionMin != 2 && metadataVersionMax != 2)
+    //    return STATUS_NOT_IMPLEMENTED;
+
+    if (metadata->VolatileAccessTable && metadata->VolatileAccessTableSize)
+    {
+        PVOID volatileAccessTable;
+        PIMAGE_VOLATILE_RVA_METADATA entry;
+
+        volatileAccessTable = PhMappedImageRvaToVa(
+            MappedImage,
+            metadata->VolatileAccessTable,
+            NULL
+            );
+
+        if (volatileAccessTable)
+        {
+            ULONG count;
+            ULONG i;
+
+            count = metadata->VolatileAccessTableSize / sizeof(IMAGE_VOLATILE_RVA_METADATA);
+
+            PhInitializeArray(&metadataAccessArray, sizeof(PH_IMAGE_VOLATILE_ENTRY), count);
+
+            for (i = 0; i < count; i++)
+            {
+                entry = PTR_ADD_OFFSET(volatileAccessTable, i * sizeof(IMAGE_VOLATILE_RVA_METADATA));
+
+                __try
+                {
+                    PhpMappedImageProbe(MappedImage, entry, sizeof(IMAGE_VOLATILE_RVA_METADATA));
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+
+                {
+                    PH_IMAGE_VOLATILE_ENTRY volatileRvaEntry;
+
+                    volatileRvaEntry.Rva = entry->Rva;
+                    volatileRvaEntry.Size = 0;
+
+                    PhAddItemArray(&metadataAccessArray, &volatileRvaEntry);
+                }
+            }
+
+            metadataAccessTotal = (ULONG)metadataAccessArray.Count;
+        }
+    }
+
+    if (metadata->VolatileInfoRangeTable && metadata->VolatileInfoRangeTableSize)
+    {
+        PVOID volatileRangeTable;
+        PIMAGE_VOLATILE_RANGE_METADATA entry;
+
+        volatileRangeTable = PhMappedImageRvaToVa(
+            MappedImage,
+            metadata->VolatileInfoRangeTable,
+            NULL
+            );
+
+        if (volatileRangeTable)
+        {
+            ULONG count;
+            ULONG i;
+
+            count = metadata->VolatileInfoRangeTableSize / sizeof(IMAGE_VOLATILE_RANGE_METADATA);
+
+            PhInitializeArray(&metadataRangeArray, sizeof(PH_IMAGE_VOLATILE_ENTRY), count);
+
+            for (i = 0; i < count; i++)
+            {
+                entry = PTR_ADD_OFFSET(volatileRangeTable, i * sizeof(IMAGE_VOLATILE_RANGE_METADATA));
+
+                __try
+                {
+                    PhpMappedImageProbe(MappedImage, entry, sizeof(IMAGE_VOLATILE_RANGE_METADATA));
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+
+                {
+                    PH_IMAGE_VOLATILE_ENTRY volatileRangeEntry;
+
+                    volatileRangeEntry.Rva = entry->Rva;
+                    volatileRangeEntry.Size = entry->Size;
+
+                    PhAddItemArray(&metadataRangeArray, &volatileRangeEntry);
+                }
+            }
+
+            metadataRangeTotal = (ULONG)metadataRangeArray.Count;
+        }
+    }
+
+    VolatileMetadata->MappedImage = MappedImage;
+    VolatileMetadata->VolatileMetadata = metadata;
+    VolatileMetadata->NumberOfAccessEntries = metadataAccessTotal;
+    VolatileMetadata->NumberOfRangeEntries = metadataRangeTotal;
+    VolatileMetadata->AccessEntries = PhFinalArrayItems(&metadataAccessArray);
+    VolatileMetadata->RangeEntries = PhFinalArrayItems(&metadataRangeArray);
 
     return status;
 }

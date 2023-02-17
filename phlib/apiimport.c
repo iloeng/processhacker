@@ -6,12 +6,13 @@
  * Authors:
  *
  *     wj32    2015
- *     dmex    2019-2020
+ *     dmex    2019-2023
  *
  */
 
 #include <ph.h>
 #include <apiimport.h>
+#include <mapldr.h>
 
 FORCEINLINE
 PVOID PhpImportProcedure(
@@ -27,7 +28,7 @@ PVOID PhpImportProcedure(
         PVOID module;
         PVOID procedure;
 
-        module = PhGetLoaderEntryDllBase(ModuleName);
+        module = PhGetLoaderEntryDllBaseZ(ModuleName);
 
         if (!module)
             module = PhLoadLibrary(ModuleName);
@@ -68,6 +69,7 @@ PH_DEFINE_IMPORT(L"ntdll.dll", NtQueryDefaultLocale);
 PH_DEFINE_IMPORT(L"ntdll.dll", NtQueryDefaultUILanguage);
 PH_DEFINE_IMPORT(L"ntdll.dll", NtTraceControl);
 PH_DEFINE_IMPORT(L"ntdll.dll", NtQueryOpenSubKeysEx);
+PH_DEFINE_IMPORT(L"ntdll.dll", NtSetInformationVirtualMemory);
 PH_DEFINE_IMPORT(L"ntdll.dll", NtCreateProcessStateChange);
 PH_DEFINE_IMPORT(L"ntdll.dll", NtChangeProcessState);
 
@@ -87,7 +89,6 @@ PH_DEFINE_IMPORT(L"dnsapi.dll", DnsWriteQuestionToBuffer_W);
 PH_DEFINE_IMPORT(L"dnsapi.dll", DnsFree);
 
 PH_DEFINE_IMPORT(L"shlwapi.dll", SHAutoComplete);
-PH_DEFINE_IMPORT(L"shell32.dll", SHGetFolderPathW);
 PH_DEFINE_IMPORT(L"shell32.dll", SHGetFileInfoW);
 
 PH_DEFINE_IMPORT(L"kernel32.dll", PssCaptureSnapshot);
@@ -99,6 +100,8 @@ PH_DEFINE_IMPORT(L"userenv.dll", DestroyEnvironmentBlock);
 PH_DEFINE_IMPORT(L"userenv.dll", GetAppContainerRegistryLocation);
 PH_DEFINE_IMPORT(L"userenv.dll", GetAppContainerFolderPath);
 
-PH_DEFINE_IMPORT(L"user32.dll", MessageBoxW)
-PH_DEFINE_IMPORT(L"user32.dll", MessageBeep)
+PH_DEFINE_IMPORT(L"user32.dll", MessageBoxW);
+PH_DEFINE_IMPORT(L"user32.dll", MessageBeep);
+PH_DEFINE_IMPORT(L"user32.dll", SetWindowDisplayAffinity);
+
 PH_DEFINE_IMPORT(L"winsta.dll", WinStationQueryInformationW);

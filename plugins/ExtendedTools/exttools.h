@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
@@ -15,8 +15,10 @@
 
 #include <phdk.h>
 #include <phappresource.h>
-#include <workqueue.h>
 #include <settings.h>
+#include <mapldr.h>
+#include <workqueue.h>
+
 #include <math.h>
 
 #include "resource.h"
@@ -51,14 +53,17 @@ extern HWND ProcessTreeNewHandle;
 extern HWND NetworkTreeNewHandle;
 extern ULONG ProcessesUpdatedCount;
 extern ULONG EtUpdateInterval;
+extern USHORT EtMaxPrecisionUnit;
 extern BOOLEAN EtGraphShowText;
 extern BOOLEAN EtEnableScaleGraph;
+extern BOOLEAN EtEnableScaleText;
 extern BOOLEAN EtPropagateCpuUsage;
 
 #define PLUGIN_NAME L"ProcessHacker.ExtendedTools"
 #define SETTING_NAME_DISK_TREE_LIST_COLUMNS (PLUGIN_NAME L".DiskTreeListColumns")
 #define SETTING_NAME_DISK_TREE_LIST_SORT (PLUGIN_NAME L".DiskTreeListSort")
 #define SETTING_NAME_ENABLE_GPUPERFCOUNTERS (PLUGIN_NAME L".EnableGpuPerformanceCounters")
+#define SETTING_NAME_ENABLE_DISKPERFCOUNTERS (PLUGIN_NAME L".EnableDiskPerformanceCounters")
 #define SETTING_NAME_ENABLE_ETW_MONITOR (PLUGIN_NAME L".EnableEtwMonitor")
 #define SETTING_NAME_ENABLE_GPU_MONITOR (PLUGIN_NAME L".EnableGpuMonitor")
 #define SETTING_NAME_ENABLE_FPS_MONITOR (PLUGIN_NAME L".EnableFpsMonitor")
@@ -80,13 +85,36 @@ extern BOOLEAN EtPropagateCpuUsage;
 #define SETTING_NAME_FW_TREE_LIST_SORT (PLUGIN_NAME L".FwTreeSort")
 #define SETTING_NAME_FW_IGNORE_PORTSCAN (PLUGIN_NAME L".FwIgnorePortScan")
 #define SETTING_NAME_SHOWSYSINFOGRAPH (PLUGIN_NAME L".ToolbarShowSystemInfoGraph")
-
-// Window messages
-#define ET_WM_SHOWDIALOG (WM_APP + 1)
-#define ET_WM_UPDATE (WM_APP + 2)
+#define SETTING_NAME_WCT_TREE_LIST_COLUMNS (PLUGIN_NAME L".WaitChainTreeListColumns")
+#define SETTING_NAME_WCT_WINDOW_POSITION (PLUGIN_NAME L".WaitChainWindowPosition")
+#define SETTING_NAME_WCT_WINDOW_SIZE (PLUGIN_NAME L".WaitChainWindowSize")
+#define SETTING_NAME_REPARSE_WINDOW_POSITION (PLUGIN_NAME L".ReparseWindowPosition")
+#define SETTING_NAME_REPARSE_WINDOW_SIZE (PLUGIN_NAME L".ReparseWindowSize")
+#define SETTING_NAME_REPARSE_LISTVIEW_COLUMNS (PLUGIN_NAME L".ReparseListViewColumns")
+#define SETTING_NAME_REPARSE_OBJECTID_LISTVIEW_COLUMNS (PLUGIN_NAME L".ReparseObjidListViewColumns")
+#define SETTING_NAME_REPARSE_SD_LISTVIEW_COLUMNS (PLUGIN_NAME L".ReparseSdListViewColumns")
+#define SETTING_NAME_PIPE_ENUM_WINDOW_POSITION (PLUGIN_NAME L".PipeEnumWindowPosition")
+#define SETTING_NAME_PIPE_ENUM_WINDOW_SIZE (PLUGIN_NAME L".PipeEnumWindowSize")
+#define SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS (PLUGIN_NAME L".PipeEnumListViewColumns")
+#define SETTING_NAME_FIRMWARE_WINDOW_POSITION (PLUGIN_NAME L".FirmwareWindowPosition")
+#define SETTING_NAME_FIRMWARE_WINDOW_SIZE (PLUGIN_NAME L".FirmwareWindowSize")
+#define SETTING_NAME_FIRMWARE_LISTVIEW_COLUMNS (PLUGIN_NAME L".FirmwareListViewColumns")
+#define SETTING_NAME_OBJMGR_WINDOW_POSITION (PLUGIN_NAME L".ObjectManagerWindowPosition")
+#define SETTING_NAME_OBJMGR_WINDOW_SIZE (PLUGIN_NAME L".ObjectManagerWindowSize")
+#define SETTING_NAME_OBJMGR_COLUMNS (PLUGIN_NAME L".ObjectManagerWindowColumns")
+#define SETTING_NAME_POOL_WINDOW_POSITION (PLUGIN_NAME L".PoolWindowPosition")
+#define SETTING_NAME_POOL_WINDOW_SIZE (PLUGIN_NAME L".PoolWindowSize")
+#define SETTING_NAME_POOL_TREE_LIST_COLUMNS (PLUGIN_NAME L".PoolTreeViewColumns")
+#define SETTING_NAME_POOL_TREE_LIST_SORT (PLUGIN_NAME L".PoolTreeViewSort")
+#define SETTING_NAME_BIGPOOL_WINDOW_POSITION (PLUGIN_NAME L".BigPoolWindowPosition")
+#define SETTING_NAME_BIGPOOL_WINDOW_SIZE (PLUGIN_NAME L".BigPoolWindowSize")
 
 VOID EtLoadSettings(
     VOID
+    );
+
+PPH_STRING PhGetSelectedListViewItemText(
+    _In_ HWND hWnd
     );
 
 // phsvc extensions
@@ -129,6 +157,7 @@ typedef struct _ET_DISK_ITEM
     ULONG FreshTime;
 
     HANDLE ProcessId;
+    PVOID FileObject;
     PPH_STRING FileName;
     PPH_STRING FileNameWin32;
     PPH_STRING ProcessName;
@@ -524,7 +553,7 @@ PET_DISK_ITEM EtCreateDiskItem(
 
 PET_DISK_ITEM EtReferenceDiskItem(
     _In_ HANDLE ProcessId,
-    _In_ PPH_STRING FileName
+    _In_ PVOID FileObject
     );
 
 PPH_STRING EtFileObjectToFileName(
@@ -810,12 +839,29 @@ FLOAT EtLookupTotalGpuEngineUtilization(
     _In_ ULONG EngineId
     );
 
+FLOAT EtLookupTotalGpuAdapterUtilization(
+    _In_ LUID AdapterLuid
+    );
+
+FLOAT EtLookupTotalGpuAdapterEngineUtilization(
+    _In_ LUID AdapterLuid,
+    _In_ ULONG EngineId
+    );
+
 ULONG64 EtLookupTotalGpuDedicated(
     VOID
     );
 
+ULONG64 EtLookupTotalGpuAdapterDedicated(
+    _In_ LUID AdapterLuid
+    );
+
 ULONG64 EtLookupTotalGpuShared(
     VOID
+    );
+
+ULONG64 EtLookupTotalGpuAdapterShared(
+    _In_ LUID AdapterLuid
     );
 
 // Firewall
@@ -926,7 +972,7 @@ typedef struct _FW_EVENT_ITEM
     PPH_STRING RuleName;
     PPH_STRING RuleDescription;
     PPH_STRING RemoteCountryName;
-    UINT CountryIconIndex;
+    INT CountryIconIndex;
 
     PPH_STRING TimeString;
     PPH_STRING TooltipText;
@@ -944,6 +990,10 @@ VOID EtFwMonitorUninitialize(
 
 VOID EtInitializeFirewallTab(
     VOID
+    );
+
+VOID InitializeFwTreeListDpi(
+    _In_ HWND TreeNewHandle
     );
 
 VOID LoadSettingsFwTreeList(
@@ -977,14 +1027,17 @@ VOID EtFwDrawCountryIcon(
     );
 
 VOID EtFwShowPingWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 
 VOID EtFwShowTracerWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 
 VOID EtFwShowWhoisWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 
@@ -996,9 +1049,12 @@ typedef ULONG (WINAPI* _FwpmNetEventSubscribe)(
     _Out_ HANDLE* eventsHandle
     );
 
-#define FWP_DIRECTION_IN 0x00003900L
-#define FWP_DIRECTION_OUT 0x00003901L
-#define FWP_DIRECTION_FORWARD 0x00003902L
+// ETW Microsoft-Windows-WFP::DirectionMap
+#define FWP_DIRECTION_MAP_INBOUND 0x3900
+#define FWP_DIRECTION_MAP_OUTBOUND 0x3901
+#define FWP_DIRECTION_MAP_FORWARD 0x3902
+#define FWP_DIRECTION_MAP_BIDIRECTIONAL 0x3903
+EXTERN_C CONST DECLSPEC_SELECTANY IN6_ADDR in6addr_v4mappedprefix = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 };
 
 VOID InitializeFwTreeList(
     _In_ HWND hwnd
@@ -1019,8 +1075,8 @@ VOID UpdateFwNode(
 BOOLEAN NTAPI FwTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
     _In_opt_ PVOID Context
     );
 
@@ -1068,8 +1124,8 @@ VOID ShowFwContextMenu(
     );
 
 VOID NTAPI FwItemAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     );
 
 VOID NTAPI FwItemModifiedHandler(
@@ -1113,6 +1169,76 @@ HWND NTAPI FwToolStatusGetTreeNewHandle(
 
 VOID EtProcessFramesPropertiesInitializing(
     _In_ PVOID Parameter
+    );
+
+// wct
+
+PVOID EtWaitChainContextCreate(
+    VOID
+    );
+
+VOID EtShowWaitChainDialog(
+    _In_ HWND ParentWindowHandle,
+    _In_ PVOID Context
+    );
+
+VOID NTAPI WctProcessMenuInitializingCallback(
+    _In_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    );
+VOID NTAPI WctThreadMenuInitializingCallback(
+    _In_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    );
+
+// reparse
+
+VOID EtShowReparseDialog(
+    _In_ HWND ParentWindowHandle,
+    _In_ PVOID Context
+    );
+
+// pipe_enum
+
+VOID EtShowPipeEnumDialog(
+    _In_ HWND ParentWindowHandle
+    );
+
+// firmware
+
+typedef struct _UEFI_WINDOW_CONTEXT
+{
+    HWND ListViewHandle;
+    HWND ParentWindowHandle;
+    PH_LAYOUT_MANAGER LayoutManager;
+} UEFI_WINDOW_CONTEXT, *PUEFI_WINDOW_CONTEXT;
+
+typedef struct _EFI_ENTRY
+{
+    ULONG Length;
+    PPH_STRING Name;
+    PPH_STRING GuidString;
+} EFI_ENTRY, *PEFI_ENTRY;
+
+VOID EtShowFirmwareEditDialog(
+    _In_ HWND ParentWindowHandle,
+    _In_ PEFI_ENTRY Entry
+    );
+
+VOID EtShowFirmwareDialog(
+    _In_ HWND ParentWindowHandle
+    );
+
+// objmgr
+
+VOID EtShowObjectManagerDialog(
+    _In_ HWND ParentWindowHandle
+    );
+
+// poolmon
+
+VOID EtShowPoolTableDialog(
+    _In_ HWND ParentWindowHandle
     );
 
 #endif

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2011
- *     dmex    2019
+ *     dmex    2019-2023
  *
  */
 
@@ -19,7 +19,10 @@
 
 #include <ph.h>
 #include <apiimport.h>
+
+#include <accctrl.h>
 #include <lsasup.h>
+#include <mapldr.h>
 
 NTSTATUS PhOpenLsaPolicy(
     _Out_ PLSA_HANDLE PolicyHandle,
@@ -332,11 +335,10 @@ VOID PhLookupSids(
             {
                 if (domainName && userName)
                 {
-                    translatedNames[i] = PhConcatStrings(
-                        3,
-                        domainName->Buffer,
-                        L"\\",
-                        userName->Buffer
+                    translatedNames[i] = PhConcatStringRef3(
+                        &domainName->sr,
+                        &PhNtPathSeperatorString,
+                        &userName->sr
                         );
                 }
                 else if (domainName)
@@ -586,22 +588,23 @@ PPH_STRING PhSidToStringSid(
     }
     else
     {
+        PhDereferenceObject(string);
+
         return NULL;
     }
 }
 
 PPH_STRING PhGetTokenUserString(
-    _In_ HANDLE TokenHandle, 
+    _In_ HANDLE TokenHandle,
     _In_ BOOLEAN IncludeDomain
     )
 {
     PPH_STRING tokenUserString = NULL;
-    PTOKEN_USER tokenUser;
+    PH_TOKEN_USER tokenUser;
 
     if (NT_SUCCESS(PhGetTokenUser(TokenHandle, &tokenUser)))
     {
-        tokenUserString = PhGetSidFullName(tokenUser->User.Sid, IncludeDomain, NULL);
-        PhFree(tokenUser);
+        tokenUserString = PhGetSidFullName(tokenUser.User.Sid, IncludeDomain, NULL);
     }
 
     return tokenUserString;
@@ -724,23 +727,19 @@ VOID PhInitializeCapabilitySidCache(
     _Inout_ PPH_ARRAY CapabilitySidArrayList
     )
 {
-    PPH_STRING applicationDirectory;
     PPH_STRING capabilityListString = NULL;
+    PPH_STRING capabilityListFileName;
     PH_STRINGREF namePart;
     PH_STRINGREF remainingPart;
 
     if (!RtlDeriveCapabilitySidsFromName_Import())
         return;
 
-    if (applicationDirectory = PhGetApplicationDirectory())
+    if (capabilityListFileName = PhGetApplicationDirectory())
     {
-        PPH_STRING capabilityListFileName;
-
-        capabilityListFileName = PhConcatStringRefZ(&applicationDirectory->sr, L"capslist.txt");
-        PhDereferenceObject(applicationDirectory);
-
-        capabilityListString = PhFileReadAllText(capabilityListFileName->Buffer, TRUE);
-        PhDereferenceObject(capabilityListFileName);      
+        PhMoveReference(&capabilityListFileName, PhConcatStringRefZ(&capabilityListFileName->sr, L"capslist.txt"));
+        capabilityListString = PhFileReadAllText(&capabilityListFileName->sr, TRUE);
+        PhDereferenceObject(capabilityListFileName);
     }
 
     if (!capabilityListString)
@@ -759,23 +758,23 @@ VOID PhInitializeCapabilitySidCache(
             BYTE capabilitySidBuffer[SECURITY_MAX_SID_SIZE] = { 0 };
             PSID capabilityGroupSid = (PSID)capabilityGroupSidBuffer;
             PSID capabilitySid = (PSID)capabilitySidBuffer;
-            UNICODE_STRING capabilityNameUs;
+            UNICODE_STRING capabilityName;
 
             if (PhEndsWithStringRef2(&namePart, L"\r", FALSE))
                 namePart.Length -= sizeof(WCHAR);
 
-            if (!PhStringRefToUnicodeString(&namePart, &capabilityNameUs))
+            if (!PhStringRefToUnicodeString(&namePart, &capabilityName))
                 continue;
 
             if (NT_SUCCESS(RtlDeriveCapabilitySidsFromName_Import()(
-                &capabilityNameUs,
+                &capabilityName,
                 capabilityGroupSid,
                 capabilitySid
                 )))
             {
                 PH_CAPABILITY_ENTRY entry;
 
-                entry.Name = PhCreateStringFromUnicodeString(&capabilityNameUs);
+                entry.Name = PhCreateStringFromUnicodeString(&capabilityName);
                 entry.CapabilityGroupSid = PhAllocateCopy(capabilityGroupSid, RtlLengthSid(capabilityGroupSid));
                 entry.CapabilitySid = PhAllocateCopy(capabilitySid, RtlLengthSid(capabilitySid));
 
@@ -1010,4 +1009,19 @@ PPH_STRING PhGetCapabilityGuidName(
     }
 
     return NULL;
+}
+
+// rev from BuildTrusteeWithSidW (dmex)
+BOOLEAN PhBuildTrusteeWithSid(
+    _Out_ PVOID Trustee,
+    _In_opt_ PSID Sid
+    )
+{
+    memset((PTRUSTEE)Trustee, 0, sizeof(TRUSTEE));
+    ((PTRUSTEE)Trustee)->pMultipleTrustee = NULL;
+    ((PTRUSTEE)Trustee)->MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+    ((PTRUSTEE)Trustee)->TrusteeForm = TRUSTEE_IS_SID;
+    ((PTRUSTEE)Trustee)->TrusteeType = TRUSTEE_IS_UNKNOWN;
+    ((PTRUSTEE)Trustee)->ptstrName = (LPWCH)Sid;
+    return TRUE;
 }

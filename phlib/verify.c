@@ -6,13 +6,14 @@
  * Authors:
  *
  *     wj32    2009-2013
- *     dmex    2016-2021
+ *     dmex    2016-2023
  *
  */
 
 #define PH_ENABLE_VERIFY_CACHE
 #include <ph.h>
 #include <appresolver.h>
+#include <mapldr.h>
 #include <verify.h>
 #include <verifyp.h>
 
@@ -863,7 +864,7 @@ VERIFY_RESULT PhVerifyFileCached(
     {
         if (!NT_SUCCESS(PhCreateFile(
             &fileHandle,
-            FileName,
+            &FileName->sr,
             FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -1076,7 +1077,7 @@ VERIFY_RESULT PhVerifyFileSignatureInfo(
         *NumberOfSignatures = 0;
         return VrUnknown;
     }
-  
+
     verifyResult = PhpSignatureStateToVerifyResult(signatureInfo.nSignatureState);
     PhpGetSignaturesFromStateData(verifyTrustStateData, Signatures, NumberOfSignatures);
 

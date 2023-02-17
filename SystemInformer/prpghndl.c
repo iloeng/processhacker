@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -32,16 +32,11 @@
 static PH_STRINGREF EmptyHandlesText = PH_STRINGREF_INIT(L"There are no handles to display.");
 
 static VOID NTAPI HandleAddedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_HANDLES_CONTEXT handlesContext = (PPH_HANDLES_CONTEXT)Context;
-
-    if (!handlesContext)
-        return;
-    if (!Parameter)
-        return;
 
     // Parameter contains a pointer to the added handle item.
     PhReferenceObject(Parameter);
@@ -49,40 +44,31 @@ static VOID NTAPI HandleAddedHandler(
 }
 
 static VOID NTAPI HandleModifiedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_HANDLES_CONTEXT handlesContext = (PPH_HANDLES_CONTEXT)Context;
-
-    if (!handlesContext)
-        return;
 
     PhPushProviderEventQueue(&handlesContext->EventQueue, ProviderModifiedEvent, Parameter, PhGetRunIdProvider(&handlesContext->ProviderRegistration));
 }
 
 static VOID NTAPI HandleRemovedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_HANDLES_CONTEXT handlesContext = (PPH_HANDLES_CONTEXT)Context;
-
-    if (!handlesContext)
-        return;
 
     PhPushProviderEventQueue(&handlesContext->EventQueue, ProviderRemovedEvent, Parameter, PhGetRunIdProvider(&handlesContext->ProviderRegistration));
 }
 
 static VOID NTAPI HandlesUpdatedHandler(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_HANDLES_CONTEXT handlesContext = (PPH_HANDLES_CONTEXT)Context;
-
-    if (!handlesContext)
-        return;
 
     PostMessage(handlesContext->WindowHandle, WM_PH_HANDLES_UPDATED, PhGetRunIdProvider(&handlesContext->ProviderRegistration), 0);
 }
@@ -96,6 +82,7 @@ VOID PhpInitializeHandleMenu(
     )
 {
     PPH_EMENU_ITEM item;
+    KPH_LEVEL level;
 
     if (NumberOfHandles == 0)
     {
@@ -121,7 +108,9 @@ VOID PhpInitializeHandleMenu(
 
     // Remove irrelevant menu items.
 
-    if (!KphIsConnected())
+    level = KphLevel();
+
+    if (level >= KphLevelMed)
     {
         if (item = PhFindEMenuItem(Menu, 0, NULL, ID_HANDLE_PROTECTED))
             PhDestroyEMenuItem(item);
@@ -130,7 +119,7 @@ VOID PhpInitializeHandleMenu(
     }
 
     // Protected, Inherit
-    if (NumberOfHandles == 1 && KphIsConnected())
+    if (NumberOfHandles == 1 && (level >= KphLevelMed))
     {
         HandlesContext->SelectedHandleProtected = FALSE;
         HandlesContext->SelectedHandleInherit = FALSE;
@@ -242,8 +231,7 @@ BOOLEAN PhpHandleTreeFilterCallback(
 
         if (PhBeginInitOnce(&initOnce))
         {
-            static PH_STRINGREF etwTypeName = PH_STRINGREF_INIT(L"EtwRegistration");
-            eventTraceTypeIndex = PhGetObjectTypeNumber(&etwTypeName);
+            eventTraceTypeIndex = PhGetObjectTypeNumberZ(L"EtwRegistration");
             PhEndInitOnce(&initOnce);
         }
 
@@ -289,15 +277,15 @@ BOOLEAN PhpHandleTreeFilterCallback(
             return TRUE;
     }
 
+    if (handleItem->ObjectString[0])
+    {
+        if (PhWordMatchStringZ(handlesContext->SearchboxText, handleItem->ObjectString))
+            return TRUE;
+    }
+
     // TODO: Add search for handleItem->Attributes
 
     // node properties
-
-    if (handleNode->ObjectString[0])
-    {
-        if (PhWordMatchStringZ(handlesContext->SearchboxText, handleNode->ObjectString))
-            return TRUE;
-    }
 
     if (!PhIsNullOrEmptyString(handleNode->GrantedAccessSymbolicText))
     {
@@ -323,45 +311,59 @@ typedef struct _HANDLE_OPEN_CONTEXT
 NTSTATUS PhpProcessHandleOpenCallback(
     _Out_ PHANDLE Handle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PHANDLE_OPEN_CONTEXT context = Context;
     NTSTATUS status;
     HANDLE processHandle;
 
-    if (!context)
-        return STATUS_UNSUCCESSFUL;
+    *Handle = NULL;
 
-    if (!NT_SUCCESS(status = PhOpenProcess(
+    if (NT_SUCCESS(status = PhOpenProcess(
         &processHandle,
         PROCESS_DUP_HANDLE,
         context->ProcessId
         )))
-        return status;
+    {
+        status = NtDuplicateObject(
+            processHandle,
+            context->HandleItem->Handle,
+            NtCurrentProcess(),
+            Handle,
+            DesiredAccess,
+            0,
+            0
+            );
+        NtClose(processHandle);
+    }
 
-    status = NtDuplicateObject(
-        processHandle,
-        context->HandleItem->Handle,
-        NtCurrentProcess(),
-        Handle,
-        DesiredAccess,
-        0,
-        0
-        );
-    NtClose(processHandle);
+    if (!NT_SUCCESS(status) && KphLevel() >= KphLevelMax)
+    {
+        if (NT_SUCCESS(status = PhOpenProcess(
+            &processHandle,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            context->ProcessId
+            )))
+        {
+            status = KphDuplicateObject(
+                processHandle,
+                context->HandleItem->Handle,
+                DesiredAccess,
+                Handle
+                );
+            NtClose(processHandle);
+        }
+    }
 
     return status;
 }
 
 NTSTATUS PhpProcessHandleCloseCallback(
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     PHANDLE_OPEN_CONTEXT context = Context;
-
-    if (!context)
-        return STATUS_UNSUCCESSFUL;
 
     PhDereferenceObject(context->HandleItem);
     PhFree(context);
@@ -436,7 +438,7 @@ INT_PTR CALLBACK PhpProcessHandlesDlgProc(
 
             // Initialize the list.
             PhInitializeHandleList(hwndDlg, handlesContext->TreeNewHandle, &handlesContext->ListContext);
-            TreeNew_SetEmptyText(handlesContext->TreeNewHandle, &PhpLoadingText, 0);
+            TreeNew_SetEmptyText(handlesContext->TreeNewHandle, &PhProcessPropPageLoadingText, 0);
             PhInitializeProviderEventQueue(&handlesContext->EventQueue, 100);
             handlesContext->LastRunStatus = -1;
             handlesContext->ErrorMessage = NULL;

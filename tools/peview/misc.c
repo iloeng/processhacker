@@ -6,16 +6,15 @@
  * Authors:
  *
  *     wj32    2011
- *     dmex    2019-2021
+ *     dmex    2019-2022
  *
  */
 
 #include <peview.h>
 #include <emenu.h>
+#include <cpysave.h>
 
 #include <shobjidl.h>
-
-#include <cpysave.h>
 
 static GUID CLSID_ShellLink_I = { 0x00021401, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 static GUID IID_IShellLinkW_I = { 0x000214f9, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
@@ -62,7 +61,6 @@ PPH_STRING PvResolveReparsePointTarget(
     PREPARSE_DATA_BUFFER reparseBuffer;
     ULONG reparseLength;
     HANDLE fileHandle;
-    IO_STATUS_BLOCK isb;
 
     if (PhIsNullOrEmptyString(FileName))
         return NULL;
@@ -83,17 +81,14 @@ PPH_STRING PvResolveReparsePointTarget(
     reparseLength = MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
     reparseBuffer = PhAllocateZero(reparseLength);
 
-    if (NT_SUCCESS(NtFsControlFile(
+    if (NT_SUCCESS(PhDeviceIoControlFile(
         fileHandle,
-        NULL,
-        NULL,
-        NULL,
-        &isb,
         FSCTL_GET_REPARSE_POINT,
         NULL,
         0,
         reparseBuffer,
-        reparseLength
+        reparseLength,
+        NULL
         )))
     {
         if (
@@ -115,7 +110,7 @@ PPH_STRING PvResolveReparsePointTarget(
 
             for (ULONG i = 0; i < appexeclink->StringCount; i++)
             {
-                if (i == 2 && PhDoesFileExistsWin32(string))
+                if (i == 2 && PhDoesFileExistWin32(string))
                 {
                     targetFileName = PhCreateString(string);
                     break;
@@ -213,7 +208,7 @@ BOOLEAN PvInsertCopyListViewEMenuItem(
     memset(&lvHitInfo, 0, sizeof(LVHITTESTINFO));
     lvHitInfo.pt = location;
 
-    if (ListView_SubItemHitTest(ListViewHandle, &lvHitInfo) == -1)
+    if (ListView_SubItemHitTest(ListViewHandle, &lvHitInfo) == INT_ERROR)
         return FALSE;
 
     memset(headerText, 0, sizeof(headerText));
@@ -308,12 +303,14 @@ BOOLEAN PvGetListViewContextMenuPoint(
 
     // The user pressed a key to display the context menu.
     // Suggest where the context menu should display.
-    if ((selectedIndex = PhFindListViewItemByFlags(ListViewHandle, -1, LVNI_SELECTED)) != -1)
+    if ((selectedIndex = PhFindListViewItemByFlags(ListViewHandle, INT_ERROR, LVNI_SELECTED)) != INT_ERROR)
     {
         if (ListView_GetItemRect(ListViewHandle, selectedIndex, &bounds, LVIR_BOUNDS))
         {
-            Point->x = bounds.left + PhSmallIconSize.X / 2;
-            Point->y = bounds.top + PhSmallIconSize.Y / 2;
+            LONG dpiValue = PhGetWindowDpi(ListViewHandle);
+
+            Point->x = bounds.left + PhGetSystemMetrics(SM_CXSMICON, dpiValue) / 2;
+            Point->y = bounds.top + PhGetSystemMetrics(SM_CYSMICON, dpiValue) / 2;
 
             GetClientRect(ListViewHandle, &clientRect);
 
@@ -873,3 +870,61 @@ BOOLEAN PhHandleCopyCellEMenuItem(
 }
 
 #pragma endregion
+
+VOID PvSetListViewImageList(
+    _In_ HWND WindowHandle,
+    _In_ HWND ListViewHandle
+    )
+{
+    HIMAGELIST listViewImageList;
+    LONG dpiValue;
+
+    if (listViewImageList = ListView_GetImageList(ListViewHandle, LVSIL_SMALL))
+    {
+        PhImageListDestroy(listViewImageList);
+        listViewImageList = NULL;
+    }
+
+    dpiValue = PhGetWindowDpi(WindowHandle);
+    listViewImageList = PhImageListCreate(
+        2,
+        PhGetDpi(20, dpiValue),
+        ILC_MASK | ILC_COLOR32,
+        1,
+        1
+        );
+
+    if (listViewImageList)
+    {
+        ListView_SetImageList(ListViewHandle, listViewImageList, LVSIL_SMALL);
+    }
+}
+
+VOID PvSetTreeViewImageList(
+    _In_ HWND WindowHandle,
+    _In_ HWND TreeViewHandle
+    )
+{
+    HIMAGELIST treeViewImageList;
+    LONG dpiValue;
+
+    if (treeViewImageList = TreeView_GetImageList(TreeViewHandle, TVSIL_NORMAL))
+    {
+        PhImageListDestroy(treeViewImageList);
+        treeViewImageList = NULL;
+    }
+
+    dpiValue = PhGetWindowDpi(WindowHandle);
+    treeViewImageList = PhImageListCreate(
+        2,
+        PhGetDpi(24, dpiValue),
+        ILC_MASK | ILC_COLOR32,
+        1,
+        1
+        );
+
+    if (treeViewImageList)
+    {
+        TreeView_SetImageList(TreeViewHandle, treeViewImageList, TVSIL_NORMAL);
+    }
+}

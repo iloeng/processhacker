@@ -69,12 +69,15 @@ VOID WeInvertWindowBorder(
 {
     RECT rect;
     HDC hdc;
+    LONG dpiValue;
 
     GetWindowRect(hWnd, &rect);
 
+    dpiValue = PhGetWindowDpi(hWnd);
+
     if (hdc = GetWindowDC(hWnd))
     {
-        ULONG penWidth = GetSystemMetrics(SM_CXBORDER) * 3;
+        ULONG penWidth = PhGetSystemMetrics(SM_CXBORDER, dpiValue) * 3;
         INT oldDc;
         HPEN pen;
         HBRUSH brush;
@@ -87,7 +90,7 @@ VOID WeInvertWindowBorder(
         pen = CreatePen(PS_INSIDEFRAME, penWidth, RGB(0x00, 0x00, 0x00));
         SelectPen(hdc, pen);
 
-        brush = GetStockObject(NULL_BRUSH);
+        brush = GetStockBrush(NULL_BRUSH);
         SelectBrush(hdc, brush);
 
         // Draw the rectangle.

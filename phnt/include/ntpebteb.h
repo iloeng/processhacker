@@ -10,15 +10,7 @@
 typedef struct _RTL_USER_PROCESS_PARAMETERS *PRTL_USER_PROCESS_PARAMETERS;
 typedef struct _RTL_CRITICAL_SECTION *PRTL_CRITICAL_SECTION;
 
-// private
-typedef struct _ACTIVATION_CONTEXT_STACK
-{
-    struct _RTL_ACTIVATION_CONTEXT_STACK_FRAME* ActiveFrame;
-    LIST_ENTRY FrameListCache;
-    ULONG Flags;
-    ULONG NextCookieSequenceNumber;
-    ULONG StackId;
-} ACTIVATION_CONTEXT_STACK, *PACTIVATION_CONTEXT_STACK;
+#include <ntsxs.h>
 
 // private
 typedef struct _API_SET_NAMESPACE
@@ -51,7 +43,7 @@ typedef struct _API_SET_NAMESPACE_ENTRY
 } API_SET_NAMESPACE_ENTRY, *PAPI_SET_NAMESPACE_ENTRY;
 
 // private
-typedef struct _API_SET_VALUE_ENTRY 
+typedef struct _API_SET_VALUE_ENTRY
 {
     ULONG Flags;
     ULONG NameOffset;
@@ -120,11 +112,11 @@ typedef struct _PEB
     ULONG TlsExpansionCounter;
     PVOID TlsBitmap;
     ULONG TlsBitmapBits[2];
-    
-    PVOID ReadOnlySharedMemoryBase; 
+
+    PVOID ReadOnlySharedMemoryBase;
     PVOID SharedData; // HotpatchInformation
     PVOID *ReadOnlyStaticServerData;
-    
+
     PVOID AnsiCodePageData; // PCPTABLEINFO
     PVOID OemCodePageData; // PCPTABLEINFO
     PVOID UnicodeCaseTableData; // PNLSTABLEINFO
@@ -172,10 +164,10 @@ typedef struct _PEB
 
     UNICODE_STRING CSDVersion;
 
-    PVOID ActivationContextData; // ACTIVATION_CONTEXT_DATA
-    PVOID ProcessAssemblyStorageMap; // ASSEMBLY_STORAGE_MAP
-    PVOID SystemDefaultActivationContextData; // ACTIVATION_CONTEXT_DATA
-    PVOID SystemAssemblyStorageMap; // ASSEMBLY_STORAGE_MAP
+    PACTIVATION_CONTEXT_DATA ActivationContextData;
+    PASSEMBLY_STORAGE_MAP ProcessAssemblyStorageMap;
+    PACTIVATION_CONTEXT_DATA SystemDefaultActivationContextData;
+    PASSEMBLY_STORAGE_MAP SystemAssemblyStorageMap;
 
     SIZE_T MinimumStackCommit;
 
@@ -297,14 +289,14 @@ typedef struct _TEB
 #else
     PVOID SystemReserved1[26];
 #endif
-    
+
     CHAR PlaceholderCompatibilityMode;
     BOOLEAN PlaceholderHydrationAlwaysExplicit;
     CHAR PlaceholderReserved[10];
 
     ULONG ProxiedProcessId;
     ACTIVATION_CONTEXT_STACK ActivationStack;
-    
+
     UCHAR WorkingOnBehalfTicket[8];
     NTSTATUS ExceptionCode;
 

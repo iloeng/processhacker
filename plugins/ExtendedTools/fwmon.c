@@ -274,12 +274,12 @@ BOOLEAN FwProcessEventType(
 
             switch (fwDropEvent->msFwpDirection)
             {
-            case FWP_DIRECTION_IN:
             case FWP_DIRECTION_INBOUND:
+            case FWP_DIRECTION_MAP_INBOUND:
                 *Direction = FWP_DIRECTION_INBOUND;
                 break;
-            case FWP_DIRECTION_OUT:
             case FWP_DIRECTION_OUTBOUND:
+            case FWP_DIRECTION_MAP_OUTBOUND:
                 *Direction = FWP_DIRECTION_OUTBOUND;
                 break;
             default:
@@ -304,12 +304,12 @@ BOOLEAN FwProcessEventType(
 
             switch (fwAllowEvent->msFwpDirection)
             {
-            case FWP_DIRECTION_IN:
             case FWP_DIRECTION_INBOUND:
+            case FWP_DIRECTION_MAP_INBOUND:
                 *Direction = FWP_DIRECTION_INBOUND;
                 break;
-            case FWP_DIRECTION_OUT:
             case FWP_DIRECTION_OUTBOUND:
+            case FWP_DIRECTION_MAP_OUTBOUND:
                 *Direction = FWP_DIRECTION_OUTBOUND;
                 break;
             default:
@@ -513,7 +513,7 @@ PPH_STRING EtFwGetDnsReverseNameFromAddress(
             else
             {
                 return PhFormat(format, RTL_NUMBER_OF(format), IP4_REVERSE_DOMAIN_STRING_LENGTH);
-            } 
+            }
         }
     case PH_IPV6_NETWORK_TYPE:
         {
@@ -656,7 +656,7 @@ PPH_STRING EtFwGetNameFromAddress(
     if (dnsLocalQuery && PhIsNullOrEmptyString(addressEndpointString))
     {
         // If the local hostname query failed then we'll cache an empty string.
-        // The hostname lookup generates a firewall event, caching the null string for 
+        // The hostname lookup generates a firewall event, caching the null string for
         // these requests prevents hostname lookups generating infinite firewall events. (dmex)
         PhMoveReference(&addressEndpointString, PhReferenceEmptyString());
     }
@@ -892,12 +892,15 @@ typedef VOID (NTAPI* PNETWORKTOOLS_DRAW_COUNTRYICON)(
     _In_ INT Index
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_PING)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_TRACERT)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 typedef VOID (NTAPI* PNETWORKTOOLS_SHOWWINDOW_WHOIS)(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     );
 
@@ -941,27 +944,30 @@ VOID EtFwDrawCountryIcon(
 }
 
 VOID EtFwShowPingWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     )
 {
     if (EtFwGetPluginInterface())
-        EtFwGetPluginInterface()->ShowPingWindow(Endpoint);
+        EtFwGetPluginInterface()->ShowPingWindow(ParentWindowHandle, Endpoint);
 }
 
 VOID EtFwShowTracerWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     )
 {
     if (EtFwGetPluginInterface())
-        EtFwGetPluginInterface()->ShowTracertWindow(Endpoint);
+        EtFwGetPluginInterface()->ShowTracertWindow(ParentWindowHandle, Endpoint);
 }
 
 VOID EtFwShowWhoisWindow(
+    _In_ HWND ParentWindowHandle,
     _In_ PH_IP_ENDPOINT Endpoint
     )
 {
     if (EtFwGetPluginInterface())
-        EtFwGetPluginInterface()->ShowWhoisWindow(Endpoint);
+        EtFwGetPluginInterface()->ShowWhoisWindow(ParentWindowHandle, Endpoint);
 }
 
 typedef struct _ETFW_FILTER_DISPLAY_CONTEXT

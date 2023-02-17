@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2015-2021
+ *     dmex    2015-2022
  *
  */
 
@@ -152,8 +152,6 @@ typedef struct _PERFPAGE_CONTEXT
     Perf_Security DotNetPerfSecurity;
 } PERFPAGE_CONTEXT, *PPERFPAGE_CONTEXT;
 
-#define MSG_UPDATE (WM_APP + 1)
-
 VOID NTAPI DotNetPerfProcessesUpdatedCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
@@ -163,7 +161,7 @@ VOID NTAPI DotNetPerfProcessesUpdatedCallback(
 
     if (context && context->WindowHandle)
     {
-        PostMessage(context->WindowHandle, MSG_UPDATE, 0, 0);
+        PostMessage(context->WindowHandle, WM_PH_UPDATE_DIALOG, 0, 0);
     }
 }
 
@@ -1739,7 +1737,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                                     else
                                     {
                                         wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, L"0.00", _TRUNCATE);
-                                    }   
+                                    }
                                 }
                                 break;
                             case DOTNET_INDEX_SECURITY_STACKWALKDEPTH:
@@ -1763,7 +1761,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
             }
         }
         break;
-    case MSG_UPDATE:
+    case WM_PH_UPDATE_DIALOG:
         {
             if (context->Enabled && context->ControlBlockValid)
             {
@@ -1838,6 +1836,12 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;

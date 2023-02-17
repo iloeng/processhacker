@@ -81,7 +81,12 @@ INT_PTR CALLBACK OptionsDlgProc(
 
             if (PhGetIntegerSetting(SETTING_NAME_UPDATE_MODE))
             {
-                Button_SetCheck(GetDlgItem(hwndDlg, IDC_AUTOCHECKBOX2), BST_CHECKED);
+                Button_SetCheck(GetDlgItem(hwndDlg, IDC_SHOWSTARTPROMPTCHECK), BST_CHECKED);
+            }
+
+            if (PhGetIntegerSetting(SETTING_NAME_AUTO_CHECK_PAGE))
+            {
+                Button_SetCheck(GetDlgItem(hwndDlg, IDC_SKIPWELCOMEPAGECHECK), BST_CHECKED);
             }
         }
         break;
@@ -95,9 +100,15 @@ INT_PTR CALLBACK OptionsDlgProc(
                         Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED);
                 }
                 break;
-            case IDC_AUTOCHECKBOX2:
+            case IDC_SHOWSTARTPROMPTCHECK:
                 {
                     PhSetIntegerSetting(SETTING_NAME_UPDATE_MODE,
+                        Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED);
+                }
+                break;
+            case IDC_SKIPWELCOMEPAGECHECK:
+                {
+                    PhSetIntegerSetting(SETTING_NAME_AUTO_CHECK_PAGE,
                         Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED);
                 }
                 break;
@@ -181,7 +192,7 @@ PPH_LIST PhpUpdaterQueryCommitHistory(
     ULONG arrayLength;
 
     versionString = PhGetPhVersion();
-    userAgentString = PhConcatStrings2(L"ProcessHacker_", versionString->Buffer);
+    userAgentString = PhConcatStrings2(L"SystemInformer_", versionString->Buffer);
 
     if (!PhHttpSocketCreate(&httpContext, PhGetString(userAgentString)))
         goto CleanupExit;
@@ -192,7 +203,7 @@ PPH_LIST PhpUpdaterQueryCommitHistory(
     if (!PhHttpSocketBeginRequest(
         httpContext,
         NULL,
-        L"/repos/processhacker/processhacker/commits",
+        L"/repos/winsiderss/systeminformer/commits",
         PH_HTTP_FLAG_REFRESH | PH_HTTP_FLAG_SECURE
         ))
     {
@@ -271,12 +282,12 @@ PPH_LIST PhpUpdaterQueryCommitHistory(
 
                 PhInitializeStringBuilder(&sb, 0x100);
 
-                for (SIZE_T i = 0; i < entry->CommitMessageString->Length / sizeof(WCHAR); i++)
+                for (SIZE_T j = 0; j < entry->CommitMessageString->Length / sizeof(WCHAR); j++)
                 {
-                    if (entry->CommitMessageString->Data[i] == L'\n')
+                    if (entry->CommitMessageString->Data[j] == L'\n')
                         PhAppendStringBuilder2(&sb, L" ");
                     else
-                        PhAppendCharStringBuilder(&sb, entry->CommitMessageString->Data[i]);
+                        PhAppendCharStringBuilder(&sb, entry->CommitMessageString->Data[j]);
                 }
 
                 PhMoveReference(&entry->CommitMessageString, PhFinalStringBuilderString(&sb));
@@ -383,13 +394,9 @@ VOID PhpUpdaterFreeListViewEntries(
     _In_ PPH_UPDATER_COMMIT_CONTEXT Context
     )
 {
-    ULONG index = ULONG_MAX;
+    INT index = INT_ERROR;
 
-    while ((index = PhFindListViewItemByFlags(
-        Context->ListViewHandle,
-        index,
-        LVNI_ALL
-        )) != ULONG_MAX)
+    while ((index = PhFindListViewItemByFlags(Context->ListViewHandle, index, LVNI_ALL)) != INT_ERROR)
     {
         PPH_UPDATER_COMMIT_ENTRY entry;
 
@@ -514,11 +521,12 @@ INT_PTR CALLBACK TextDlgProc(
                 DeleteFont(context->ListViewBoldFont);
 
             PhpUpdaterFreeListViewEntries(context);
-
+        }
+        break;
+    case WM_NCDESTROY:
+        {
             PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
             PhFree(context);
-            context = NULL;
         }
         break;
     case WM_SIZE:
@@ -560,7 +568,7 @@ INT_PTR CALLBACK TextDlgProc(
                         if (entry = PhGetSelectedListViewItemParam(context->ListViewHandle))
                         {
                             if (commitHashUrl = PhConcatStrings2(
-                                L"https://github.com/processhacker/processhacker/commit/",
+                                L"https://github.com/winsiderss/systeminformer/commit/",
                                 PhGetString(entry->CommitHashString)
                                 ))
                             {
@@ -622,7 +630,7 @@ INT_PTR CALLBACK TextDlgProc(
 
                                     PhDereferenceObject(commitHash);
                                 }
-        
+
                                 if (newFont)
                                 {
                                     SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, CDRF_NEWFONT);
@@ -674,6 +682,8 @@ INT_PTR CALLBACK TextDlgProc(
             }
 
             PhHandleListViewNotifyForCopy(lParam, context->ListViewHandle);
+
+            REFLECT_MESSAGE_DLG(hwndDlg, context->ListViewHandle, uMsg, wParam, lParam);
         }
         break;
     case WM_CONTEXTMENU:
@@ -727,14 +737,14 @@ INT_PTR CALLBACK TextDlgProc(
                                     PPH_STRING commitHashUrl;
                                     INT lvItemIndex;
 
-                                    lvItemIndex = PhFindListViewItemByFlags(context->ListViewHandle, -1, LVNI_SELECTED);
+                                    lvItemIndex = PhFindListViewItemByFlags(context->ListViewHandle, INT_ERROR, LVNI_SELECTED);
 
-                                    if (lvItemIndex != -1)
+                                    if (lvItemIndex != INT_ERROR)
                                     {
                                         if (PhGetListViewItemParam(context->ListViewHandle, lvItemIndex, &entry))
                                         {
                                             if (commitHashUrl = PhConcatStrings2(
-                                                L"https://github.com/processhacker/processhacker/commit/",
+                                                L"https://github.com/winsiderss/systeminformer/commit/",
                                                 PhGetString(entry->CommitHashString)
                                                 ))
                                             {
@@ -800,11 +810,6 @@ INT_PTR CALLBACK TextDlgProc(
         return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     case WM_CTLCOLORSTATIC:
         return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
-    }
-
-    if (context)
-    {
-        REFLECT_MESSAGE_DLG(hwndDlg, context->ListViewHandle, uMsg, wParam, lParam);
     }
 
     return FALSE;

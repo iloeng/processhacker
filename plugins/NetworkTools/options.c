@@ -6,11 +6,15 @@
  * Authors:
  *
  *     wj32    2010-2013
- *     dmex    2012-2018
+ *     dmex    2012-2023
  *
  */
 
 #include "nettools.h"
+
+VOID ShowGeoLiteConfigDialog(
+    _In_ HWND ParentWindowHandle
+    );
 
 INT_PTR CALLBACK OptionsDlgProc(
     _In_ HWND hwndDlg,
@@ -28,8 +32,7 @@ INT_PTR CALLBACK OptionsDlgProc(
             PhSetDialogItemValue(hwndDlg, IDC_PINGPACKETLENGTH, PhGetIntegerSetting(SETTING_NAME_PING_SIZE), FALSE);
             PhSetDialogItemValue(hwndDlg, IDC_MAXHOPS, PhGetIntegerSetting(SETTING_NAME_TRACERT_MAX_HOPS), FALSE);
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_EXTENDED_TCP), PhGetIntegerSetting(SETTING_NAME_EXTENDED_TCP_STATS) ? BST_CHECKED : BST_UNCHECKED);
-
-            PhSetDialogItemText(hwndDlg, IDC_DATABASE, PhaGetStringSetting(SETTING_NAME_DB_LOCATION)->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_KEYTEXT, PhaGetStringSetting(SETTING_NAME_GEOLITE_API_KEY)->Buffer);
 
             PhInitializeLayoutManager(&LayoutManager, hwndDlg);
             PhAddLayoutItem(&LayoutManager, GetDlgItem(hwndDlg, IDC_DATABASE), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);
@@ -41,8 +44,6 @@ INT_PTR CALLBACK OptionsDlgProc(
             PhSetIntegerSetting(SETTING_NAME_PING_SIZE, PhGetDialogItemValue(hwndDlg, IDC_PINGPACKETLENGTH));
             PhSetIntegerSetting(SETTING_NAME_TRACERT_MAX_HOPS, PhGetDialogItemValue(hwndDlg, IDC_MAXHOPS));
             PhSetIntegerSetting(SETTING_NAME_EXTENDED_TCP_STATS, Button_GetCheck(GetDlgItem(hwndDlg, IDC_ENABLE_EXTENDED_TCP)) == BST_CHECKED);
-
-            PhSetStringSetting2(SETTING_NAME_DB_LOCATION, &PhaGetDlgItemText(hwndDlg, IDC_DATABASE)->sr);
 
             PhDeleteLayoutManager(&LayoutManager);
         }
@@ -56,29 +57,19 @@ INT_PTR CALLBACK OptionsDlgProc(
         {
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
-            case IDC_BROWSE:
+            case IDC_REFRESH:
                 {
-                    static PH_FILETYPE_FILTER filters[] =
-                    {
-                        { L"XML files (*.xml)", L"*.xml" },
-                        { L"All files (*.*)", L"*.*" }
-                    };
-                    PVOID fileDialog;
-                    PPH_STRING fileName;
+                    if (!GeoLiteCheckUpdatePlatformSupported())
+                        break;
 
-                    fileDialog = PhCreateOpenFileDialog();
-                    PhSetFileDialogFilter(fileDialog, filters, RTL_NUMBER_OF(filters));
+                    ShowGeoLiteConfigDialog(hwndDlg);
 
-                    fileName = PH_AUTO(PhGetFileName(PhaGetDlgItemText(hwndDlg, IDC_DATABASE)));
-                    PhSetFileDialogFileName(fileDialog, fileName->Buffer);
-
-                    if (PhShowFileDialog(hwndDlg, fileDialog))
-                    {
-                        fileName = PH_AUTO(PhGetFileDialogFileName(fileDialog));
-                        PhSetDialogItemText(hwndDlg, IDC_DATABASE, fileName->Buffer);
-                    }
-
-                    PhFreeFileDialog(fileDialog);
+                    PhSetDialogItemText(hwndDlg, IDC_KEYTEXT, PhaGetStringSetting(SETTING_NAME_GEOLITE_API_KEY)->Buffer);
+                }
+                break;
+            case IDRETRY:
+                {
+                    ShowGeoLiteUpdateDialog(hwndDlg);
                 }
                 break;
             }
@@ -93,4 +84,88 @@ INT_PTR CALLBACK OptionsDlgProc(
     }
 
     return FALSE;
+}
+
+INT_PTR CALLBACK OptionsGeoLiteDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    )
+{
+    switch (uMsg)
+    {
+    case WM_INITDIALOG:
+        {
+            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+
+            PhSetDialogItemText(hwndDlg, IDC_KEYTEXT, PhaGetStringSetting(SETTING_NAME_GEOLITE_API_KEY)->Buffer);
+
+            PhSetDialogFocus(hwndDlg, GetDlgItem(hwndDlg, IDCANCEL));
+        }
+        break;
+    case WM_COMMAND:
+        {
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
+            {
+            case IDCANCEL:
+                EndDialog(hwndDlg, FALSE);
+                break;
+            case IDYES:
+                {
+                    PPH_STRING string;
+
+                    string = PhGetWindowText(GetDlgItem(hwndDlg, IDC_KEYTEXT));
+                    PhSetStringSetting(SETTING_NAME_GEOLITE_API_KEY, PhGetStringOrEmpty(string));
+                    PhClearReference(&string);
+
+                    EndDialog(hwndDlg, FALSE);
+                }
+                break;
+            }
+        }
+        break;
+    case WM_NOTIFY:
+        {
+            LPNMHDR header = (LPNMHDR)lParam;
+
+            switch (header->code)
+            {
+            case NM_CLICK:
+            case NM_RETURN:
+                {
+                    PNMLINK link = (PNMLINK)lParam;
+                    LITEM item = link->item;
+
+                    if (header->idFrom == IDC_HELPLINK && item.iLink == 0)
+                    {
+                        PhShellExecute(hwndDlg, item.szUrl, NULL);
+                    }
+                }
+                break;
+            }
+        }
+        break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    }
+
+    return FALSE;
+}
+
+VOID ShowGeoLiteConfigDialog(
+    _In_ HWND ParentWindowHandle
+    )
+{
+    PhDialogBox(
+        PluginInstance->DllBase,
+        MAKEINTRESOURCE(IDD_OPTIONSKEY),
+        ParentWindowHandle,
+        OptionsGeoLiteDlgProc,
+        NULL
+        );
 }

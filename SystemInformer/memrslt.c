@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2021
+ *     dmex    2017-2022
  *
  */
 
@@ -52,7 +52,7 @@ VOID PhShowMemoryResultsDialog(
     PMEMORY_RESULTS_CONTEXT context;
     ULONG i;
 
-    context = PhAllocate(sizeof(MEMORY_RESULTS_CONTEXT));
+    context = PhAllocateZero(sizeof(MEMORY_RESULTS_CONTEXT));
     context->ProcessId = ProcessId;
     context->Results = Results;
 
@@ -61,12 +61,12 @@ VOID PhShowMemoryResultsDialog(
     for (i = 0; i < Results->Count; i++)
         PhReferenceMemoryResult(Results->Items[i]);
 
-    windowHandle = CreateDialogParam(
+    windowHandle = PhCreateDialog(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_MEMRESULTS),
         NULL,
         PhpMemoryResultsDlgProc,
-        (LPARAM)context
+        context
         );
     ShowWindow(windowHandle, SW_SHOW);
     SetForegroundWindow(windowHandle);
@@ -330,10 +330,16 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                 PhaFormatUInt64(context->Results->Count, TRUE)->Buffer)->Buffer);
 
             {
-                PH_RECTANGLE windowRectangle;
+                PH_RECTANGLE windowRectangle = {0};
+                RECT rect;
+                LONG dpiValue;
 
                 windowRectangle.Position = PhGetIntegerPairSetting(L"MemResultsPosition");
-                windowRectangle.Size = PhGetScalableIntegerPairSetting(L"MemResultsSize", TRUE).Pair;
+
+                rect = PhRectangleToRect(windowRectangle);
+                dpiValue = PhGetMonitorDpi(&rect);
+
+                windowRectangle.Size = PhGetScalableIntegerPairSetting(L"MemResultsSize", TRUE, dpiValue).Pair;
                 PhAdjustRectangleToWorkingArea(NULL, &windowRectangle);
 
                 MoveWindow(hwndDlg, windowRectangle.Left, windowRectangle.Top,
@@ -344,7 +350,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                 windowRectangle.Top += 20;
 
                 PhSetIntegerPairSetting(L"MemResultsPosition", windowRectangle.Position);
-                PhSetScalableIntegerPairSetting2(L"MemResultsSize", windowRectangle.Size);
+                PhSetScalableIntegerPairSetting2(L"MemResultsSize", windowRectangle.Size, dpiValue);
             }
 
             PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
@@ -633,11 +639,11 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                         GetCursorPos(&point);
 
                         selectedItem = PhShowEMenu(
-                            menu, 
-                            hwndDlg, 
-                            PH_EMENU_SHOW_LEFTRIGHT, 
-                            PH_ALIGN_LEFT | PH_ALIGN_TOP, 
-                            point.x, 
+                            menu,
+                            hwndDlg,
+                            PH_EMENU_SHOW_LEFTRIGHT,
+                            PH_ALIGN_LEFT | PH_ALIGN_TOP,
+                            point.x,
                             point.y
                             );
 
@@ -737,6 +743,12 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
             PhResizingMinimumSize((PRECT)lParam, wParam, MinimumSize.right, MinimumSize.bottom);
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;

@@ -237,6 +237,7 @@ typedef struct _RTL_USER_PROCESS_PARAMETERS32
     UNICODE_STRING32 HeapPartitionName; // 19H1
     WOW64_POINTER(ULONG_PTR) DefaultThreadpoolCpuSetMasks;
     ULONG DefaultThreadpoolCpuSetMaskCount;
+    ULONG DefaultThreadpoolThreadMaximum;
 } RTL_USER_PROCESS_PARAMETERS32, *PRTL_USER_PROCESS_PARAMETERS32;
 
 typedef struct _PEB32
@@ -343,9 +344,9 @@ typedef struct _PEB32
 
     UNICODE_STRING32 CSDVersion;
 
-    WOW64_POINTER(PVOID) ActivationContextData;
+    WOW64_POINTER(PACTIVATION_CONTEXT_DATA) ActivationContextData;
     WOW64_POINTER(PVOID) ProcessAssemblyStorageMap;
-    WOW64_POINTER(PVOID) SystemDefaultActivationContextData;
+    WOW64_POINTER(PACTIVATION_CONTEXT_DATA) SystemDefaultActivationContextData;
     WOW64_POINTER(PVOID) SystemAssemblyStorageMap;
 
     WOW64_POINTER(SIZE_T) MinimumStackCommit;

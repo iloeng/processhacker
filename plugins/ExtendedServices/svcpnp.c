@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     wj32    2021
+ *     dmex    2022
  *
  */
 
@@ -25,7 +25,7 @@ typedef struct _PNP_SERVICE_CONTEXT
 
 BOOLEAN HardwareDeviceEnableDisable(
     _In_ HWND ParentWindow,
-    _In_ PPH_STRING DeviceInstance, 
+    _In_ PPH_STRING DeviceInstance,
     _In_ BOOLEAN Enable
     )
 {
@@ -38,16 +38,16 @@ BOOLEAN HardwareDeviceEnableDisable(
         CM_LOCATE_DEVNODE_PHANTOM
         );
 
-    if (result != CR_SUCCESS) 
+    if (result != CR_SUCCESS)
     {
         PhShowStatus(ParentWindow, L"Failed to change the device state.", 0, CM_MapCrToWin32Err(result, ERROR_INVALID_HANDLE_STATE));
         return FALSE;
     }
 
     if (Enable)
-        result = CM_Enable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
+        result = CM_Enable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST
     else
-        result = CM_Disable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
+        result = CM_Disable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST
 
     if (result != CR_SUCCESS)
     {
@@ -190,7 +190,7 @@ BOOLEAN HardwareDeviceShowProperties(
             }
         }
 
-        FreeLibrary(devMgrHandle);
+        PhFreeLibrary(devMgrHandle);
     }
 
     return FALSE;
@@ -258,9 +258,9 @@ BOOLEAN HardwareDeviceOpenKey(
             );
 
         if (bestObjectName)
-        { 
+        {
             // HKLM\SYSTEM\ControlSet\Control\Class\ += DEVPKEY_Device_Driver
-            PhShellOpenKey(ParentWindow, bestObjectName);
+            PhShellOpenKey2(ParentWindow, bestObjectName);
             PhDereferenceObject(bestObjectName);
         }
 
@@ -351,6 +351,7 @@ VOID EspLoadDeviceInstanceImage(
     ULONG deviceIconPathLength;
     DEVPROPTYPE deviceIconPathPropertyType;
     PPH_STRING deviceIconPath;
+    LONG dpiValue;
 
     deviceIconPathLength = 0x40;
     deviceIconPath = PhCreateStringEx(NULL, deviceIconPathLength);
@@ -392,15 +393,17 @@ VOID EspLoadDeviceInstanceImage(
         LONG64 index = 0;
 
         if (
-            PhSplitStringRefAtChar(&deviceIconPath->sr, L',', &dllPartSr, &indexPartSr) && 
+            PhSplitStringRefAtChar(&deviceIconPath->sr, L',', &dllPartSr, &indexPartSr) &&
             PhStringToInteger64(&indexPartSr, 10, &index)
             )
         {
             if (dllIconPath = PhExpandEnvironmentStrings(&dllPartSr))
             {
-                if (PhExtractIconEx(dllIconPath, FALSE, (INT)index, &smallIcon, NULL))
+                dpiValue = PhGetWindowDpi(Context->WindowHandle);
+
+                if (PhExtractIconEx(dllIconPath, FALSE, (INT)index, &smallIcon, NULL, dpiValue))
                 {
-                    UINT imageIndex = PhImageListAddIcon(Context->ImageList, smallIcon);
+                    INT imageIndex = PhImageListAddIcon(Context->ImageList, smallIcon);
                     PhSetListViewItemImageIndex(Context->ListViewHandle, ItemIndex, imageIndex);
                     DestroyIcon(smallIcon);
                 }
@@ -704,13 +707,9 @@ VOID EspFreeListViewDiskDriveEntries(
     _In_ PPNP_SERVICE_CONTEXT Context
     )
 {
-    ULONG index = ULONG_MAX;
+    INT index = INT_ERROR;
 
-    while ((index = PhFindListViewItemByFlags(
-        Context->ListViewHandle,
-        index,
-        LVNI_ALL
-        )) != ULONG_MAX)
+    while ((index = PhFindListViewItemByFlags(Context->ListViewHandle, index, LVNI_ALL)) != INT_ERROR)
     {
         PPH_STRING param;
 
@@ -752,10 +751,10 @@ INT_PTR CALLBACK EspPnPServiceDlgProc(
     {
     case WM_INITDIALOG:
         {
+            LONG dpiValue;
+
             context->WindowHandle = hwndDlg;
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
-
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             PhSetListViewStyle(context->ListViewHandle, FALSE, TRUE);
             PhSetControlTheme(context->ListViewHandle, L"explorer");
@@ -767,10 +766,13 @@ INT_PTR CALLBACK EspPnPServiceDlgProc(
             PhAddListViewGroup(context->ListViewHandle, 0, L"Connected");
             PhAddListViewGroup(context->ListViewHandle, 1, L"Disconnected");
 
+            dpiValue = PhGetWindowDpi(hwndDlg);
             context->ImageList = PhImageListCreate(
-                24, // GetSystemMetrics(SM_CXSMICON)
-                24, // GetSystemMetrics(SM_CYSMICON)
-                ILC_MASK | ILC_COLOR32, 1, 1);
+                PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CXSMICON, dpiValue)
+                PhGetDpi(24, dpiValue), // PhGetSystemMetrics(SM_CYSMICON, dpiValue)
+                ILC_MASK | ILC_COLOR32,
+                1, 1
+                );
             ListView_SetImageList(context->ListViewHandle, context->ImageList, LVSIL_SMALL);
 
             if (context->ServiceItem->Type & SERVICE_DRIVER)

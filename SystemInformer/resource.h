@@ -1,7 +1,8 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
-// Used by ProcessHacker.rc
+// Used by SystemInformer.rc
 //
+#define IDR_RT_MANIFEST                 1
 #define IDI_PROCESSHACKER               101
 #define IDR_MAINWND_ACCEL               102
 #define IDD_PROCGENERAL                 103
@@ -13,8 +14,6 @@
 #define IDC_CPU                         112
 #define IDC_PRIVATEBYTES                113
 #define IDC_IO                          114
-#define IDB_CROSS                       117
-#define IDB_TICK                        118
 #define IDC_MEMORY                      120
 #define IDD_ABOUT                       121
 #define IDC_NEWOBJECTS                  121
@@ -89,9 +88,9 @@
 #define IDD_MINIINFO                    207
 #define IDD_MINIINFO_LIST               210
 #define IDD_MITIGATION                  215
+#define IDD_TOKAPPPOLICY                216
 #define IDI_PIN                         216
 #define IDI_FOLDER                      217
-#define IDI_PENCIL                      218
 #define IDI_MAGNIFIER                   219
 #define IDD_EDITENV                     221
 #define IDB_SEARCH_ACTIVE               223
@@ -109,7 +108,10 @@
 #define IDD_LIVEDUMP                    254
 #define IDD_HEAPS                       255
 #define IDD_PROCVDMHOST                 257
+#define IDD_OPTSYMBOLS                  258
 #define IDI_UACSHIELD                   261
+#define IDB_SEARCH_ACTIVE_SMALL         265
+#define IDB_SEARCH_INACTIVE_SMALL       266
 #define IDC_TERMINATE                   1003
 #define IDC_FILEICON                    1005
 #define IDC_FILE                        1006
@@ -154,7 +156,6 @@
 #define IDC_REFERENCES                  1045
 #define IDC_INTERNALNAME                1045
 #define IDC_HANDLES                     1046
-//#define IDC_PROCESSTYPELABEL            1046
 #define IDC_AUTHOR                      1046
 #define IDC_PAGED                       1047
 #define IDC_PROCESSTYPETEXT             1047
@@ -542,6 +543,8 @@
 #define IDC_USERMODE                    1413
 #define IDC_HYPERVISOR                  1414
 #define IDC_SIZESINBYTES                1415
+#define IDC_DUMPKERNELTHREADSTACKS      1415
+#define IDC_FONTMONOSPACE               1416
 #define ID_HACKER_EXIT                  40001
 #define ID_PROCESS_PROPERTIES           40006
 #define ID_PROCESS_TERMINATE            40007
@@ -576,7 +579,6 @@
 #define ID_PROCESS_MISCELLANEOUS        40041
 #define ID_PROCESS_WINDOW               40042
 #define ID_PROCESS_PAGEPRIORITY         40043
-#define ID_PROCESS_BOOST                40044
 #define ID_PRIORITY_REALTIME            40048
 #define ID_PRIORITY_HIGH                40049
 #define ID_MISCELLANEOUS_ECOMODE        40050
@@ -751,10 +753,11 @@
 #define ID_COMPUTER_RESTARTBOOTOPTIONS  40280
 #define ID_COMPUTER_RESTARTFWOPTIONS    40281
 #define ID_COMPUTER_RESTARTFWDEVICE     40282
-#define ID_COMPUTER_RESTARTBOOTDEVICE   40283
 #define ID_HANDLE_OBJECTPROPERTIES1     40282
+#define ID_COMPUTER_RESTARTBOOTDEVICE   40283
 #define ID_HANDLE_OBJECTPROPERTIES2     40283
 #define ID_OBJECT_GOTOOWNINGPROCESS     40284
+#define ID_COMPUTER_RESTARTWDOSCAN      40284
 #define ID_NETWORK_GOTOSERVICE          40285
 #define ID_SERVICE_OPENFILELOCATION     40286
 #define ID_PROCESS_GOTOPROCESS          40287
@@ -762,7 +765,9 @@
 #define ID_MINIINFO_REFRESHAUTOMATICALLY 40289
 #define ID_TOOLS_STARTRESOURCEMONITOR   40290
 #define IDC_MAXSCREEN                   40293
+#define ID_EMPTY_COMPRESSIONSTORE       40294
 #define ID_EMPTY_COMBINEMEMORYLISTS     40295
+#define ID_EMPTY_SYSTEMFILECACHE        40296
 #define ID_PRIVILEGE_RESET              40296
 #define ID_GROUP_ENABLE                 40297
 #define ID_THREAD_CRITICAL              40297
@@ -778,12 +783,12 @@
 #define IDPLUGINS                       55000
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        258
+#define _APS_NEXT_RESOURCE_VALUE        267
 #define _APS_NEXT_COMMAND_VALUE         40298
-#define _APS_NEXT_CONTROL_VALUE         1411
+#define _APS_NEXT_CONTROL_VALUE         1415
 #define _APS_NEXT_SYMED_VALUE           170
 #endif
 #endif

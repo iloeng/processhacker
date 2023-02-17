@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
@@ -111,8 +111,8 @@ VOID EtGpuMonitorInitialization(
 
 NTSTATUS EtQueryAdapterInformation(
     _In_ D3DKMT_HANDLE AdapterHandle,
-    _In_ KMTQUERYADAPTERINFOTYPE InformationClass, 
-    _Out_writes_bytes_opt_(InformationLength) PVOID Information, 
+    _In_ KMTQUERYADAPTERINFOTYPE InformationClass,
+    _Out_writes_bytes_opt_(InformationLength) PVOID Information,
     _In_ UINT32 InformationLength
     )
 {
@@ -212,7 +212,50 @@ PPH_STRING EtpGetNodeEngineTypeString(
     return PhFormatString(L"ERROR (%lu)", NodeMetaData.NodeData.EngineType);
 }
 
-PPH_STRING EtpQueryDeviceProperty(
+PVOID EtpQueryDeviceProperty(
+    _In_ DEVINST DeviceHandle,
+    _In_ CONST DEVPROPKEY* DeviceProperty
+    )
+{
+    CONFIGRET result;
+    PBYTE buffer;
+    ULONG bufferSize;
+    DEVPROPTYPE propertyType;
+
+    bufferSize = 0x80;
+    buffer = PhAllocate(bufferSize);
+    propertyType = DEVPROP_TYPE_EMPTY;
+
+    if ((result = CM_Get_DevNode_Property(
+        DeviceHandle,
+        DeviceProperty,
+        &propertyType,
+        buffer,
+        &bufferSize,
+        0
+        )) == CR_BUFFER_SMALL)
+    {
+        PhFree(buffer);
+        buffer = PhAllocate(bufferSize);
+
+        result = CM_Get_DevNode_Property(
+            DeviceHandle,
+            DeviceProperty,
+            &propertyType,
+            buffer,
+            &bufferSize,
+            0
+            );
+    }
+
+    if (result == CR_SUCCESS)
+        return buffer;
+
+    PhFree(buffer);
+    return NULL;
+}
+
+PPH_STRING EtpQueryDevicePropertyString(
     _In_ DEVINST DeviceHandle,
     _In_ CONST DEVPROPKEY *DeviceProperty
     )
@@ -452,20 +495,16 @@ BOOLEAN EtQueryDeviceProperties(
     }
 
     if (Description)
-        *Description = EtpQueryDeviceProperty(deviceInstanceHandle, &DEVPKEY_Device_DeviceDesc);
+        *Description = EtpQueryDevicePropertyString(deviceInstanceHandle, &DEVPKEY_Device_DeviceDesc);
     if (DriverDate)
-        *DriverDate = EtpQueryDeviceProperty(deviceInstanceHandle, &DEVPKEY_Device_DriverDate);
+        *DriverDate = EtpQueryDevicePropertyString(deviceInstanceHandle, &DEVPKEY_Device_DriverDate);
     if (DriverVersion)
-        *DriverVersion = EtpQueryDeviceProperty(deviceInstanceHandle, &DEVPKEY_Device_DriverVersion);
+        *DriverVersion = EtpQueryDevicePropertyString(deviceInstanceHandle, &DEVPKEY_Device_DriverVersion);
     if (LocationInfo)
-        *LocationInfo = EtpQueryDeviceProperty(deviceInstanceHandle, &DEVPKEY_Device_LocationInfo);
+        *LocationInfo = EtpQueryDevicePropertyString(deviceInstanceHandle, &DEVPKEY_Device_LocationInfo);
     if (InstalledMemory)
         *InstalledMemory = EtpQueryGpuInstalledMemory(deviceInstanceHandle);
-    // EtpQueryDeviceProperty(deviceInstanceHandle, &DEVPKEY_Device_Manufacturer);
-
-    // Undocumented device properties (Win10 only)
-    //DEFINE_DEVPROPKEY(DEVPKEY_Gpu_Luid, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2); // DEVPROP_TYPE_UINT64
-    //DEFINE_DEVPROPKEY(DEVPKEY_Gpu_PhysicalAdapterIndex, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 3); // DEVPROP_TYPE_UINT32
+    // EtpQueryDevicePropertyString(deviceInstanceHandle, &DEVPKEY_Device_Manufacturer);
 
     return TRUE;
 }
@@ -559,8 +598,8 @@ D3D_FEATURE_LEVEL EtQueryAdapterFeatureLevel(
 PETP_GPU_ADAPTER EtpAddDisplayAdapter(
     _In_ PCWSTR DeviceInterface,
     _In_ D3DKMT_HANDLE AdapterHandle,
-    _In_ LUID AdapterLuid, 
-    _In_ ULONG NumberOfSegments, 
+    _In_ LUID AdapterLuid,
+    _In_ ULONG NumberOfSegments,
     _In_ ULONG NumberOfNodes
     )
 {
@@ -704,7 +743,7 @@ BOOLEAN EtpInitializeD3DStatistics(
                 //
                 // This will be averaged below.
                 //
-                EtGpuTemperatureLimit += perfCaps.TemperatureMax;
+                EtGpuTemperatureLimit += max(perfCaps.TemperatureWarning, perfCaps.TemperatureMax);
                 EtGpuFanRpmLimit += perfCaps.MaxFanRPM;
             }
         }
@@ -720,7 +759,7 @@ BOOLEAN EtpInitializeD3DStatistics(
             gpuAdapter = EtpAddDisplayAdapter(
                 openAdapterFromDeviceName.pDeviceName,
                 openAdapterFromDeviceName.hAdapter,
-                openAdapterFromDeviceName.AdapterLuid, 
+                openAdapterFromDeviceName.AdapterLuid,
                 queryStatistics.QueryResult.AdapterInformation.NbSegments,
                 queryStatistics.QueryResult.AdapterInformation.NodeCount
                 );
@@ -901,12 +940,12 @@ VOID EtpUpdateSystemSegmentInformation(
 
             if (NT_SUCCESS(D3DKMTQueryStatistics(&queryStatistics)))
             {
-                ULONG64 bytesCommitted;
+                ULONG64 bytesResident;
                 ULONG aperture;
 
                 if (PhWindowsVersion >= WINDOWS_8)
                 {
-                    bytesCommitted = queryStatistics.QueryResult.SegmentInformation.BytesResident;
+                    bytesResident = queryStatistics.QueryResult.SegmentInformation.BytesResident;
                     aperture = queryStatistics.QueryResult.SegmentInformation.Aperture;
                 }
                 else
@@ -914,14 +953,14 @@ VOID EtpUpdateSystemSegmentInformation(
                     PD3DKMT_QUERYSTATISTICS_SEGMENT_INFORMATION_V1 segmentInfo;
 
                     segmentInfo = (PD3DKMT_QUERYSTATISTICS_SEGMENT_INFORMATION_V1)&queryStatistics.QueryResult;
-                    bytesCommitted = segmentInfo->BytesResident;
+                    bytesResident = segmentInfo->BytesResident;
                     aperture = segmentInfo->Aperture;
                 }
 
                 if (aperture) // RtlCheckBit(&gpuAdapter->ApertureBitMap, j)
-                    sharedUsage += bytesCommitted;
+                    sharedUsage += bytesResident;
                 else
-                    dedicatedUsage += bytesCommitted;
+                    dedicatedUsage += bytesResident;
             }
         }
     }
@@ -1004,7 +1043,7 @@ VOID EtpUpdateSystemNodeInformation(
         }
     }
 
-    PhQueryPerformanceCounter(&performanceCounter, &EtClockTotalRunningTimeFrequency);
+    PhQueryPerformanceCounter(&performanceCounter);
     PhUpdateDelta(&EtClockTotalRunningTimeDelta, performanceCounter.QuadPart);
 }
 
@@ -1077,7 +1116,7 @@ VOID NTAPI EtGpuProcessesUpdatedCallback(
         temperature = 0.0f;
         fanRpm = 0;
 
-        for (ULONG i = 0; i < EtpGpuAdapterList->Count; i++)
+        for (i = 0; i < EtpGpuAdapterList->Count; i++)
         {
             PETP_GPU_ADAPTER gpuAdapter;
             D3DKMT_HANDLE adapterHandle;

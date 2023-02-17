@@ -30,9 +30,11 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"DisabledPlugins", L"");
     PhpAddIntegerSetting(L"ElevationLevel", L"1"); // PromptElevateAction
     PhpAddIntegerSetting(L"EnableAdvancedOptions", L"0");
+    PhpAddIntegerSetting(L"EnableBitmapSupport", L"1");
     PhpAddIntegerSetting(L"EnableBreakOnTermination", L"0");
     PhpAddIntegerSetting(L"EnableBootObjectsEnumerate", L"0");
     PhpAddIntegerSetting(L"EnableCycleCpuUsage", L"1");
+    PhpAddIntegerSetting(L"EnableArmCycleCpuUsage", L"0");
     PhpAddIntegerSetting(L"EnableImageCoherencySupport", L"0");
     PhpAddIntegerSetting(L"EnableInstantTooltips", L"0");
     PhpAddIntegerSetting(L"EnableHeapReflection", L"0");
@@ -42,13 +44,20 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableLastProcessShutdown", L"0");
     PhpAddIntegerSetting(L"EnableLinuxSubsystemSupport", L"0");
     PhpAddIntegerSetting(L"EnableHandleSnapshot", L"1");
+    PhpAddIntegerSetting(L"EnableMinidumpKernelMinidump", L"0");
+    PhpAddIntegerSetting(L"EnableMonospaceFont", L"0");
     PhpAddIntegerSetting(L"EnableNetworkBoundConnections", L"1");
     PhpAddIntegerSetting(L"EnableNetworkResolve", L"1");
     PhpAddIntegerSetting(L"EnableNetworkResolveDoH", L"0");
+    PhpAddIntegerSetting(L"EnablePackageIconSupport", L"0");
+    PhpAddIntegerSetting(L"EnableProcessHandlePnPDeviceNameSupport", L"0");
     PhpAddIntegerSetting(L"EnablePlugins", L"1");
-    PhpAddIntegerSetting(L"EnableScaleCpuGraph", L"0");
+    PhpAddIntegerSetting(L"EnableGraphMaxScale", L"0");
+    PhpAddIntegerSetting(L"EnableGraphMaxText", L"1");
     PhpAddIntegerSetting(L"EnableServiceNonPoll", L"0");
+    PhpAddIntegerSetting(L"EnableShellExecuteSkipIfeoDebugger", L"1");
     PhpAddIntegerSetting(L"EnableStage2", L"1");
+    PhpAddIntegerSetting(L"EnableStreamerMode", L"0");
     PhpAddIntegerSetting(L"EnableServiceStage2", L"0");
     PhpAddIntegerSetting(L"EnableStartAsAdmin", L"0");
     PhpAddIntegerSetting(L"EnableDefaultSafePlugins", L"1");
@@ -58,6 +67,8 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableShutdownBootMenu", L"1");
     PhpAddIntegerSetting(L"EnableSilentCrashNotify", L"0");
     PhpAddIntegerSetting(L"EnableThemeSupport", L"0");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicSupport", L"1");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicWindowSupport", L"0");
     PhpAddIntegerSetting(L"EnableThreadStackInlineSymbols", L"1");
     PhpAddIntegerSetting(L"EnableThreadStackLineInformation", L"1");
     PhpAddIntegerSetting(L"EnableTooltipSupport", L"1");
@@ -75,9 +86,8 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"FileBrowseExecutable", L"%SystemRoot%\\explorer.exe /select,\"%s\"");
     PhpAddIntegerSetting(L"FirstRun", L"1");
     PhpAddStringSetting(L"Font", L""); // null
+    PhpAddStringSetting(L"FontMonospace", L""); // null
     PhpAddIntegerSetting(L"ForceNoParent", L"1");
-    PhpAddIntegerSetting(L"KphBuildNumber", L"0");
-    PhpAddStringSetting(L"KphServiceName", L"");
     PhpAddStringSetting(L"HandleTreeListColumns", L"");
     PhpAddStringSetting(L"HandleTreeListSort", L"0,1"); // 0, AscendingSortOrder
     PhpAddIntegerSetting(L"HandleTreeListFlags", L"3");
@@ -99,16 +109,20 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"HideSignedProcesses", L"0");
     PhpAddIntegerSetting(L"HideWaitingConnections", L"0");
     PhpAddIntegerSetting(L"HighlightingDuration", L"3e8"); // 1000ms
-    PhpAddStringSetting(L"IconGuids", L"");
+    PhpAddStringSetting(L"IconTrayGuids", L"");
+    PhpAddIntegerSetting(L"IconTrayPersistGuidEnabled", L"0");
     PhpAddIntegerSetting(L"IconIgnoreBalloonClick", L"0");
-    PhpAddStringSetting(L"IconSettings", L"1|1");
+    PhpAddStringSetting(L"IconSettings", L"2|1");
     PhpAddIntegerSetting(L"IconNotifyMask", L"c"); // PH_NOTIFY_SERVICE_CREATE | PH_NOTIFY_SERVICE_DELETE
     PhpAddIntegerSetting(L"IconProcesses", L"f"); // 15
     PhpAddIntegerSetting(L"IconSingleClick", L"0");
     PhpAddIntegerSetting(L"IconTogglesVisibility", L"1");
+    PhpAddIntegerSetting(L"IconTransparencyEnabled", L"0");
+    //PhpAddIntegerSetting(L"IconTransparency", L"255");
+    PhpAddIntegerPairSetting(L"InformationWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"InformationWindowSize", L"@96|140,190");
     PhpAddIntegerSetting(L"ImageCoherencyScanLevel", L"1");
     PhpAddStringSetting(L"JobListViewColumns", L"");
-    //PhpAddIntegerSetting(L"KphUnloadOnShutdown", L"0");
     PhpAddIntegerSetting(L"LogEntries", L"200"); // 512
     PhpAddStringSetting(L"LogListViewColumns", L"");
     PhpAddIntegerPairSetting(L"LogWindowPosition", L"0,0");
@@ -125,7 +139,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"MaxPrecisionUnit", L"2");
     PhpAddIntegerSetting(L"MemEditBytesPerRow", L"10"); // 16
     PhpAddStringSetting(L"MemEditGotoChoices", L"");
-    PhpAddIntegerPairSetting(L"MemEditPosition", L"450,450");
+    PhpAddIntegerPairSetting(L"MemEditPosition", L"0,0");
     PhpAddScalableIntegerPairSetting(L"MemEditSize", L"@96|600,500");
     PhpAddStringSetting(L"MemFilterChoices", L"");
     PhpAddStringSetting(L"MemResultsListViewColumns", L"");
@@ -179,6 +193,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"SampleCount", L"200"); // 512
     PhpAddIntegerSetting(L"SampleCountAutomatic", L"1");
     PhpAddIntegerSetting(L"ScrollToNewProcesses", L"0");
+    PhpAddIntegerSetting(L"ScrollToRemovedProcesses", L"0");
     PhpAddStringSetting(L"SearchEngine", L"https://duckduckgo.com/?q=\"%s\"");
     PhpAddStringSetting(L"SegmentHeapListViewColumns", L"");
     PhpAddStringSetting(L"SegmentHeapListViewSort", L"0,1");
@@ -209,8 +224,6 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"TokenGroupsListViewColumns", L"");
     PhpAddStringSetting(L"TokenGroupsListViewStates", L"");
     PhpAddStringSetting(L"TokenGroupsListViewSort", L"1,2");
-    PhpAddIntegerSetting(L"TokenSplitterEnable", L"0");
-    PhpAddIntegerSetting(L"TokenSplitterPosition", L"150");
     PhpAddStringSetting(L"TokenPrivilegesListViewColumns", L"");
     PhpAddIntegerSetting(L"TreeListBorderEnable", L"0");
     PhpAddIntegerSetting(L"TreeListCustomColorsEnable", L"0");
@@ -278,11 +291,11 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"UseColorUnknown", L"1");
     PhpAddIntegerSetting(L"ColorUnknown", L"8080ff"); // Light Red
 
-    PhpAddIntegerSetting(L"UseColorSystemThreadStack", L"0");
+    PhpAddIntegerSetting(L"UseColorSystemThreadStack", L"1");
     PhpAddIntegerSetting(L"ColorSystemThreadStack", L"ffccaa");
-    PhpAddIntegerSetting(L"UseColorUserThreadStack", L"0");
+    PhpAddIntegerSetting(L"UseColorUserThreadStack", L"1");
     PhpAddIntegerSetting(L"ColorUserThreadStack", L"aaffff");
-    PhpAddIntegerSetting(L"UseColorInlineThreadStack", L"0");
+    PhpAddIntegerSetting(L"UseColorInlineThreadStack", L"1");
     PhpAddIntegerSetting(L"ColorInlineThreadStack", L"00ffde");
 
     PhpAddIntegerSetting(L"GraphShowText", L"1");
@@ -294,9 +307,19 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"ColorPrivate", L"0077ff");
     PhpAddIntegerSetting(L"ColorPhysical", L"ff8000"); // Blue
 
-    PhpAddIntegerSetting(L"ColorPowerUsage", L"77ff77");
-    PhpAddIntegerSetting(L"ColorTemperature", L"7777ff");
-    PhpAddIntegerSetting(L"ColorFanRpm", L"ff7777");
+    PhpAddIntegerSetting(L"ColorPowerUsage", L"00ff00");
+    PhpAddIntegerSetting(L"ColorTemperature", L"0000ff");
+    PhpAddIntegerSetting(L"ColorFanRpm", L"ff0077");
+
+    PhpAddStringSetting(L"KphServiceName", L"");
+    PhpAddStringSetting(L"KphObjectName", L"");
+    PhpAddStringSetting(L"KphPortName", L"");
+    PhpAddStringSetting(L"KphAltitude", L"385400");
+    PhpAddIntegerSetting(L"KphDisableImageLoadProtection", L"0");
+    PhpAddIntegerSetting(L"KsiEnableSplashScreen", L"0");
+    PhpAddIntegerSetting(L"KsiEnableLoadNative", L"0");
+    PhpAddIntegerSetting(L"KsiEnableLoadFilter", L"0");
+    PhpAddIntegerSetting(L"KsiUnloadOnExitTest", L"0");
 }
 
 VOID PhUpdateCachedSettings(
@@ -308,6 +331,7 @@ VOID PhUpdateCachedSettings(
     PH_UPDATE_SETTING(HideOtherUserProcesses);
     PH_UPDATE_SETTING(PropagateCpuUsage);
     PH_UPDATE_SETTING(ScrollToNewProcesses);
+    PH_UPDATE_SETTING(ScrollToRemovedProcesses);
     PH_UPDATE_SETTING(ShowCpuBelow001);
     PH_UPDATE_SETTING(UpdateInterval);
 
@@ -376,8 +400,10 @@ VOID PhUpdateCachedSettings(
     PH_UPDATE_SETTING(ColorFanRpm);
 
     PH_UPDATE_SETTING(ImageCoherencyScanLevel);
-    PH_UPDATE_SETTING(EnableScaleCpuGraph);
 
+    PhCsEnableGraphMaxScale = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
+    PhCsEnableGraphMaxText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
     PhEnableNetworkResolveDoHSupport = !!PhGetIntegerSetting(L"EnableNetworkResolveDoH");
     PhEnableVersionShortText = !!PhGetIntegerSetting(L"EnableVersionSupport");
+    PhEnableWindowText = !!PhGetIntegerSetting(L"EnableWindowText");
 }

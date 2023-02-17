@@ -5,14 +5,13 @@
  *
  * Authors:
  *
- *     dmex    2012-2021
+ *     dmex    2012-2022
  *
  */
 
 #include <peview.h>
-#include <uxtheme.h>
 #include <vssym32.h>
-#include <wincodec.h>
+//#include <wincodec.h>
 
 typedef struct _EDIT_CONTEXT
 {
@@ -41,12 +40,6 @@ typedef struct _EDIT_CONTEXT
     PPH_STRING CueBannerText;
 } EDIT_CONTEXT, *PEDIT_CONTEXT;
 
-HICON PhpSearchBitmapToIcon(
-    _In_ HBITMAP BitmapHandle,
-    _In_ INT Width,
-    _In_ INT Height
-    );
-
 VOID PhpSearchFreeTheme(
     _Inout_ PEDIT_CONTEXT Context
     )
@@ -60,15 +53,18 @@ VOID PhpSearchInitializeFont(
     )
 {
     LOGFONT logFont;
+    LONG dpiValue;
 
-    if (Context->WindowFont) 
+    if (Context->WindowFont)
         DeleteFont(Context->WindowFont);
 
-    if (!SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &logFont, 0))
+    dpiValue = PhGetWindowDpi(WindowHandle);
+
+    if (!PhGetSystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &logFont, dpiValue))
         return;
 
     Context->WindowFont = CreateFont(
-        -PhMultiplyDivideSigned(10, PhGlobalDpi, 72),
+        -PhMultiplyDivideSigned(10, dpiValue, 72),
         0,
         0,
         0,
@@ -92,197 +88,62 @@ VOID PhpSearchInitializeTheme(
     _In_ HWND WindowHandle
     )
 {
-    Context->CXWidth = PhMultiplyDivideSigned(20, PhGlobalDpi, 96);//PH_SCALE_DPI(20);
+    LONG dpiValue;
+    INT borderX;
+
+    dpiValue = PhGetWindowDpi(WindowHandle);
+
+    Context->CXWidth = PhGetDpi(20, dpiValue);
     Context->ColorMode = PhGetIntegerSetting(L"GraphColorMode");
 
-    if (IsThemeActive())
+    borderX = PhGetSystemMetrics(SM_CXBORDER, dpiValue);
+
+    if (PhIsThemeActive())
     {
         HTHEME themeDataHandle;
 
-        if (themeDataHandle = OpenThemeData(WindowHandle, VSCLASS_EDIT))
+        if (themeDataHandle = PhOpenThemeData(WindowHandle, VSCLASS_EDIT, dpiValue))
         {
             //IsThemePartDefined_I(themeDataHandle, EP_EDITBORDER_NOSCROLL, EPSHV_NORMAL);
 
-            if (!SUCCEEDED(GetThemeInt(
+            if (!PhGetThemeInt(
                 themeDataHandle,
                 EP_EDITBORDER_NOSCROLL,
                 EPSHV_NORMAL,
                 TMT_BORDERSIZE,
                 &Context->CXBorder
-                )))
+                ))
             {
-                Context->CXBorder = GetSystemMetrics(SM_CXBORDER) * 2;
+                Context->CXBorder = borderX * 2;
             }
 
-            CloseThemeData(themeDataHandle);
+            PhCloseThemeData(themeDataHandle);
         }
         else
         {
-            Context->CXBorder = GetSystemMetrics(SM_CXBORDER) * 2;
+            Context->CXBorder = borderX * 2;
         }
     }
     else
     {
-        Context->CXBorder = GetSystemMetrics(SM_CXBORDER) * 2;
+        Context->CXBorder = borderX * 2;
     }
-}
-
-HBITMAP PhLoadPngImageFromResource(
-    _In_ PVOID DllBase,
-    _In_ UINT Width,
-    _In_ UINT Height,
-    _In_ PCWSTR Name,
-    _In_ BOOLEAN RGBAImage
-    )
-{
-    BOOLEAN success = FALSE;
-    UINT frameCount = 0;
-    ULONG resourceLength = 0;
-    WICInProcPointer resourceBuffer = NULL;
-    HDC screenHdc = NULL;
-    HDC bufferDc = NULL;
-    BITMAPINFO bitmapInfo = { 0 };
-    HBITMAP bitmapHandle = NULL;
-    PVOID bitmapBuffer = NULL;
-    IWICStream* wicStream = NULL;
-    IWICBitmapSource* wicBitmapSource = NULL;
-    IWICBitmapDecoder* wicDecoder = NULL;
-    IWICBitmapFrameDecode* wicFrame = NULL;
-    IWICImagingFactory* wicFactory = NULL;
-    IWICBitmapScaler* wicScaler = NULL;
-    WICPixelFormatGUID pixelFormat;
-    WICRect rect = { 0, 0, Width, Height };
-
-    // Load the resource
-    if (!PhLoadResource(DllBase, Name, L"PNG", &resourceLength, &resourceBuffer))
-        goto CleanupExit;
-
-    // Create the ImagingFactory
-    if (FAILED(PhGetClassObject(L"windowscodecs.dll", &CLSID_WICImagingFactory1, &IID_IWICImagingFactory, &wicFactory)))
-        goto CleanupExit;
-
-    // Create the Stream
-    if (FAILED(IWICImagingFactory_CreateStream(wicFactory, &wicStream)))
-        goto CleanupExit;
-
-    // Initialize the Stream from Memory
-    if (FAILED(IWICStream_InitializeFromMemory(wicStream, resourceBuffer, resourceLength)))
-        goto CleanupExit;
-
-    if (FAILED(IWICImagingFactory_CreateDecoder(wicFactory, &GUID_ContainerFormatPng, NULL, &wicDecoder)))
-        goto CleanupExit;
-
-    if (FAILED(IWICBitmapDecoder_Initialize(wicDecoder, (IStream*)wicStream, WICDecodeMetadataCacheOnLoad)))
-        goto CleanupExit;
-
-    // Get the Frame count
-    if (FAILED(IWICBitmapDecoder_GetFrameCount(wicDecoder, &frameCount)) || frameCount < 1)
-        goto CleanupExit;
-
-    // Get the Frame
-    if (FAILED(IWICBitmapDecoder_GetFrame(wicDecoder, 0, &wicFrame)))
-        goto CleanupExit;
-
-    // Get the WicFrame image format
-    if (FAILED(IWICBitmapFrameDecode_GetPixelFormat(wicFrame, &pixelFormat)))
-        goto CleanupExit;
-
-    // Check if the image format is supported:
-    if (IsEqualGUID(&pixelFormat, RGBAImage ? &GUID_WICPixelFormat32bppPRGBA : &GUID_WICPixelFormat32bppPBGRA))
-    {
-        wicBitmapSource = (IWICBitmapSource*)wicFrame;
-    }
-    else
-    {
-        IWICFormatConverter* wicFormatConverter = NULL;
-
-        if (FAILED(IWICImagingFactory_CreateFormatConverter(wicFactory, &wicFormatConverter)))
-            goto CleanupExit;
-
-        if (FAILED(IWICFormatConverter_Initialize(
-            wicFormatConverter,
-            (IWICBitmapSource*)wicFrame,
-            RGBAImage ? &GUID_WICPixelFormat32bppPRGBA : &GUID_WICPixelFormat32bppPBGRA,
-            WICBitmapDitherTypeNone,
-            NULL,
-            0.0,
-            WICBitmapPaletteTypeCustom
-            )))
-        {
-            IWICFormatConverter_Release(wicFormatConverter);
-            goto CleanupExit;
-        }
-
-        // Convert the image to the correct format:
-        IWICFormatConverter_QueryInterface(wicFormatConverter, &IID_IWICBitmapSource, &wicBitmapSource);
-
-        // Cleanup the converter.
-        IWICFormatConverter_Release(wicFormatConverter);
-
-        // Dispose the old frame now that the converted frame is in wicBitmapSource.
-        IWICBitmapFrameDecode_Release(wicFrame);
-    }
-
-    bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bitmapInfo.bmiHeader.biWidth = rect.Width;
-    bitmapInfo.bmiHeader.biHeight = -((LONG)rect.Height);
-    bitmapInfo.bmiHeader.biPlanes = 1;
-    bitmapInfo.bmiHeader.biBitCount = 32;
-    bitmapInfo.bmiHeader.biCompression = BI_RGB;
-
-    screenHdc = GetDC(NULL);
-    bufferDc = CreateCompatibleDC(screenHdc);
-    bitmapHandle = CreateDIBSection(screenHdc, &bitmapInfo, DIB_RGB_COLORS, &bitmapBuffer, NULL, 0);
-
-    // Check if it's the same rect as the requested size.
-    //if (width != rect.Width || height != rect.Height)
-    if (FAILED(IWICImagingFactory_CreateBitmapScaler(wicFactory, &wicScaler)))
-        goto CleanupExit;
-    if (FAILED(IWICBitmapScaler_Initialize(wicScaler, wicBitmapSource, rect.Width, rect.Height, WICBitmapInterpolationModeFant)))
-        goto CleanupExit;
-    if (FAILED(IWICBitmapScaler_CopyPixels(wicScaler, &rect, rect.Width * 4, rect.Width * rect.Height * 4, (PBYTE)bitmapBuffer)))
-        goto CleanupExit;
-
-    success = TRUE;
-
-CleanupExit:
-
-    if (wicScaler)
-        IWICBitmapScaler_Release(wicScaler);
-
-    if (bufferDc)
-        DeleteDC(bufferDc);
-
-    if (screenHdc)
-        ReleaseDC(NULL, screenHdc);
-
-    if (wicBitmapSource)
-        IWICBitmapSource_Release(wicBitmapSource);
-
-    if (wicStream)
-        IWICStream_Release(wicStream);
-
-    if (wicDecoder)
-        IWICBitmapDecoder_Release(wicDecoder);
-
-    if (wicFactory)
-        IWICImagingFactory_Release(wicFactory);
-
-    if (success)
-        return bitmapHandle;
-
-    if (bitmapHandle) DeleteBitmap(bitmapHandle);
-    return NULL;
 }
 
 VOID PhpSearchInitializeImages(
-    _Inout_ PEDIT_CONTEXT Context
+    _Inout_ PEDIT_CONTEXT Context,
+    _In_ HWND WindowHandle
     )
 {
     HBITMAP bitmap;
+    LONG dpiValue;
 
-    Context->ImageWidth = PhSmallIconSize.X + 4; //GetSystemMetrics(SM_CXSMICON) + 4;
-    Context->ImageHeight = PhSmallIconSize.Y + 4; //GetSystemMetrics(SM_CYSMICON) + 4;
+    dpiValue = PhGetWindowDpi(WindowHandle);
+
+    Context->ImageWidth = PhGetSystemMetrics(SM_CXSMICON, dpiValue) + PhGetDpi(4, dpiValue);
+    Context->ImageHeight = PhGetSystemMetrics(SM_CYSMICON, dpiValue) + PhGetDpi(4, dpiValue);
+
+    if (Context->ImageListHandle) PhImageListDestroy(Context->ImageListHandle);
     Context->ImageListHandle = PhImageListCreate(
         Context->ImageWidth,
         Context->ImageHeight,
@@ -292,7 +153,7 @@ VOID PhpSearchInitializeImages(
         );
     PhImageListSetImageCount(Context->ImageListHandle, 2);
 
-    if (bitmap = PhLoadPngImageFromResource(PhInstanceHandle, Context->ImageWidth, Context->ImageHeight, MAKEINTRESOURCE(IDB_SEARCH_ACTIVE), TRUE))
+    if (bitmap = PhLoadImageFormatFromResource(PhInstanceHandle, MAKEINTRESOURCE(IDB_SEARCH_ACTIVE), L"PNG", PH_IMAGE_FORMAT_TYPE_PNG, Context->ImageWidth, Context->ImageHeight))
     {
         PhImageListReplace(Context->ImageListHandle, 0, bitmap, NULL);
         DeleteBitmap(bitmap);
@@ -302,7 +163,7 @@ VOID PhpSearchInitializeImages(
         PhSetImageListBitmap(Context->ImageListHandle, 0, PhInstanceHandle, MAKEINTRESOURCE(IDB_SEARCH_ACTIVE_BMP));
     }
 
-    if (bitmap = PhLoadPngImageFromResource(PhInstanceHandle, Context->ImageWidth, Context->ImageHeight, MAKEINTRESOURCE(IDB_SEARCH_INACTIVE), TRUE))
+    if (bitmap = PhLoadImageFormatFromResource(PhInstanceHandle, MAKEINTRESOURCE(IDB_SEARCH_INACTIVE), L"PNG", PH_IMAGE_FORMAT_TYPE_PNG, Context->ImageWidth, Context->ImageHeight))
     {
         PhImageListReplace(Context->ImageListHandle, 1, bitmap, NULL);
         DeleteBitmap(bitmap);
@@ -481,8 +342,8 @@ VOID PhpSearchDrawButton(
             Context->ImageListHandle,
             0,
             Hdc,
-            ButtonRect.left + 1, // offset
-            ButtonRect.top,
+            ButtonRect.left + 1 /*offset*/ + ((ButtonRect.right - ButtonRect.left) - Context->ImageWidth) / 2,
+            ButtonRect.top + ((ButtonRect.bottom - ButtonRect.top) - Context->ImageHeight) / 2,
             ILD_TRANSPARENT,
             FALSE
             );
@@ -493,8 +354,8 @@ VOID PhpSearchDrawButton(
             Context->ImageListHandle,
             1,
             Hdc,
-            ButtonRect.left + 2, // offset
-            ButtonRect.top + 1, // offset
+            ButtonRect.left + 2 /*offset*/ + ((ButtonRect.right - ButtonRect.left) - Context->ImageWidth) / 2,
+            ButtonRect.top + 1 /*offset*/ + ((ButtonRect.bottom - ButtonRect.top) - Context->ImageHeight) / 2,
             ILD_TRANSPARENT,
             FALSE
             );
@@ -547,6 +408,20 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
         break;
     case WM_ERASEBKGND:
         return 1;
+    case WM_DPICHANGED:
+        {
+            PhpSearchFreeTheme(context);
+            PhpSearchInitializeTheme(context, hWnd);
+            PhpSearchInitializeFont(context, hWnd);
+            PhpSearchInitializeImages(context, hWnd);
+
+            // Refresh the non-client area.
+            SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+
+            // Force the edit control to update its non-client area.
+            RedrawWindow(hWnd, NULL, NULL, RDW_FRAME | RDW_INVALIDATE);
+        }
+        break;
     case WM_NCCALCSIZE:
         {
             LPNCCALCSIZE_PARAMS ncCalcSize = (NCCALCSIZE_PARAMS*)lParam;
@@ -571,11 +446,10 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
             if (updateRegion == (HRGN)1) // HRGN_FULL
                 updateRegion = NULL;
 
-            // Note the use of undocumented flags below. GetDCEx doesn't work without these.
-            flags = DCX_WINDOW | DCX_LOCKWINDOWUPDATE | 0x10000;
+            flags = DCX_WINDOW | DCX_LOCKWINDOWUPDATE | DCX_USESTYLE;
 
             if (updateRegion)
-                flags |= DCX_INTERSECTRGN | 0x40000;
+                flags |= DCX_INTERSECTRGN | DCX_NODELETERGN;
 
             if (hdc = GetDCEx(hWnd, updateRegion, flags))
             {
@@ -587,7 +461,7 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
                 // Get the screen coordinates of the window.
                 GetWindowRect(hWnd, &windowRect);
                 // Adjust the coordinates (start from 0,0).
-                PhOffsetRect(&windowRect, -windowRect.left, -windowRect.top);   
+                PhOffsetRect(&windowRect, -windowRect.left, -windowRect.top);
                 buttonRect = windowRect;
                 // Get the position of the inserted button.
                 PhpSearchGetButtonRect(context, &buttonRect);
@@ -954,39 +828,13 @@ LRESULT CALLBACK PhpSearchWndSubclassProc(
             PWSTR text = (PWSTR)lParam;
 
             PhMoveReference(&context->CueBannerText, PhCreateString(text));
-            
+
             RedrawWindow(hWnd, NULL, NULL, RDW_FRAME | RDW_INVALIDATE);
         }
         return TRUE;
     }
 
     return CallWindowProc(oldWndProc, hWnd, uMsg, wParam, lParam);
-}
-
-HICON PhpSearchBitmapToIcon(
-    _In_ HBITMAP BitmapHandle,
-    _In_ INT Width,
-    _In_ INT Height
-    )
-{
-    HICON icon;
-    HDC screenDc;
-    HBITMAP screenBitmap;
-    ICONINFO iconInfo = { 0 };
-
-    screenDc = CreateCompatibleDC(NULL);
-    screenBitmap = CreateCompatibleBitmap(screenDc, Width, Height);
-
-    iconInfo.fIcon = TRUE;
-    iconInfo.hbmColor = BitmapHandle;
-    iconInfo.hbmMask = screenBitmap;
-
-    icon = CreateIconIndirect(&iconInfo);
-
-    DeleteBitmap(screenBitmap);
-    DeleteDC(screenDc);
-
-    return icon;
 }
 
 VOID PvCreateSearchControl(
@@ -1001,7 +849,7 @@ VOID PvCreateSearchControl(
     context->ColorMode = PhGetIntegerSetting(L"GraphColorMode");
 
     //PhpSearchInitializeTheme(context);
-    PhpSearchInitializeImages(context);
+    PhpSearchInitializeImages(context, WindowHandle);
 
     // Set initial text
     if (BannerText)

@@ -21,6 +21,7 @@
 #include <refp.h>
 #include <settings.h>
 #include <symprv.h>
+#include <mapldr.h>
 #include <workqueue.h>
 #include <workqueuep.h>
 
@@ -469,7 +470,8 @@ static VOID PhStartStopwatch(
     _Inout_ PSTOPWATCH Stopwatch
     )
 {
-    NtQueryPerformanceCounter(&Stopwatch->StartCounter, &Stopwatch->Frequency);
+    PhQueryPerformanceCounter(&Stopwatch->StartCounter);
+    PhQueryPerformanceFrequency(&Stopwatch->Frequency);
 }
 
 static VOID PhStopStopwatch(
@@ -673,7 +675,7 @@ NTSTATUS PhpDebugConsoleThreadStart(
 
         if (NT_SUCCESS(PhQueryEnvironmentVariable(NULL, &variableNameSr, &variableValue)))
         {
-            PPH_STRING currentDirectory = PhGetApplicationDirectory();
+            PPH_STRING currentDirectory = PhGetApplicationDirectoryWin32();
             PPH_STRING currentSearchPath = PhGetStringSetting(L"DbgHelpSearchPath");
 
             if (currentSearchPath->Length != 0)

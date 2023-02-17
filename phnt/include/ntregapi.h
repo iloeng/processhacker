@@ -37,7 +37,7 @@ typedef struct _KEY_BASIC_INFORMATION
     LARGE_INTEGER LastWriteTime;
     ULONG TitleIndex;
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
 } KEY_BASIC_INFORMATION, *PKEY_BASIC_INFORMATION;
 
 typedef struct _KEY_NODE_INFORMATION
@@ -47,7 +47,7 @@ typedef struct _KEY_NODE_INFORMATION
     ULONG ClassOffset;
     ULONG ClassLength;
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
     // ...
     // WCHAR Class[1];
 } KEY_NODE_INFORMATION, *PKEY_NODE_INFORMATION;
@@ -59,18 +59,18 @@ typedef struct _KEY_FULL_INFORMATION
     ULONG ClassOffset;
     ULONG ClassLength;
     ULONG SubKeys;
-    ULONG MaxNameLen;
-    ULONG MaxClassLen;
+    ULONG MaxNameLength;
+    ULONG MaxClassLength;
     ULONG Values;
-    ULONG MaxValueNameLen;
-    ULONG MaxValueDataLen;
+    ULONG MaxValueNameLength;
+    ULONG MaxValueDataLength;
     WCHAR Class[1];
 } KEY_FULL_INFORMATION, *PKEY_FULL_INFORMATION;
 
 typedef struct _KEY_NAME_INFORMATION
 {
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
 } KEY_NAME_INFORMATION, *PKEY_NAME_INFORMATION;
 
 typedef struct _KEY_CACHED_INFORMATION
@@ -78,12 +78,12 @@ typedef struct _KEY_CACHED_INFORMATION
     LARGE_INTEGER LastWriteTime;
     ULONG TitleIndex;
     ULONG SubKeys;
-    ULONG MaxNameLen;
+    ULONG MaxNameLength;
     ULONG Values;
-    ULONG MaxValueNameLen;
-    ULONG MaxValueDataLen;
+    ULONG MaxValueNameLength;
+    ULONG MaxValueDataLength;
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
 } KEY_CACHED_INFORMATION, *PKEY_CACHED_INFORMATION;
 
 // rev
@@ -195,7 +195,7 @@ typedef struct _KEY_VALUE_BASIC_INFORMATION
     ULONG TitleIndex;
     ULONG Type;
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
 } KEY_VALUE_BASIC_INFORMATION, *PKEY_VALUE_BASIC_INFORMATION;
 
 typedef struct _KEY_VALUE_FULL_INFORMATION
@@ -205,7 +205,7 @@ typedef struct _KEY_VALUE_FULL_INFORMATION
     ULONG DataOffset;
     ULONG DataLength;
     ULONG NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
     // ...
     // UCHAR Data[1];
 } KEY_VALUE_FULL_INFORMATION, *PKEY_VALUE_FULL_INFORMATION;
@@ -215,14 +215,14 @@ typedef struct _KEY_VALUE_PARTIAL_INFORMATION
     ULONG TitleIndex;
     ULONG Type;
     ULONG DataLength;
-    UCHAR Data[1];
+    _Field_size_bytes_(DataLength) UCHAR Data[1];
 } KEY_VALUE_PARTIAL_INFORMATION, *PKEY_VALUE_PARTIAL_INFORMATION;
 
 typedef struct _KEY_VALUE_PARTIAL_INFORMATION_ALIGN64
 {
     ULONG Type;
     ULONG DataLength;
-    UCHAR Data[1];
+    _Field_size_bytes_(DataLength) UCHAR Data[1];
 } KEY_VALUE_PARTIAL_INFORMATION_ALIGN64, *PKEY_VALUE_PARTIAL_INFORMATION_ALIGN64;
 
 // private
@@ -486,7 +486,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtCompressKey(
-    _In_ HANDLE Key
+    _In_ HANDLE KeyHandle
     );
 
 NTSYSCALLAPI
@@ -519,7 +519,7 @@ NtLoadKeyEx(
     _Out_opt_ PHANDLE RootHandle,
     _Reserved_ PVOID Reserved // previously PIO_STATUS_BLOCK
     );
-       
+
 // rev by tyranid
 #if (PHNT_VERSION >= PHNT_20H1)
 NTSYSCALLAPI
@@ -710,7 +710,7 @@ NTSTATUS NtCreateRegistryTransaction(
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjAttributes,
     _Reserved_ ULONG CreateOptions
-    );     
+    );
 #endif
 
 #if (PHNT_VERSION >= PHNT_REDSTONE)

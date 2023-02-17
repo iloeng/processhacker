@@ -6,13 +6,14 @@
  * Authors:
  *
  *     wj32    2010-2012
- *     dmex    2019-2021
+ *     dmex    2019-2023
  *
  */
 
 #include <ph.h>
 #include <subprocesstag.h>
 #include <svcsup.h>
+#include <mapldr.h>
 
 #define SIP(String, Integer) \
     { (String), (PVOID)(Integer) }
@@ -241,6 +242,13 @@ SC_HANDLE PhOpenService(
     serviceHandle = OpenService(PhGetServiceManagerHandle(), ServiceName, DesiredAccess);
 
     return serviceHandle;
+}
+
+VOID PhCloseServiceHandle(
+    _In_ SC_HANDLE ServiceHandle
+    )
+{
+    CloseServiceHandle(ServiceHandle);
 }
 
 PVOID PhGetServiceConfig(
@@ -603,6 +611,109 @@ NTSTATUS PhGetThreadServiceTag(
     return status;
 }
 
+PPH_STRING PhGetServiceKeyName(
+    _In_ PPH_STRINGREF ServiceName
+    )
+{
+    static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
+
+    return PhConcatStringRef2(&servicesKeyName, ServiceName);
+}
+
+PPH_STRING PhGetServiceHandleFileName(
+    _In_ SC_HANDLE ServiceHandle,
+    _In_ PPH_STRINGREF ServiceName
+    )
+{
+    PPH_STRING fileName = NULL;
+    LPQUERY_SERVICE_CONFIG config;
+
+    if (config = PhGetServiceConfig(ServiceHandle))
+    {
+        PhGetServiceDllParameter(config->dwServiceType, ServiceName, &fileName);
+
+        if (!fileName)
+        {
+            PPH_STRING commandLine;
+
+            if (config->lpBinaryPathName[0])
+            {
+                commandLine = PhCreateString(config->lpBinaryPathName);
+
+                if (config->dwServiceType & SERVICE_WIN32)
+                {
+                    PH_STRINGREF dummyFileName;
+                    PH_STRINGREF dummyArguments;
+
+                    PhParseCommandLineFuzzy(&commandLine->sr, &dummyFileName, &dummyArguments, &fileName);
+
+                    if (!fileName)
+                        PhSwapReference(&fileName, commandLine);
+                }
+                else
+                {
+                    fileName = PhGetFileName(commandLine);
+                }
+
+                PhDereferenceObject(commandLine);
+            }
+        }
+
+        PhFree(config);
+    }
+
+    return fileName;
+}
+
+PPH_STRING PhGetServiceFileName(
+    _In_ PPH_STRINGREF ServiceName
+    )
+{
+    PPH_STRING fileName = NULL;
+    PPH_STRING serviceDllString = NULL;
+    NTSTATUS status;
+    HANDLE keyHandle;
+    PPH_STRING keyName;
+
+    keyName = PhGetServiceKeyName(ServiceName);
+
+    status = PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &keyName->sr,
+        0
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (serviceDllString = PhQueryRegistryString(keyHandle, L"ImagePath"))
+        {
+            PPH_STRING expandedString;
+
+            if (expandedString = PhExpandEnvironmentStrings(&serviceDllString->sr))
+            {
+                PhMoveReference(&serviceDllString, expandedString);
+            }
+        }
+        else
+        {
+            status = STATUS_NOT_FOUND;
+        }
+
+        NtClose(keyHandle);
+    }
+
+    PhDereferenceObject(keyName);
+
+    if (NT_SUCCESS(status))
+    {
+        return serviceDllString;
+    }
+
+    return NULL;
+}
+
 NTSTATUS PhpGetServiceDllName(
     _In_ PPH_STRING ServiceKeyName,
     _Out_ PPH_STRING* ServiceDll
@@ -653,10 +764,10 @@ NTSTATUS PhGetServiceDllParameter(
     _Out_ PPH_STRING *ServiceDll
     )
 {
-    static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
     static PH_STRINGREF parameters = PH_STRINGREF_INIT(L"\\Parameters");
     NTSTATUS status;
     PPH_STRING serviceDllString;
+    PPH_STRING serviceKeyName;
     PPH_STRING keyName;
 
     if (ServiceType & SERVICE_USERSERVICE_INSTANCE)
@@ -670,20 +781,29 @@ NTSTATUS PhGetServiceDllParameter(
         // and we need to parse the user service template and query the "host service instance" configuration. (hsebs)
 
         if (PhSplitStringRefAtLastChar(ServiceName, L'_', &hostServiceName, &userSessionLuid))
-            keyName = PhConcatStringRef3(&servicesKeyName, &hostServiceName, &parameters);
+        {
+            serviceKeyName = PhGetServiceKeyName(&hostServiceName);
+            keyName = PhConcatStringRef2(&serviceKeyName->sr, &parameters);
+        }
         else
-            keyName = PhConcatStringRef3(&servicesKeyName, ServiceName, &parameters);
+        {
+            serviceKeyName = PhGetServiceKeyName(ServiceName);
+            keyName = PhConcatStringRef2(&serviceKeyName->sr, &parameters);
+        }
     }
     else
     {
-        keyName = PhConcatStringRef3(&servicesKeyName, ServiceName, &parameters);
+        serviceKeyName = PhGetServiceKeyName(ServiceName);
+        keyName = PhConcatStringRef2(&serviceKeyName->sr, &parameters);
     }
 
     status = PhpGetServiceDllName(
         keyName,
         &serviceDllString
         );
+
     PhDereferenceObject(keyName);
+    PhDereferenceObject(serviceKeyName);
 
     if (NT_SUCCESS(status))
     {
@@ -696,16 +816,14 @@ NTSTATUS PhGetServiceDllParameter(
         (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_NOT_FOUND)
         )
     {
-        // Windows 8 places the ServiceDll for some services in the root key. (dmex)
-        keyName = PhConcatStringRef2(
-            &servicesKeyName,
-            ServiceName
-            );
+        keyName = PhGetServiceKeyName(ServiceName);
 
+        // Windows 8 places the ServiceDll for some services in the root key. (dmex)
         status = PhpGetServiceDllName(
             keyName,
             &serviceDllString
             );
+
         PhDereferenceObject(keyName);
 
         if (NT_SUCCESS(status))

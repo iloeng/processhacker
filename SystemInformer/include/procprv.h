@@ -10,6 +10,35 @@ extern PH_QUEUED_LOCK PhProcessRecordListLock;
 extern ULONG PhStatisticsSampleCount;
 extern BOOLEAN PhEnablePurgeProcessRecords;
 extern BOOLEAN PhEnableCycleCpuUsage;
+extern BOOLEAN PhEnablePackageIconSupport;
+
+typedef enum _PH_PROCESS_PROVIDER_FLAG
+{
+    PH_PROCESS_PROVIDER_FLAG_WSCOUNTERS = 0x1,
+    PH_PROCESS_PROVIDER_FLAG_GDIUSERHANDLES = 0x2,
+    PH_PROCESS_PROVIDER_FLAG_IOPAGEPRIORITY = 0x4,
+    PH_PROCESS_PROVIDER_FLAG_WINDOW = 0x8,
+    PH_PROCESS_PROVIDER_FLAG_DEPSTATUS = 0x10,
+    PH_PROCESS_PROVIDER_FLAG_TOKEN = 0x20,
+    PH_PROCESS_PROVIDER_FLAG_OSCONTEXT = 0x40,
+    PH_PROCESS_PROVIDER_FLAG_QUOTALIMITS = 0x80,
+    PH_PROCESS_PROVIDER_FLAG_IMAGE = 0x100,
+    PH_PROCESS_PROVIDER_FLAG_APPID = 0x200,
+    PH_PROCESS_PROVIDER_FLAG_DPIAWARENESS = 0x400,
+    PH_PROCESS_PROVIDER_FLAG_FILEATTRIBUTES = 0x800,
+    PH_PROCESS_PROVIDER_FLAG_DESKTOPINFO = 0x1000,
+    PH_PROCESS_PROVIDER_FLAG_USERNAME = 0x2000,
+    PH_PROCESS_PROVIDER_FLAG_CRITICAL = 0x4000,
+    PH_PROCESS_PROVIDER_FLAG_ERRORMODE = 0x8000,
+    PH_PROCESS_PROVIDER_FLAG_CODEPAGE = 0x10000,
+    PH_PROCESS_PROVIDER_FLAG_POWERTHROTTLING = 0x20000,
+    PH_PROCESS_PROVIDER_FLAG_PRIORITYBOOST = 0x40000,
+    PH_PROCESS_PROVIDER_FLAG_CFGUARD = 0x80000,
+    PH_PROCESS_PROVIDER_FLAG_CET = 0x100000,
+    PH_PROCESS_PROVIDER_FLAG_AVERAGE = 0x200000,
+} PH_PROCESS_PROVIDER_FLAG;
+
+extern ULONG PhProcessProviderFlagsMask;
 
 extern PVOID PhProcessInformation; // only can be used if running on same thread as process provider
 extern ULONG PhProcessInformationSequenceNumber;
@@ -169,17 +198,18 @@ typedef struct _PH_PROCESS_ITEM
             ULONG IsProtectedProcess : 1;
             ULONG IsSecureProcess : 1;
             ULONG IsSubsystemProcess : 1;
+            ULONG IsPackagedProcess : 1;
             ULONG IsControlFlowGuardEnabled : 1;
             ULONG IsCetEnabled : 1;
             ULONG IsXfgEnabled : 1;
             ULONG IsXfgAuditEnabled : 1;
-            ULONG Spare : 11;
+            ULONG Spare : 10;
         };
     };
 
     // Misc.
 
-    ULONG JustProcessed;
+    volatile LONG JustProcessed;
     PH_EVENT Stage1Event;
 
     PPH_POINTER_LIST ServiceList;
@@ -201,6 +231,7 @@ typedef struct _PH_PROCESS_ITEM
     FLOAT CpuUsage; // Below Windows 7, sum of kernel and user CPU usage; above Windows 7, cycle-based CPU usage.
     FLOAT CpuKernelUsage;
     FLOAT CpuUserUsage;
+    FLOAT CpuAverageUsage;
 
     PH_UINT64_DELTA CpuKernelDelta;
     PH_UINT64_DELTA CpuUserDelta;
@@ -317,7 +348,7 @@ PHAPPAPI
 PPH_PROCESS_ITEM
 NTAPI
 PhReferenceProcessItem(
-    _In_ HANDLE ProcessId
+    _In_opt_ HANDLE ProcessId
     );
 
 PHAPPAPI
@@ -351,6 +382,7 @@ VOID PhFlushVerifyCache(
 
 // begin_phapppub
 PHAPPAPI
+_Success_(return)
 BOOLEAN
 NTAPI
 PhGetStatisticsTime(
@@ -443,7 +475,7 @@ PHAPPAPI
 VOID
 NTAPI
 PhProcessImageListInitialization(
-    VOID
+    _In_ HWND hwnd
     );
 
 PHAPPAPI
@@ -451,7 +483,10 @@ PPH_IMAGELIST_ITEM
 NTAPI
 PhImageListExtractIcon(
     _In_ PPH_STRING FileName,
-    _In_ BOOLEAN NativeFileName
+    _In_ BOOLEAN NativeFileName,
+    _In_opt_ HANDLE ProcessId,
+    _In_opt_ PPH_STRING PackageFullName,
+    _In_ LONG SystemDpi
     );
 
 PHAPPAPI

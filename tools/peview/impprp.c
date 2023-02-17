@@ -504,6 +504,8 @@ INT_PTR CALLBACK PvPeImportsDlgProc(
         {
             PhSaveSettingsImportList(context);
             PvDeleteImportTree(context);
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
         }
         break;
     case WM_SHOWWINDOW:
@@ -966,7 +968,7 @@ BOOLEAN NTAPI PvImportTreeNewCallback(
             SendMessage(context->ParentWindowHandle, WM_PV_SEARCH_SHOWMENU, 0, (LPARAM)contextMenu);
         }
         return TRUE;
-    case TreeNewHeaderRightClick: 
+    case TreeNewHeaderRightClick:
         {
             PH_TN_COLUMN_MENU_DATA data;
 
@@ -974,7 +976,7 @@ BOOLEAN NTAPI PvImportTreeNewCallback(
             data.MouseEvent = Parameter1;
             data.DefaultSortColumn = 0;
             data.DefaultSortOrder = AscendingSortOrder;
-            PhInitializeTreeNewColumnMenu(&data);
+            PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
                 PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);

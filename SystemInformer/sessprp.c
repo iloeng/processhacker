@@ -6,14 +6,13 @@
  * Authors:
  *
  *     wj32    2010
- *     dmex    2018-2022
+ *     dmex    2018-2023
  *
  */
 
 #include <phapp.h>
 #include <emenu.h>
 #include <phsettings.h>
-
 #include <winsta.h>
 
 INT_PTR CALLBACK PhpSessionPropertiesDlgProc(
@@ -44,12 +43,12 @@ VOID PhShowSessionProperties(
     _In_ ULONG SessionId
     )
 {
-    DialogBoxParam(
+    PhDialogBox(
         PhInstanceHandle,
         MAKEINTRESOURCE(IDD_SESSION),
         PhCsForceNoParent ? NULL : ParentWindowHandle,
         PhpSessionPropertiesDlgProc,
-        (LPARAM)SessionId
+        UlongToPtr(SessionId)
         );
 }
 
@@ -515,6 +514,12 @@ INT_PTR CALLBACK PhpSessionPropertiesDlgProc(
             PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;

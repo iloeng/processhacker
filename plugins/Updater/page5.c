@@ -5,50 +5,11 @@
  *
  * Authors:
  *
- *     dmex    2016-202
+ *     dmex    2016-2023
  *
  */
 
 #include "updater.h"
-#include <shellapi.h>
-#include <shlobj.h>
-
-static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
-{
-    { IDYES, L"Install" }
-};
-
-BOOLEAN UpdaterCheckApplicationDirectory(
-    VOID
-    )
-{
-    static PH_STRINGREF fileNameStringRef = PH_STRINGREF_INIT(L"\\test");
-    HANDLE fileHandle;
-    PPH_STRING fileName;
-
-    fileName = PhGetApplicationDirectoryFileNameWin32(&fileNameStringRef);
-
-    if (PhIsNullOrEmptyString(fileName))
-        return FALSE;
-
-    if (NT_SUCCESS(PhCreateFileWin32(
-        &fileHandle,
-        PhGetString(fileName),
-        FILE_GENERIC_WRITE | DELETE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_DELETE,
-        FILE_OPEN_IF,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE
-        )))
-    {
-        PhDereferenceObject(fileName);
-        NtClose(fileHandle);
-        return TRUE;
-    }
-
-    PhDereferenceObject(fileName);
-    return FALSE;
-}
 
 HRESULT CALLBACK FinalTaskDialogCallbackProc(
     _In_ HWND hwndDlg,
@@ -64,7 +25,13 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
     {
     case TDN_NAVIGATED:
         {
-            if (!UpdaterCheckApplicationDirectory())
+            context->DirectoryElevationRequired = !!UpdateCheckDirectoryElevationRequired();
+
+#ifdef FORCE_ELEVATION_CHECK
+            context->DirectoryElevationRequired = TRUE;
+#endif
+
+            if (context->DirectoryElevationRequired)
             {
                 SendMessage(hwndDlg, TDM_SET_BUTTON_ELEVATION_REQUIRED_STATE, IDYES, TRUE);
             }
@@ -81,49 +48,8 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
             }
             else if (buttonId == IDYES)
             {
-                SHELLEXECUTEINFO info = { sizeof(SHELLEXECUTEINFO) };
-                PPH_STRING parameters;
-
-                if (PhIsNullOrEmptyString(context->SetupFilePath))
-                    break;
-
-                parameters = PH_AUTO(PhGetApplicationDirectory());
-                parameters = PH_AUTO(PhBufferToHexString((PUCHAR)parameters->Buffer, (ULONG)parameters->Length));
-                parameters = PH_AUTO(PhConcatStrings(3, L"-update \"", PhGetStringOrEmpty(parameters), L"\""));
-
-                info.lpFile = PhGetStringOrEmpty(context->SetupFilePath);
-                info.lpParameters = PhGetString(parameters);
-                info.lpVerb = UpdaterCheckApplicationDirectory() ? NULL : L"runas";
-                info.nShow = SW_SHOW;
-                info.hwnd = hwndDlg;
-                info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOZONECHECKS;
-
-                ProcessHacker_PrepareForEarlyShutdown();
-
-                if (ShellExecuteEx(&info))
-                {
-                    ProcessHacker_Destroy();
-                }
-                else
-                {
-                    ULONG errorCode = GetLastError();
-
-                    // Install failed, cancel the shutdown.
-                    ProcessHacker_CancelEarlyShutdown();
-
-                    // Show error dialog.
-                    if (errorCode != ERROR_CANCELLED) // Ignore UAC decline.
-                    {
-                        PhShowStatus(hwndDlg, L"Unable to execute the setup.", 0, errorCode);
-
-                        if (context->StartupCheck)
-                            ShowAvailableDialog(context);
-                        else
-                            ShowCheckForUpdatesDialog(context);
-                    }
-
+                if (!UpdateShellExecute(context, hwndDlg))
                     return S_FALSE;
-                }
             }
         }
         break;
@@ -142,6 +68,10 @@ VOID ShowUpdateInstallDialog(
     _In_ PPH_UPDATER_CONTEXT Context
     )
 {
+    TASKDIALOG_BUTTON TaskDialogButtonArray[] =
+    {
+        { IDYES, L"Install" }
+    };
     TASKDIALOGCONFIG config;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
@@ -290,7 +220,7 @@ VOID ShowUpdateFailedDialog(
         if (Context->ErrorCode)
         {
             PPH_STRING errorMessage;
-          
+
             if (errorMessage = PhHttpSocketGetErrorMessage(Context->ErrorCode))
             {
                 config.pszContent = PhaFormatString(L"[%lu] %s", Context->ErrorCode, errorMessage->Buffer)->Buffer;

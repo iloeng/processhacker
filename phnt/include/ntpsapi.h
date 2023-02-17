@@ -14,6 +14,7 @@
 #define PROCESS_VM_OPERATION 0x0008
 #define PROCESS_VM_READ 0x0010
 #define PROCESS_VM_WRITE 0x0020
+//#define PROCESS_DUP_HANDLE 0x0040
 #define PROCESS_CREATE_PROCESS 0x0080
 #define PROCESS_SET_QUOTA 0x0100
 #define PROCESS_SET_INFORMATION 0x0200
@@ -116,7 +117,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessBasePriority, // s: KPRIORITY
     ProcessRaisePriority, // s: ULONG
     ProcessDebugPort, // q: HANDLE
-    ProcessExceptionPort, // s: PROCESS_EXCEPTION_PORT
+    ProcessExceptionPort, // s: PROCESS_EXCEPTION_PORT (requires SeTcbPrivilege)
     ProcessAccessToken, // s: PROCESS_ACCESS_TOKEN
     ProcessLdtInformation, // qs: PROCESS_LDT_INFORMATION // 10
     ProcessLdtSize, // s: PROCESS_LDT_SIZE
@@ -129,7 +130,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessPriorityClass, // qs: PROCESS_PRIORITY_CLASS
     ProcessWx86Information, // qs: ULONG (requires SeTcbPrivilege) (VdmAllowed)
     ProcessHandleCount, // q: ULONG, PROCESS_HANDLE_INFORMATION // 20
-    ProcessAffinityMask, // qs: KAFFINITY, qs: GROUP_AFFINITY
+    ProcessAffinityMask, // (q >WIN7)s: KAFFINITY, qs: GROUP_AFFINITY
     ProcessPriorityBoost, // qs: ULONG
     ProcessDeviceMap, // qs: PROCESS_DEVICEMAP_INFORMATION, PROCESS_DEVICEMAP_INFORMATION_EX
     ProcessSessionInformation, // q: PROCESS_SESSION_INFORMATION
@@ -143,11 +144,11 @@ typedef enum _PROCESSINFOCLASS
     ProcessHandleTracing, // q: PROCESS_HANDLE_TRACING_QUERY; s: size 0 disables, otherwise enables
     ProcessIoPriority, // qs: IO_PRIORITY_HINT
     ProcessExecuteFlags, // qs: ULONG
-    ProcessTlsInformation, // PROCESS_TLS_INFORMATION // ProcessResourceManagement 
+    ProcessTlsInformation, // PROCESS_TLS_INFORMATION // ProcessResourceManagement
     ProcessCookie, // q: ULONG
     ProcessImageInformation, // q: SECTION_IMAGE_INFORMATION
     ProcessCycleTime, // q: PROCESS_CYCLE_TIME_INFORMATION // since VISTA
-    ProcessPagePriority, // q: PAGE_PRIORITY_INFORMATION
+    ProcessPagePriority, // qs: PAGE_PRIORITY_INFORMATION
     ProcessInstrumentationCallback, // s: PVOID or PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION // 40
     ProcessThreadStackAllocation, // s: PROCESS_STACK_ALLOCATION_INFORMATION, PROCESS_STACK_ALLOCATION_INFORMATION_EX
     ProcessWorkingSetWatchEx, // q: PROCESS_WS_WATCH_INFORMATION_EX[]
@@ -157,7 +158,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessMemoryAllocationMode, // qs: PROCESS_MEMORY_ALLOCATION_MODE
     ProcessGroupInformation, // q: USHORT[]
     ProcessTokenVirtualizationEnabled, // s: ULONG
-    ProcessConsoleHostProcess, // q: ULONG_PTR // ProcessOwnerInformation
+    ProcessConsoleHostProcess, // qs: ULONG_PTR // ProcessOwnerInformation
     ProcessWindowInformation, // q: PROCESS_WINDOW_INFORMATION // 50
     ProcessHandleInformation, // q: PROCESS_HANDLE_SNAPSHOT_INFORMATION // since WIN8
     ProcessMitigationPolicy, // s: PROCESS_MITIGATION_POLICY_INFORMATION
@@ -165,7 +166,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessHandleCheckingMode, // qs: ULONG; s: 0 disables, otherwise enables
     ProcessKeepAliveCount, // q: PROCESS_KEEPALIVE_COUNT_INFORMATION
     ProcessRevokeFileHandles, // s: PROCESS_REVOKE_FILE_HANDLES_INFORMATION
-    ProcessWorkingSetControl, // s: PROCESS_WORKING_SET_CONTROL
+    ProcessWorkingSetControl, // s: PROCESS_WORKING_SET_CONTROL (requires SeDebugPrivilege)
     ProcessHandleTable, // q: ULONG[] // since WINBLUE
     ProcessCheckStackExtentsMode, // qs: ULONG // KPROCESS->CheckStackExtents (CFG)
     ProcessCommandLineInformation, // q: UNICODE_STRING // 60
@@ -208,7 +209,7 @@ typedef enum _PROCESSINFOCLASS
     ProcessLeapSecondInformation, // PROCESS_LEAP_SECOND_INFORMATION
     ProcessFiberShadowStackAllocation, // PROCESS_FIBER_SHADOW_STACK_ALLOCATION_INFORMATION // since 19H1
     ProcessFreeFiberShadowStackAllocation, // PROCESS_FREE_FIBER_SHADOW_STACK_ALLOCATION_INFORMATION
-    ProcessAltSystemCallInformation, // qs: BOOLEAN (kernel-mode only) // INT2E // since 20H1 // 100
+    ProcessAltSystemCallInformation, // since 20H1 // 100
     ProcessDynamicEHContinuationTargets, // PROCESS_DYNAMIC_EH_CONTINUATION_TARGETS_INFORMATION
     ProcessDynamicEnforcedCetCompatibleRanges, // PROCESS_DYNAMIC_ENFORCED_ADDRESS_RANGE_INFORMATION // since 20H2
     ProcessCreateStateChange, // since WIN11
@@ -216,10 +217,10 @@ typedef enum _PROCESSINFOCLASS
     ProcessEnableOptionalXStateFeatures,
     ProcessAltPrefetchParam, // since 22H1
     ProcessAssignCpuPartitions,
-    ProcessPriorityClassEx,
-    ProcessMembershipInformation,
-    ProcessEffectiveIoPriority,
-    ProcessEffectivePagePriority,
+    ProcessPriorityClassEx, // s: PROCESS_PRIORITY_CLASS_EX
+    ProcessMembershipInformation, // PROCESS_MEMBERSHIP_INFORMATION
+    ProcessEffectiveIoPriority, // q: IO_PRIORITY_HINT
+    ProcessEffectivePagePriority, // q: ULONG
     MaxProcessInfoClass
 } PROCESSINFOCLASS;
 #endif
@@ -242,7 +243,7 @@ typedef enum _THREADINFOCLASS
     ThreadAmILastThread, // q: ULONG
     ThreadIdealProcessor, // s: ULONG
     ThreadPriorityBoost, // qs: ULONG
-    ThreadSetTlsArrayAddress, // s: ULONG_PTR 
+    ThreadSetTlsArrayAddress, // s: ULONG_PTR
     ThreadIsIoPending, // q: ULONG
     ThreadHideFromDebugger, // q: BOOLEAN; s: void
     ThreadBreakOnTermination, // qs: ULONG
@@ -251,12 +252,12 @@ typedef enum _THREADINFOCLASS
     ThreadLastSystemCall, // q: THREAD_LAST_SYSCALL_INFORMATION
     ThreadIoPriority, // qs: IO_PRIORITY_HINT (requires SeIncreaseBasePriorityPrivilege)
     ThreadCycleTime, // q: THREAD_CYCLE_TIME_INFORMATION
-    ThreadPagePriority, // q: ULONG
+    ThreadPagePriority, // qs: PAGE_PRIORITY_INFORMATION
     ThreadActualBasePriority, // s: LONG (requires SeIncreaseBasePriorityPrivilege)
     ThreadTebInformation, // q: THREAD_TEB_INFORMATION (requires THREAD_GET_CONTEXT + THREAD_SET_CONTEXT)
     ThreadCSwitchMon,
     ThreadCSwitchPmu,
-    ThreadWow64Context, // qs: WOW64_CONTEXT
+    ThreadWow64Context, // qs: WOW64_CONTEX, ARM_NT_CONTEXT since 20H1
     ThreadGroupInformation, // qs: GROUP_AFFINITY // 30
     ThreadUmsInformation, // q: THREAD_UMS_INFORMATION
     ThreadCounterProfiling, // q: BOOLEAN; s: THREAD_PROFILING_INFORMATION?
@@ -281,8 +282,8 @@ typedef enum _THREADINFOCLASS
     ThreadCreateStateChange, // since WIN11
     ThreadApplyStateChange,
     ThreadStrongerBadHandleChecks, // since 22H1
-    ThreadEffectiveIoPriority,
-    ThreadEffectivePagePriority,
+    ThreadEffectiveIoPriority, // q: IO_PRIORITY_HINT
+    ThreadEffectivePagePriority, // q: ULONG
     MaxThreadInfoClass
 } THREADINFOCLASS;
 #endif
@@ -395,7 +396,7 @@ typedef struct _POOLED_USAGE_AND_LIMITS
 #define PROCESS_EXCEPTION_PORT_ALL_STATE_BITS 0x00000003
 #define PROCESS_EXCEPTION_PORT_ALL_STATE_FLAGS ((ULONG_PTR)((1UL << PROCESS_EXCEPTION_PORT_ALL_STATE_BITS) - 1))
 
-typedef struct _PROCESS_EXCEPTION_PORT 
+typedef struct _PROCESS_EXCEPTION_PORT
 {
     _In_ HANDLE ExceptionPortHandle; // Handle to the exception port. No particular access required.
     _Inout_ ULONG StateFlags; // Miscellaneous state flags to be cached along with the exception port in the kernel.
@@ -448,6 +449,21 @@ typedef struct _PROCESS_PRIORITY_CLASS
     BOOLEAN Foreground;
     UCHAR PriorityClass;
 } PROCESS_PRIORITY_CLASS, *PPROCESS_PRIORITY_CLASS;
+
+typedef struct _PROCESS_PRIORITY_CLASS_EX
+{
+    union
+    {
+        struct
+        {
+            USHORT ForegroundValid : 1;
+            USHORT PriorityClassValid : 1;
+        };
+        USHORT AllFlags;
+    };
+    UCHAR PriorityClass;
+    BOOLEAN Foreground;
+} PROCESS_PRIORITY_CLASS_EX, *PPROCESS_PRIORITY_CLASS_EX;
 
 typedef struct _PROCESS_FOREGROUND_BACKGROUND
 {
@@ -532,7 +548,7 @@ typedef struct _PROCESS_HANDLE_TRACING_QUERY
 {
     HANDLE Handle;
     ULONG TotalTraces;
-    PROCESS_HANDLE_TRACING_ENTRY HandleTrace[1];
+    _Field_size_(TotalTraces) PROCESS_HANDLE_TRACING_ENTRY HandleTrace[1];
 } PROCESS_HANDLE_TRACING_QUERY, *PPROCESS_HANDLE_TRACING_QUERY;
 
 #endif
@@ -562,7 +578,7 @@ typedef struct _PROCESS_TLS_INFORMATION
     ULONG ThreadDataCount;
     ULONG TlsIndex;
     ULONG PreviousCount;
-    THREAD_TLS_INFORMATION ThreadData[1];
+    _Field_size_(ThreadDataCount) THREAD_TLS_INFORMATION ThreadData[1];
 } PROCESS_TLS_INFORMATION, *PPROCESS_TLS_INFORMATION;
 
 // private
@@ -633,7 +649,7 @@ typedef struct _PROCESS_WINDOW_INFORMATION
 {
     ULONG WindowFlags;
     USHORT WindowTitleLength;
-    WCHAR WindowTitle[1];
+    _Field_size_bytes_(WindowTitleLength) WCHAR WindowTitle[1];
 } PROCESS_WINDOW_INFORMATION, *PPROCESS_WINDOW_INFORMATION;
 
 // private
@@ -653,7 +669,7 @@ typedef struct _PROCESS_HANDLE_SNAPSHOT_INFORMATION
 {
     ULONG_PTR NumberOfHandles;
     ULONG_PTR Reserved;
-    PROCESS_HANDLE_TABLE_ENTRY_INFO Handles[1];
+    _Field_size_(NumberOfHandles) PROCESS_HANDLE_TABLE_ENTRY_INFO Handles[1];
 } PROCESS_HANDLE_SNAPSHOT_INFORMATION, *PPROCESS_HANDLE_SNAPSHOT_INFORMATION;
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
@@ -838,7 +854,8 @@ typedef struct _PROCESS_CHILD_PROCESS_INFORMATION
 #define POWER_THROTTLING_PROCESS_CURRENT_VERSION 1
 #define POWER_THROTTLING_PROCESS_EXECUTION_SPEED 0x1
 #define POWER_THROTTLING_PROCESS_DELAYTIMERS 0x2
-#define POWER_THROTTLING_PROCESS_VALID_FLAGS ((POWER_THROTTLING_PROCESS_EXECUTION_SPEED | POWER_THROTTLING_PROCESS_DELAYTIMERS))
+#define POWER_THROTTLING_PROCESS_IGNORE_TIMER_RESOLUTION 0x4 // since WIN11
+#define POWER_THROTTLING_PROCESS_VALID_FLAGS ((POWER_THROTTLING_PROCESS_EXECUTION_SPEED | POWER_THROTTLING_PROCESS_DELAYTIMERS | POWER_THROTTLING_PROCESS_IGNORE_TIMER_RESOLUTION))
 
 typedef struct _POWER_THROTTLING_PROCESS_STATE
 {
@@ -923,7 +940,7 @@ typedef struct _PROCESS_UPTIME_INFORMATION
         ULONG HangCount : 4;
         ULONG GhostCount : 4;
         ULONG Crashed : 1;
-        ULONG Terminated : 1;       
+        ULONG Terminated : 1;
     };
 } PROCESS_UPTIME_INFORMATION, *PPROCESS_UPTIME_INFORMATION;
 
@@ -1002,6 +1019,12 @@ typedef struct _PROCESS_FREE_FIBER_SHADOW_STACK_ALLOCATION_INFORMATION
 //    ULONG Reserved2;
 //    PPROCESS_DYNAMIC_ENFORCED_ADDRESS_RANGE Ranges;
 //} PROCESS_DYNAMIC_ENFORCED_ADDRESS_RANGES_INFORMATION, *PPROCESS_DYNAMIC_ENFORCED_ADDRESS_RANGES_INFORMATION;
+
+// private
+typedef struct _PROCESS_MEMBERSHIP_INFORMATION
+{
+    ULONG ServerSiloId;
+} PROCESS_MEMBERSHIP_INFORMATION, *PPROCESS_MEMBERSHIP_INFORMATION;
 
 // end_private
 
@@ -1172,7 +1195,7 @@ typedef struct _RTL_WORK_ON_BEHALF_TICKET_EX
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 // private
-typedef enum _SUBSYSTEM_INFORMATION_TYPE 
+typedef enum _SUBSYSTEM_INFORMATION_TYPE
 {
     SubsystemInformationTypeWin32,
     SubsystemInformationTypeWSL,
@@ -1187,6 +1210,89 @@ typedef enum _THREAD_WORKLOAD_CLASS
     ThreadWorkloadClassGraphics,
     MaxThreadWorkloadClass
 } THREAD_WORKLOAD_CLASS;
+
+#if defined(_ARM64_)
+
+#define CONTEXT_ARM   0x00200000L
+
+#define CONTEXT_ARM_CONTROL (CONTEXT_ARM | 0x1L)
+#define CONTEXT_ARM_INTEGER (CONTEXT_ARM | 0x2L)
+#define CONTEXT_ARM_FLOATING_POINT  (CONTEXT_ARM | 0x4L)
+#define CONTEXT_ARM_DEBUG_REGISTERS (CONTEXT_ARM | 0x8L)
+
+#define CONTEXT_ARM_FULL (CONTEXT_ARM_CONTROL | CONTEXT_ARM_INTEGER | CONTEXT_ARM_FLOATING_POINT)
+
+#define CONTEXT_ARM_ALL (CONTEXT_ARM_CONTROL | CONTEXT_ARM_INTEGER | CONTEXT_ARM_FLOATING_POINT | CONTEXT_ARM_DEBUG_REGISTERS)
+
+#define ARM_MAX_BREAKPOINTS     8
+#define ARM_MAX_WATCHPOINTS     1
+
+typedef struct _ARM_NT_NEON128 {
+    ULONGLONG Low;
+    LONGLONG High;
+} ARM_NT_NEON128, *PARM_NT_NEON128;
+
+typedef struct DECLSPEC_ALIGN(8) DECLSPEC_NOINITALL _ARM_NT_CONTEXT {
+
+    //
+    // Control flags.
+    //
+
+    DWORD ContextFlags;
+
+    //
+    // Integer registers
+    //
+
+    DWORD R0;
+    DWORD R1;
+    DWORD R2;
+    DWORD R3;
+    DWORD R4;
+    DWORD R5;
+    DWORD R6;
+    DWORD R7;
+    DWORD R8;
+    DWORD R9;
+    DWORD R10;
+    DWORD R11;
+    DWORD R12;
+
+    //
+    // Control Registers
+    //
+
+    DWORD Sp;
+    DWORD Lr;
+    DWORD Pc;
+    DWORD Cpsr;
+
+    //
+    // Floating Point/NEON Registers
+    //
+
+    DWORD Fpscr;
+    DWORD Padding;
+    union {
+        ARM_NT_NEON128 Q[16];
+        ULONGLONG D[32];
+        DWORD S[32];
+    } DUMMYUNIONNAME;
+
+    //
+    // Debug registers
+    //
+
+    DWORD Bvr[ARM_MAX_BREAKPOINTS];
+    DWORD Bcr[ARM_MAX_BREAKPOINTS];
+    DWORD Wvr[ARM_MAX_WATCHPOINTS];
+    DWORD Wcr[ARM_MAX_WATCHPOINTS];
+
+    DWORD Padding2[2];
+
+} ARM_NT_CONTEXT, *PARM_NT_CONTEXT;
+
+#endif
 
 // Processes
 
@@ -1571,7 +1677,7 @@ NtSetLdtEntries(
     _In_ ULONG Entry1Hi
     );
 
-typedef VOID (*PPS_APC_ROUTINE)(
+typedef VOID (NTAPI* PPS_APC_ROUTINE)(
     _In_opt_ PVOID ApcArgument1,
     _In_opt_ PVOID ApcArgument2,
     _In_opt_ PVOID ApcArgument3
@@ -1627,7 +1733,7 @@ NTAPI
 NtQueueApcThreadEx2(
     _In_ HANDLE ThreadHandle,
     _In_opt_ HANDLE ReserveHandle, // NtAllocateReserveObject
-    _In_ QUEUE_USER_APC_FLAGS ApcFlags,
+    _In_ ULONG ApcFlags, // QUEUE_USER_APC_FLAGS
     _In_ PPS_APC_ROUTINE ApcRoutine,
     _In_opt_ PVOID ApcArgument1,
     _In_opt_ PVOID ApcArgument2,
@@ -1744,7 +1850,7 @@ typedef struct _PROC_THREAD_ATTRIBUTE_LIST
     ULONG LastAttribute;
     ULONG SpareUlong0;
     PPROC_THREAD_ATTRIBUTE ExtendedFlagsAttribute;
-    PROC_THREAD_ATTRIBUTE Attributes[1];
+    _Field_size_(AttributeCount) PROC_THREAD_ATTRIBUTE Attributes[1];
 } PROC_THREAD_ATTRIBUTE_LIST, *PPROC_THREAD_ATTRIBUTE_LIST;
 
 // private
@@ -2195,6 +2301,7 @@ NtCreateUserProcess(
 #endif
 
 // begin_rev
+#define THREAD_CREATE_FLAGS_NONE 0x00000000
 #define THREAD_CREATE_FLAGS_CREATE_SUSPENDED 0x00000001 // NtCreateUserProcess & NtCreateThreadEx
 #define THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH 0x00000002 // NtCreateThreadEx only
 #define THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER 0x00000004 // NtCreateThreadEx only
