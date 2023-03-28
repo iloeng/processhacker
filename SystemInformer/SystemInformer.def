@@ -333,6 +333,7 @@ EXPORTS
     PhSetFileAllocationSize
     PhSetFilePosition
     PhSetFileSize
+    PhSetFirmwareEnvironmentVariable
     PhSetObjectSecurity
     PhSetThreadName
     PhSetTokenIsVirtualizationEnabled
@@ -421,6 +422,7 @@ EXPORTS
     PhGetFileVersionInfoString2
     PhGetFullPath
     PhGetKnownFolderPath
+    PhGetKnownLocation
     PhGetMessage
     PhGetNtMessage
     PhGetStatusMessage
@@ -430,6 +432,7 @@ EXPORTS
     PhGetTemporaryDirectoryRandomAlphaFileName
     PhInitializeHash
     PhInitializeImageVersionInfo
+    PhInitializeImageVersionInfoEx
     PhLargeIntegerToLocalSystemTime
     PhLargeIntegerToSystemTime
     PhLoadLibrary
@@ -440,9 +443,9 @@ EXPORTS
     PhParseCommandLine
     PhParseCommandLineFuzzy
     PhParseCommandLinePart
-    PhQueryRegistryStringRef
-    PhQueryRegistryUlongStringRef
-    PhQueryRegistryUlong64StringRef
+    PhQueryRegistryString
+    PhQueryRegistryUlong
+    PhQueryRegistryUlong64
     PhReferenceObjects
     PhSetFileDialogFileName
     PhSetFileDialogFilter
@@ -556,7 +559,6 @@ EXPORTS
     PhFindListViewItemByFlags
     PhFindListViewItemByParam
     PhGetComboBoxString
-    PhGetFileShellIcon
     PhGetListBoxString
     PhGetListViewItemImageIndex
     PhGetListViewItemParam
@@ -600,7 +602,6 @@ EXPORTS
     PhUnregisterWindowCallback
     PhInitializeWindowTheme
     PhReInitializeWindowTheme
-    PhInitializeThemeWindowHeader
     PhImageListCreate
     PhImageListDestroy
     PhImageListSetImageCount
@@ -738,6 +739,7 @@ EXPORTS
 
 ; verify
     PhVerifyFile
+    PhVerifyFileIsChainedToMicrosoft
 
 ; workqueue
     PhDeleteWorkQueue

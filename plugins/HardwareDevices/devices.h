@@ -30,8 +30,6 @@
 #define SETTING_NAME_GRAPHICS_LIST (PLUGIN_NAME L".GraphicsList")
 #define SETTING_NAME_GRAPHICS_NODES_WINDOW_POSITION (PLUGIN_NAME L".GraphicsNodesWindowPosition")
 #define SETTING_NAME_GRAPHICS_NODES_WINDOW_SIZE (PLUGIN_NAME L".GraphicsNodesWindowSize")
-#define SETTING_NAME_DEVICE_TREE_WINDOW_POSITION (PLUGIN_NAME L".DeviceTreeWindowPosition")
-#define SETTING_NAME_DEVICE_TREE_WINDOW_SIZE (PLUGIN_NAME L".DeviceTreeWindowSize")
 #define SETTING_NAME_DEVICE_TREE_AUTO_REFRESH (PLUGIN_NAME L".DeviceTreeAutoRefresh")
 #define SETTING_NAME_DEVICE_TREE_SHOW_DISCONNECTED (PLUGIN_NAME L".DeviceTreeShowDisconnected")
 #define SETTING_NAME_DEVICE_TREE_HIGHLIGHT_UPPER_FILTERED (PLUGIN_NAME L".DeviceTreeHighlightUpperFiltered")
@@ -81,6 +79,7 @@ __has_include (<d3dkmthk.h>)
 
 extern PPH_PLUGIN PluginInstance;
 extern BOOLEAN NetAdapterEnableNdis;
+extern ULONG NetWindowsVersion;
 
 extern PPH_OBJECT_TYPE NetAdapterEntryType;
 extern PPH_LIST NetworkAdaptersList;
@@ -616,6 +615,8 @@ typedef enum _DISKDRIVE_DETAILS_INDEX
 {
     DISKDRIVE_DETAILS_INDEX_FS_CREATION_TIME,
     DISKDRIVE_DETAILS_INDEX_SERIAL_NUMBER,
+    DISKDRIVE_DETAILS_INDEX_UNIQUEID,
+    DISKDRIVE_DETAILS_INDEX_PARTITIONID,
     DISKDRIVE_DETAILS_INDEX_FILE_SYSTEM,
     DISKDRIVE_DETAILS_INDEX_FS_VERSION,
     DISKDRIVE_DETAILS_INDEX_LFS_VERSION,
@@ -835,6 +836,12 @@ BOOLEAN DiskDriveQueryRefsVolumeInfo(
 NTSTATUS DiskDriveQueryVolumeInformation(
     _In_ HANDLE DosDeviceHandle,
     _Out_ PFILE_FS_VOLUME_INFORMATION* VolumeInfo
+    );
+
+NTSTATUS DiskDriveQueryUniqueId(
+    _In_ HANDLE DeviceHandle,
+    _Out_ PPH_STRING* UniqueId,
+    _Out_ PPH_STRING* PartitionId
     );
 
 // https://en.wikipedia.org/wiki/S.M.A.R.T.#Known_ATA_S.M.A.R.T._attributes

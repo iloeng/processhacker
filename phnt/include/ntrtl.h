@@ -1927,7 +1927,7 @@ NTAPI
 RtlUTF8ToUnicodeN(
     _Out_writes_bytes_to_(UnicodeStringMaxByteCount, *UnicodeStringActualByteCount) PWSTR UnicodeStringDestination,
     _In_ ULONG UnicodeStringMaxByteCount,
-    _Out_ PULONG UnicodeStringActualByteCount,
+    _Out_opt_ PULONG UnicodeStringActualByteCount,
     _In_reads_bytes_(UTF8StringByteCount) PCCH UTF8StringSource,
     _In_ ULONG UTF8StringByteCount
     );
@@ -1940,7 +1940,7 @@ NTAPI
 RtlUnicodeToUTF8N(
     _Out_writes_bytes_to_(UTF8StringMaxByteCount, *UTF8StringActualByteCount) PCHAR UTF8StringDestination,
     _In_ ULONG UTF8StringMaxByteCount,
-    _Out_ PULONG UTF8StringActualByteCount,
+    _Out_opt_ PULONG UTF8StringActualByteCount,
     _In_reads_bytes_(UnicodeStringByteCount) PCWCH UnicodeStringSource,
     _In_ ULONG UnicodeStringByteCount
     );
@@ -3808,6 +3808,15 @@ NTSYSAPI UNICODE_STRING RtlNtPathSeperatorString;
 #define RtlDosPathSeperatorsString ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\/"))
 #define RtlAlternateDosPathSeperatorString ((UNICODE_STRING)RTL_CONSTANT_STRING(L"/"))
 #define RtlNtPathSeperatorString ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\"))
+
+#define RtlDosDevicesPrefix ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\??\\"))
+#define RtlDosDevicesUncPrefix ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\??\\UNC\\"))
+#define RtlSlashSlashDot ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\\\.\\"))
+#define RtlNullString ((UNICODE_STRING)RTL_CONSTANT_STRING(L""))
+#define RtlWin32NtRootSlash ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\\\?\\"))
+#define RtlWin32NtRoot ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\\\?"))
+#define RtlWin32NtUncRoot ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\\\?\\UNC"))
+#define RtlWin32NtUncRootSlash ((UNICODE_STRING)RTL_CONSTANT_STRING(L"\\\\?\\UNC\\"))
 #endif
 
 // Path functions
@@ -4421,9 +4430,11 @@ RtlDestroyHeap(
     );
 
 NTSYSAPI
+_Success_(return != 0)
 _Must_inspect_result_
 _Ret_maybenull_
 _Post_writable_byte_size_(Size)
+__drv_allocatesMem(Mem)
 DECLSPEC_ALLOCATOR
 PVOID
 NTAPI
@@ -4497,9 +4508,11 @@ RtlUnlockHeap(
     );
 
 NTSYSAPI
+_Success_(return != 0)
 _Must_inspect_result_
 _Ret_maybenull_
 _Post_writable_byte_size_(Size)
+_When_(Size > 0, __drv_allocatesMem(Mem))
 DECLSPEC_ALLOCATOR
 PVOID
 NTAPI
@@ -4828,7 +4841,7 @@ typedef struct _HEAP_INFORMATION_ITEM
 
 typedef NTSTATUS (NTAPI *PRTL_HEAP_EXTENDED_ENUMERATION_ROUTINE)(
     _In_ PHEAP_INFORMATION_ITEM Information,
-    _In_ PVOID Context
+    _In_opt_ PVOID Context
     );
 
 // HEAP_EXTENDED_INFORMATION Level
@@ -4857,7 +4870,7 @@ typedef struct _HEAP_EXTENDED_INFORMATION
 typedef NTSTATUS (NTAPI *RTL_HEAP_STACK_WRITE_ROUTINE)(
     _In_ PVOID Information, // TODO: 3 missing structures (dmex)
     _In_ ULONG Size,
-    _In_ PVOID Context
+    _In_opt_ PVOID Context
     );
 
 // rev
@@ -7713,7 +7726,7 @@ RtlRegisterWait(
     _Out_ PHANDLE WaitHandle,
     _In_ HANDLE Handle,
     _In_ WAITORTIMERCALLBACKFUNC Function,
-    _In_ PVOID Context,
+    _In_opt_ PVOID Context,
     _In_ ULONG Milliseconds,
     _In_ ULONG Flags
     );
@@ -7740,7 +7753,7 @@ NTSTATUS
 NTAPI
 RtlQueueWorkItem(
     _In_ WORKERCALLBACKFUNC Function,
-    _In_ PVOID Context,
+    _In_opt_ PVOID Context,
     _In_ ULONG Flags
     );
 
@@ -7903,8 +7916,8 @@ typedef NTSTATUS (NTAPI *PRTL_QUERY_REGISTRY_ROUTINE)(
     _In_ ULONG ValueType,
     _In_ PVOID ValueData,
     _In_ ULONG ValueLength,
-    _In_ PVOID Context,
-    _In_ PVOID EntryContext
+    _In_opt_ PVOID Context,
+    _In_opt_ PVOID EntryContext
     );
 
 typedef struct _RTL_QUERY_REGISTRY_TABLE
@@ -8980,13 +8993,13 @@ RtlAppxIsFileOwnedByTrustedInstaller(
 #define BREAKAWAY_INHIBITED 0x20
 
 // PackageOrigin appmodel.h
-#define PackageOrigin_Unknown 0
-#define PackageOrigin_Unsigned 1
-#define PackageOrigin_Inbox 2
-#define PackageOrigin_Store 3
-#define PackageOrigin_DeveloperUnsigned 4
-#define PackageOrigin_DeveloperSigned 5
-#define PackageOrigin_LineOfBusiness 6
+//#define PackageOrigin_Unknown 0
+//#define PackageOrigin_Unsigned 1
+//#define PackageOrigin_Inbox 2
+//#define PackageOrigin_Store 3
+//#define PackageOrigin_DeveloperUnsigned 4
+//#define PackageOrigin_DeveloperSigned 5
+//#define PackageOrigin_LineOfBusiness 6
 
 #define PSMP_MINIMUM_SYSAPP_CLAIM_VALUES 2
 #define PSMP_MAXIMUM_SYSAPP_CLAIM_VALUES 4

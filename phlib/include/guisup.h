@@ -219,6 +219,42 @@ FORCEINLINE VOID PhSetWindowExStyle(
     SetWindowLongPtr(Handle, GWL_EXSTYLE, style);
 }
 
+FORCEINLINE PVOID PhGetWindowProcedure(
+    _In_ HWND WindowHandle,
+    _In_ PVOID SubclassProcedure
+    )
+{
+    return (PVOID)GetWindowLongPtr(WindowHandle, GWLP_WNDPROC);
+}
+
+FORCEINLINE PVOID PhSetWindowProcedure(
+    _In_ HWND WindowHandle,
+    _In_ PVOID SubclassProcedure
+    )
+{
+    return (PVOID)SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)SubclassProcedure);
+}
+
+FORCEINLINE UINT_PTR PhSetTimer(
+    _In_ HWND WindowHandle,
+    _In_ UINT_PTR TimerID,
+    _In_ UINT Elapse,
+    _In_opt_ TIMERPROC TimerProcedure
+    )
+{
+    assert(WindowHandle);
+    return SetTimer(WindowHandle, TimerID, Elapse, TimerProcedure);
+}
+
+FORCEINLINE BOOL PhKillTimer(
+    _In_ HWND WindowHandle,
+    _In_ UINT_PTR TimerID
+    )
+{
+    assert(WindowHandle);
+    return KillTimer(WindowHandle, TimerID);
+}
+
 #ifndef WM_REFLECT
 #define WM_REFLECT 0x2000
 #endif
@@ -409,7 +445,9 @@ PPH_STRING PhGetWindowText(
 #define PH_GET_WINDOW_TEXT_LENGTH_ONLY 0x2
 
 PHLIBAPI
-ULONG PhGetWindowTextEx(
+ULONG
+NTAPI
+PhGetWindowTextEx(
     _In_ HWND hwnd,
     _In_ ULONG Flags,
     _Out_opt_ PPH_STRING *Text
@@ -500,12 +538,12 @@ VOID PhGetStockApplicationIcon(
     _Out_opt_ HICON *LargeIcon
     );
 
-PHLIBAPI
-HICON PhGetFileShellIcon(
-    _In_opt_ PWSTR FileName,
-    _In_opt_ PWSTR DefaultExtension,
-    _In_ BOOLEAN LargeIcon
-    );
+//PHLIBAPI
+//HICON PhGetFileShellIcon(
+//    _In_opt_ PWSTR FileName,
+//    _In_opt_ PWSTR DefaultExtension,
+//    _In_ BOOLEAN LargeIcon
+//    );
 
 PHLIBAPI
 VOID PhSetClipboardString(
@@ -720,12 +758,12 @@ VOID PhEnumChildWindows(
     );
 
 HWND PhGetProcessMainWindow(
-    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessId,
     _In_opt_ HANDLE ProcessHandle
     );
 
 HWND PhGetProcessMainWindowEx(
-    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessId,
     _In_opt_ HANDLE ProcessHandle,
     _In_ BOOLEAN SkipInvisible
     );
@@ -1118,11 +1156,50 @@ PhWindowNotifyTopMostEvent(
     _In_ BOOLEAN TopMost
     );
 
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhRegenerateUserEnvironment(
+    _Out_opt_ PVOID* NewEnvironment,
+    _In_ BOOLEAN UpdateCurrentEnvironment
+    );
+
 PHLIBAPI
 BOOLEAN
 NTAPI
 PhIsImmersiveProcess(
     _In_ HANDLE ProcessHandle
+    );
+
+typedef enum _PROCESS_UICONTEXT
+{
+    PROCESS_UICONTEXT_DESKTOP,
+    PROCESS_UICONTEXT_IMMERSIVE,
+    PROCESS_UICONTEXT_IMMERSIVE_BROKER,
+    PROCESS_UICONTEXT_IMMERSIVE_BROWSER
+} PROCESS_UICONTEXT;
+
+typedef enum _PROCESS_UI_FLAGS
+{
+    PROCESS_UIF_NONE,
+    PROCESS_UIF_AUTHORING_MODE,
+    PROCESS_UIF_RESTRICTIONS_DISABLED
+} PROCESS_UI_FLAGS;
+
+typedef struct _PROCESS_UICONTEXT_INFORMATION
+{
+    PROCESS_UICONTEXT ProcessUIContext;
+    PROCESS_UI_FLAGS Flags;
+} PROCESS_UICONTEXT_INFORMATION, *PPROCESS_UICONTEXT_INFORMATION;
+
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetProcessUIContextInformation(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PPROCESS_UICONTEXT_INFORMATION UIContext
     );
 
 typedef enum _PH_PROCESS_DPI_AWARENESS
@@ -1176,7 +1253,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhExtractIconEx(
-    _In_ PPH_STRING FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ BOOLEAN NativeFileName,
     _In_ INT32 IconIndex,
     _Out_opt_ HICON *IconLarge,
@@ -1201,7 +1278,7 @@ PHLIBAPI
 BOOLEAN
 NTAPI
 PhImageListDestroy(
-    _In_ HIMAGELIST ImageListHandle
+    _In_opt_ HIMAGELIST ImageListHandle
     );
 
 PHLIBAPI
@@ -1426,7 +1503,7 @@ PhLoadImageFromFile(
 
 // Acrylic support
 
-typedef enum _WINDOWCOMPOSITIONATTRIBUTE
+typedef enum _WINDOWCOMPOSITIONATTRIB
 {
     WCA_UNDEFINED = 0,
     WCA_NCRENDERING_ENABLED = 1,
@@ -1462,11 +1539,11 @@ typedef enum _WINDOWCOMPOSITIONATTRIBUTE
     WCA_SET_TAGGED_WINDOW_RECT = 31,
     WCA_CLEAR_TAGGED_WINDOW_RECT = 32,
     WCA_LAST
-} WINDOWCOMPOSITIONATTRIBUTE;
+} WINDOWCOMPOSITIONATTRIB;
 
 typedef struct _WINDOWCOMPOSITIONATTRIBUTEDATA
 {
-    WINDOWCOMPOSITIONATTRIBUTE Attribute;
+    WINDOWCOMPOSITIONATTRIB Attribute;
     PVOID Data;
     SIZE_T Length;
 } WINDOWCOMPOSITIONATTRIBUTEDATA, *PWINDOWCOMPOSITIONATTRIBUTEDATA;
@@ -1598,13 +1675,6 @@ PhWindowThemeControlColor(
     _In_ HDC Hdc,
     _In_ HWND ChildWindowHandle,
     _In_ INT Type
-    );
-
-PHLIBAPI
-VOID
-NTAPI
-PhInitializeThemeWindowHeader(
-    _In_ HWND HeaderWindow
     );
 
 PHLIBAPI

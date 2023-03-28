@@ -1476,7 +1476,7 @@ PPH_STRING PhSipGetCpuBrandString(
         )))
     {
         brandLength = sizeof(brandString) - sizeof(ANSI_NULL);
-        brand = PhZeroExtendToUtf16Ex(brandString, brandLength);
+        brand = PhConvertUtf8ToUtf16Ex(brandString, brandLength);
     }
     else
     {
@@ -1488,19 +1488,19 @@ PPH_STRING PhSipGetCpuBrandString(
         __cpuid(&cpubrand[8], 0x80000004);
 
         brandLength = sizeof(brandString) - sizeof(ANSI_NULL);
-        brand = PhZeroExtendToUtf16Ex((PSTR)cpubrand, brandLength);
+        brand = PhConvertUtf8ToUtf16Ex((PSTR)cpubrand, brandLength);
 #else
         static PH_STRINGREF processorKeyName = PH_STRINGREF_INIT(L"Hardware\\Description\\System\\CentralProcessor\\0");
         HANDLE keyHandle;
 
         if (NT_SUCCESS(PhOpenKey(&keyHandle, KEY_READ, PH_KEY_LOCAL_MACHINE, &processorKeyName, 0)))
         {
-            brand = PhQueryRegistryString(keyHandle, L"ProcessorNameString");
+            brand = PhQueryRegistryStringZ(keyHandle, L"ProcessorNameString");
             NtClose(keyHandle);
         }
 
         if (PhIsNullOrEmptyString(brand))
-            PhMoveReference(&brand, PhCreateString(L"Not Available"));
+            PhMoveReference(&brand, PhCreateString(L"N/A"));
 #endif
     }
 
@@ -1535,12 +1535,12 @@ BOOLEAN PhSipGetCpuFrequencyFromDistribution(
         return FALSE;
 
     stateSize = FIELD_OFFSET(SYSTEM_PROCESSOR_PERFORMANCE_STATE_DISTRIBUTION, States) + sizeof(SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT) * 2;
-    differences = PhAllocate(UInt32Mul32To64(stateSize, NumberOfProcessors));
+    differences = PhAllocate(UInt32x32To64(stateSize, NumberOfProcessors));
 
     for (i = 0; i < NumberOfProcessors; i++)
     {
         stateDistribution = PTR_ADD_OFFSET(CurrentPerformanceDistribution, CurrentPerformanceDistribution->Offsets[i]);
-        stateDifference = PTR_ADD_OFFSET(differences, UInt32Mul32To64(stateSize, i));
+        stateDifference = PTR_ADD_OFFSET(differences, UInt32x32To64(stateSize, i));
 
         if (stateDistribution->StateCount != 2)
         {
@@ -1566,7 +1566,7 @@ BOOLEAN PhSipGetCpuFrequencyFromDistribution(
     for (i = 0; i < NumberOfProcessors; i++)
     {
         stateDistribution = PTR_ADD_OFFSET(PreviousPerformanceDistribution, PreviousPerformanceDistribution->Offsets[i]);
-        stateDifference = PTR_ADD_OFFSET(differences, UInt32Mul32To64(stateSize, i));
+        stateDifference = PTR_ADD_OFFSET(differences, UInt32x32To64(stateSize, i));
 
         if (stateDistribution->StateCount != 2)
         {
@@ -1595,7 +1595,7 @@ BOOLEAN PhSipGetCpuFrequencyFromDistribution(
 
     for (i = 0; i < NumberOfProcessors; i++)
     {
-        stateDifference = PTR_ADD_OFFSET(differences, UInt32Mul32To64(stateSize, i));
+        stateDifference = PTR_ADD_OFFSET(differences, UInt32x32To64(stateSize, i));
 
         for (j = 0; j < 2; j++)
         {

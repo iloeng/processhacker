@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
@@ -14,6 +14,7 @@
 #include <procprp.h>
 #include <procprpp.h>
 
+#include <mapimg.h>
 #include <secedit.h>
 #include <verify.h>
 
@@ -23,8 +24,6 @@
 #include <procmtgn.h>
 #include <procprv.h>
 #include <settings.h>
-
-#include <shellapi.h>
 
 static PWSTR ProtectedSignerStrings[] =
     { L"", L" (Authenticode)", L" (CodeGen)", L" (Antimalware)", L" (Lsa)", L" (Windows)", L" (WinTcb)", L" (WinSystem)", L" (StoreApp)" };
@@ -86,10 +85,33 @@ PPH_STRING PhGetProcessItemImageTypeText(
     _In_ PPH_PROCESS_ITEM ProcessItem
     )
 {
+    USHORT architecture = IMAGE_FILE_MACHINE_UNKNOWN;
     PWSTR arch = L"";
     PWSTR bits = L"";
 
-    switch (ProcessItem->Architecture)
+    {
+        USHORT processArchitecture;
+
+        if (
+            WindowsVersion >= WINDOWS_11 && ProcessItem->QueryHandle && 
+            NT_SUCCESS(PhGetProcessArchitecture(ProcessItem->QueryHandle, &processArchitecture))
+            )
+        {
+            architecture = processArchitecture;
+        }
+        else if (ProcessItem->FileName)
+        {
+            PH_MAPPED_IMAGE mappedImage;
+
+            if (NT_SUCCESS(PhLoadMappedImageHeaderPageSize(&ProcessItem->FileName->sr, NULL, &mappedImage)))
+            {
+                architecture = mappedImage.NtHeaders->FileHeader.Machine;
+                PhUnloadMappedImage(&mappedImage);
+            }
+        }
+    }
+
+    switch (architecture)
     {
     case IMAGE_FILE_MACHINE_I386:
         arch = L"I386 ";
@@ -106,10 +128,7 @@ PPH_STRING PhGetProcessItemImageTypeText(
     }
 
 #if _WIN64
-    if (ProcessItem->IsWow64Valid)
-    {
-        bits = ProcessItem->IsWow64 ? L"(32-bit)" : L"(64-bit)";
-    }
+    bits = ProcessItem->IsWow64 ? L"(32-bit)" : L"(64-bit)";
 #else
     bits = L"(32-bit)";
 #endif
@@ -287,6 +306,7 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
             PPH_STRING curDir = NULL;
             PPH_PROCESS_ITEM parentProcess;
             CLIENT_ID clientId;
+            PPH_STRING fileNameWin32;
 
             context = propPageContext->Context = PhAllocateZero(sizeof(PH_PROCGENERAL_CONTEXT));
             context->WindowHandle = hwndDlg;
@@ -309,8 +329,9 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
                 PhSetDialogItemText(hwndDlg, IDC_NAME, processItem->ProcessName->Buffer);
             }
 
+            fileNameWin32 = processItem->FileName ? PhGetFileName(processItem->FileName) : NULL;
             PhSetDialogItemText(hwndDlg, IDC_VERSION, PhpGetStringOrNa(processItem->VersionInfo.FileVersion));
-            PhSetDialogItemText(hwndDlg, IDC_FILENAME, PhpGetStringOrNa(processItem->FileNameWin32));
+            PhSetDialogItemText(hwndDlg, IDC_FILENAME, PhpGetStringOrNa(fileNameWin32));
             PhSetDialogItemText(hwndDlg, IDC_FILENAMEWIN32, PhpGetStringOrNa(processItem->FileName));
 
             {
@@ -503,12 +524,12 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
 
             PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
 
-            SetTimer(hwndDlg, 1, 1000, NULL);
+            PhSetTimer(hwndDlg, 1, 1000, NULL);
         }
         break;
     case WM_DESTROY:
         {
-            KillTimer(hwndDlg, 1);
+            PhKillTimer(hwndDlg, 1);
 
             if (context->ProgramIcon)
             {
@@ -561,30 +582,56 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_INSPECT:
+            case IDC_INSPECT2:
                 {
-                    if (processItem->FileNameWin32)
+                    if (processItem->FileName)
                     {
-                        PhShellExecuteUserString(
-                            hwndDlg,
-                            L"ProgramInspectExecutables",
-                            processItem->FileNameWin32->Buffer,
-                            FALSE,
-                            L"Make sure the PE Viewer executable file is present."
-                            );
+                        PPH_STRING fileNameWin32 = processItem->FileName ? PH_AUTO(PhGetFileName(processItem->FileName)) : NULL;
+
+                        if (
+                            !PhIsNullOrEmptyString(fileNameWin32) && 
+                            PhDoesFileExistWin32(PhGetString(fileNameWin32))
+                            )
+                        {
+                            PhShellExecuteUserString(
+                                hwndDlg,
+                                L"ProgramInspectExecutables",
+                                PhGetString(fileNameWin32),
+                                FALSE,
+                                L"Make sure the PE Viewer executable file is present."
+                                );
+                        }
+                        else
+                        {
+                            PhShowStatus(hwndDlg, L"Unable to locate the file.", STATUS_NOT_FOUND, 0);
+                        }
                     }
                 }
                 break;
             case IDC_OPENFILENAME:
+            case IDC_OPENFILENAME2:
                 {
-                    if (processItem->FileNameWin32)
+                    if (processItem->FileName)
                     {
-                        PhShellExecuteUserString(
-                            hwndDlg,
-                            L"FileBrowseExecutable",
-                            processItem->FileNameWin32->Buffer,
-                            FALSE,
-                            L"Make sure the Explorer executable file is present."
-                            );
+                        PPH_STRING fileNameWin32 = processItem->FileName ? PH_AUTO(PhGetFileName(processItem->FileName)) : NULL;
+
+                        if (
+                            !PhIsNullOrEmptyString(fileNameWin32) && 
+                            PhDoesFileExistWin32(PhGetString(fileNameWin32))
+                            )
+                        {
+                            PhShellExecuteUserString(
+                                hwndDlg,
+                                L"FileBrowseExecutable",
+                                PhGetString(fileNameWin32),
+                                FALSE,
+                                L"Make sure the Explorer executable file is present."
+                                );
+                        }
+                        else
+                        {
+                            PhShowStatus(hwndDlg, L"Unable to locate the file.", STATUS_NOT_FOUND, 0);
+                        }
                     }
                 }
                 break;
@@ -593,32 +640,32 @@ INT_PTR CALLBACK PhpProcessGeneralDlgProc(
                     if (processItem->CommandLine)
                     {
                         PPH_STRING commandLineString;
-                        INT stringArgCount;
-                        PWSTR* stringArgList;
+                        PPH_LIST commandLineList;
 
-                        if (stringArgList = CommandLineToArgvW(processItem->CommandLine->Buffer, &stringArgCount))
+                        if (commandLineList = PhCommandLineToList(PhGetString(processItem->CommandLine)))
                         {
                             PH_STRING_BUILDER sb;
 
                             PhInitializeStringBuilder(&sb, 260);
 
-                            for (INT i = 0; i < stringArgCount; i++)
+                            for (ULONG i = 0; i < commandLineList->Count; i++)
                             {
-                                PhAppendFormatStringBuilder(&sb, L"[%d] %s\r\n\r\n", i, stringArgList[i]);
+                                PhAppendFormatStringBuilder(&sb, L"[%d] %s\r\n\r\n", i, PhGetString(commandLineList->Items[i]));
                             }
 
-                            PhAppendFormatStringBuilder(&sb, L"[FULL] %s\r\n", processItem->CommandLine->Buffer);
+                            PhAppendFormatStringBuilder(&sb, L"[FULL] %s\r\n", PhGetString(processItem->CommandLine));
 
                             commandLineString = PhFinalStringBuilderString(&sb);
 
-                            LocalFree(stringArgList);
+                            PhDereferenceObjects(commandLineList->Items, commandLineList->Count);
+                            PhDereferenceObject(commandLineList);
                         }
                         else
                         {
                             commandLineString = PhReferenceObject(processItem->CommandLine);
                         }
 
-                        PhShowInformationDialog(hwndDlg, commandLineString->Buffer, 0);
+                        PhShowInformationDialog(hwndDlg, PhGetString(commandLineString), 0);
 
                         PhDereferenceObject(commandLineString);
                     }

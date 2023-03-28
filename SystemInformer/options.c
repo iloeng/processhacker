@@ -406,7 +406,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
                             PhMainWndHandle,
                             L"-v -newinstance",
                             SW_SHOW,
-                            0,
+                            PH_SHELL_EXECUTE_DEFAULT,
                             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                             0,
                             NULL
@@ -955,7 +955,7 @@ BOOLEAN PhpIsDefaultTaskManager(
     {
         PhClearReference(&OldTaskMgrDebugger);
 
-        if (OldTaskMgrDebugger = PhQueryRegistryString(taskmgrKeyHandle, L"Debugger"))
+        if (OldTaskMgrDebugger = PhQueryRegistryStringZ(taskmgrKeyHandle, L"Debugger"))
         {
             alreadyReplaced = PathMatchesPh(OldTaskMgrDebugger);
         }
@@ -1318,7 +1318,7 @@ NTSTATUS PhpSetSilentProcessNotifyEnabled(
 
             if (NT_SUCCESS(status))
             {
-                ULONG globalFlags = PhQueryRegistryUlong(keyHandle, L"GlobalFlag");
+                ULONG globalFlags = PhQueryRegistryUlongZ(keyHandle, L"GlobalFlag");
 
                 if (globalFlags == ULONG_MAX) globalFlags = 0;
                 globalFlags = globalFlags | FLG_MONITOR_SILENT_PROCESS_EXIT;
@@ -1560,12 +1560,45 @@ static VOID PhpOptionsNotifyChangeCallback(
                 PhMainWndHandle,
                 L"-v -newinstance",
                 SW_SHOW,
-                0,
+                PH_SHELL_EXECUTE_DEFAULT,
                 PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                 0,
                 NULL
                 );
             ProcessHacker_Destroy();
+        }
+    }
+}
+
+VOID PhShowOptionsRestartRequired(
+    _In_ HWND WindowHandle
+    )
+{
+    if (PhShowMessage2(
+        PhMainWndHandle,
+        TDCBF_YES_BUTTON | TDCBF_NO_BUTTON,
+        TD_INFORMATION_ICON,
+        L"One or more options you have changed requires a restart of System Informer.",
+        L"Do you want to restart System Informer now?"
+        ) == IDYES)
+    {
+        ProcessHacker_PrepareForEarlyShutdown();
+
+        if (PhShellProcessHacker(
+            WindowHandle,
+            L"-v -newinstance",
+            SW_SHOW,
+            PH_SHELL_EXECUTE_DEFAULT,
+            PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
+            0,
+            NULL
+            ))
+        {
+            ProcessHacker_Destroy();
+        }
+        else
+        {
+            ProcessHacker_CancelEarlyShutdown();
         }
     }
 }
@@ -2265,15 +2298,12 @@ static INT_PTR CALLBACK PhpOptionsAdvancedEditDlgProc(
                 {
                     PPH_SETTING setting = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
                     PPH_STRING settingValue = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_VALUE)));
-                    LONG dpiValue;
-
-                    dpiValue = PhGetWindowDpi(hwndDlg);
 
                     if (!PhSettingFromString(
                         setting->Type,
                         &settingValue->sr,
                         settingValue,
-                        dpiValue,
+                        PhSystemDpi,
                         setting
                         ))
                     {
@@ -2281,7 +2311,7 @@ static INT_PTR CALLBACK PhpOptionsAdvancedEditDlgProc(
                             setting->Type,
                             &setting->DefaultValue,
                             NULL,
-                            dpiValue,
+                            PhSystemDpi,
                             setting
                             );
                     }
@@ -2853,10 +2883,14 @@ VOID InitializeOptionsAdvancedTree(
 
     TreeNew_SetCallback(Context->TreeNewHandle, OptionsAdvancedTreeNewCallback, Context);
 
+    TreeNew_SetRedraw(Context->TreeNewHandle, FALSE);
+
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_NAME, TRUE, L"Name", 200, PH_ALIGN_LEFT, 0, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_TYPE, TRUE, L"Type", 100, PH_ALIGN_LEFT, 1, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_VALUE, TRUE, L"Value", 200, PH_ALIGN_LEFT, 2, 0, TRUE);
     PhAddTreeNewColumnEx(Context->TreeNewHandle, PH_OPTIONS_ADVANCED_COLUMN_ITEM_DEFAULT, TRUE, L"Default", 200, PH_ALIGN_LEFT, 3, 0, TRUE);
+
+    TreeNew_SetRedraw(Context->TreeNewHandle, TRUE);
 
     TreeNew_SetTriState(Context->TreeNewHandle, TRUE);
 
@@ -3290,6 +3324,7 @@ static COLOR_ITEM ColorItems[] =
 #endif
     COLOR_ITEM(L"ColorDebuggedProcesses", L"Debugged processes", L"Processes that are currently being debugged."),
     COLOR_ITEM(L"ColorElevatedProcesses", L"Elevated processes", L"Processes with full privileges on a system with UAC enabled."),
+    COLOR_ITEM(L"ColorUIAccessProcesses", L"UIAccess processes", L"Processes with UIAccess privileges."),
     COLOR_ITEM(L"ColorPicoProcesses", L"Pico processes", L"Processes that belong to the Windows subsystem for Linux."),
     COLOR_ITEM(L"ColorImmersiveProcesses", L"Immersive processes and DLLs", L"Processes and DLLs that belong to a Modern UI app."),
     COLOR_ITEM(L"ColorSuspended", L"Suspended processes and threads", L"Processes and threads that are suspended from execution."),

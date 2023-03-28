@@ -202,12 +202,12 @@ BOOLEAN EtpDiskPageCallback(
         return TRUE;
     case MainTabPageLoadSettings:
         {
-            // Nothing
+            NOTHING;
         }
         return TRUE;
     case MainTabPageSaveSettings:
         {
-            // Nothing
+            EtSaveSettingsDiskTreeList();
         }
         return TRUE;
     case MainTabPageSelected:
@@ -822,11 +822,6 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
             EtShowDiskContextMenu(WindowHandle, contextMenuEvent);
         }
         return TRUE;
-    case TreeNewDestroying:
-        {
-            EtSaveSettingsDiskTreeList();
-        }
-        return TRUE;
     }
 
     return FALSE;
@@ -888,7 +883,7 @@ BOOLEAN EtGetSelectedDiskItems(
 
         if (node->Node.Selected)
         {
-            PhAddItemList(list, node);
+            PhAddItemList(list, node->DiskItem);
         }
     }
 
@@ -978,9 +973,27 @@ VOID EtHandleDiskCommand(
 
                 if (diskItem->ProcessRecord)
                 {
-                    // Check if this is really the process that we want, or if it's just a case of PID re-use.
-                    if ((processNode = PhFindProcessNode(diskItem->ProcessId)) &&
-                        processNode->ProcessItem->CreateTime.QuadPart == diskItem->ProcessRecord->CreateTime.QuadPart)
+                    BOOLEAN found = FALSE;
+
+                    if (EtWindowsVersion >= WINDOWS_10_RS3 && !EtIsExecutingInWow64)
+                    {
+                        if ((processNode = PhFindProcessNode(diskItem->ProcessId)) &&
+                            processNode->ProcessItem->ProcessSequenceNumber == diskItem->ProcessRecord->ProcessSequenceNumber)
+                        {
+                            found = TRUE;
+                        }
+                    }
+                    else
+                    {
+                        // Check if this is really the process that we want, or if it's just a case of PID re-use. (wj32)
+                        if ((processNode = PhFindProcessNode(diskItem->ProcessId)) &&
+                            processNode->ProcessItem->CreateTime.QuadPart == diskItem->ProcessRecord->CreateTime.QuadPart)
+                        {
+                            found = TRUE;
+                        }
+                    }
+
+                    if (found)
                     {
                         ProcessHacker_SelectTabPage(0);
                         PhSelectAndEnsureVisibleProcessNode(processNode);
@@ -1350,7 +1363,7 @@ HWND NTAPI EtpToolStatusGetTreeNewHandle(
 //                    PhMainWndHandle,
 //                    L"-v -selecttab Disk",
 //                    SW_SHOW,
-//                    PH_SHELL_EXECUTE_ADMIN,
+//                    PH_SHELL_EXECUTE_ADMIN | PH_SHELL_EXECUTE_NOASYNC,
 //                    PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
 //                    0,
 //                    NULL

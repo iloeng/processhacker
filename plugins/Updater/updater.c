@@ -96,8 +96,9 @@ BOOLEAN UpdateShellExecute(
         WindowHandle,
         PhGetString(Context->SetupFilePath),
         PhGetString(parameters),
+        NULL,
         SW_SHOW,
-        PH_SHELL_EXECUTE_NOZONECHECKS | PH_SHELL_EXECUTE_NOASYNC | (Context->DirectoryElevationRequired ? PH_SHELL_EXECUTE_ADMIN : 0),
+        Context->DirectoryElevationRequired ? PH_SHELL_EXECUTE_ADMIN : PH_SHELL_EXECUTE_DEFAULT,
         0,
         NULL
         ))
@@ -924,7 +925,7 @@ LRESULT CALLBACK TaskDialogSubclassProc(
 
     switch (uMsg)
     {
-    case WM_DESTROY:
+    case WM_NCDESTROY:
         {
             context->Cancel = TRUE;
 

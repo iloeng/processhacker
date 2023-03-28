@@ -687,7 +687,7 @@ PPH_STRING PhGetServiceFileName(
 
     if (NT_SUCCESS(status))
     {
-        if (serviceDllString = PhQueryRegistryString(keyHandle, L"ImagePath"))
+        if (serviceDllString = PhQueryRegistryStringZ(keyHandle, L"ImagePath"))
         {
             PPH_STRING expandedString;
 
@@ -733,7 +733,7 @@ NTSTATUS PhpGetServiceDllName(
 
     if (NT_SUCCESS(status))
     {
-        if (serviceDllString = PhQueryRegistryString(keyHandle, L"ServiceDll"))
+        if (serviceDllString = PhQueryRegistryStringZ(keyHandle, L"ServiceDll"))
         {
             PPH_STRING expandedString;
 
@@ -834,4 +834,58 @@ NTSTATUS PhGetServiceDllParameter(
     }
 
     return status;
+}
+
+PPH_STRING PhGetServiceAppUserModelId(
+    _In_ PPH_STRINGREF ServiceName
+    )
+{
+    PPH_STRING serviceAppUserModelId = NULL;
+    PPH_STRING serviceKeyName;
+    HANDLE keyHandle;
+
+    serviceKeyName = PhGetServiceKeyName(ServiceName);
+
+    if (NT_SUCCESS(PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &serviceKeyName->sr,
+        0
+        )))
+    {
+        serviceAppUserModelId = PhQueryRegistryStringZ(keyHandle, L"AppUserModelId");
+        NtClose(keyHandle);
+    }
+
+    PhDereferenceObject(serviceKeyName);
+
+    return serviceAppUserModelId;
+}
+
+PPH_STRING PhGetServicePackageFullName(
+    _In_ PPH_STRINGREF ServiceName
+    )
+{
+    PPH_STRING servicePackageName = NULL;
+    PPH_STRING serviceKeyName;
+    HANDLE keyHandle;
+
+    serviceKeyName = PhGetServiceKeyName(ServiceName);
+
+    if (NT_SUCCESS(PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &serviceKeyName->sr,
+        0
+        )))
+    {
+        servicePackageName = PhQueryRegistryStringZ(keyHandle, L"PackageFullName");
+        NtClose(keyHandle);
+    }
+
+    PhDereferenceObject(serviceKeyName);
+
+    return servicePackageName;
 }

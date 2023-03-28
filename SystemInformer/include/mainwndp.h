@@ -20,6 +20,7 @@
 #define TIMER_FLUSH_PROCESS_QUERY_DATA 1
 #define TIMER_ICON_CLICK_ACTIVATE 2
 #define TIMER_ICON_RESTORE_HOVER 3
+#define TIMER_ICON_POPUPOPEN 3
 
 typedef union _PH_MWP_NOTIFICATION_DETAILS
 {
@@ -57,6 +58,10 @@ VOID PhMwpApplyUpdateInterval(
     _In_ ULONG Interval
     );
 
+VOID PhMwpInitializeMetrics(
+    _In_ HWND WindowHandle
+    );
+
 VOID PhMwpInitializeControls(
     _In_ HWND WindowHandle
     );
@@ -81,11 +86,15 @@ VOID PhMwpOnDestroy(
     );
 
 VOID PhMwpOnEndSession(
-    _In_ HWND WindowHandle
+    _In_ HWND WindowHandle,
+    _In_ BOOLEAN SessionEnding,
+    _In_ ULONG Reason
     );
 
 VOID PhMwpOnSettingChange(
-    _In_ HWND hwnd
+    _In_ HWND WindowHandle,
+    _In_opt_ ULONG Action,
+    _In_opt_ PWSTR Metric
     );
 
 VOID PhMwpOnCommand(
@@ -222,6 +231,11 @@ BOOLEAN PhMwpExecuteNotificationMenuCommand(
     _In_ ULONG Id
     );
 
+BOOLEAN PhMwpExecuteNotificationSettingsMenuCommand(
+    _In_ HWND WindowHandle,
+    _In_ ULONG Id
+    );
+
 // Tab control
 
 VOID PhMwpLayoutTabControl(
@@ -308,7 +322,16 @@ VOID PhMwpToggleSignedProcessTreeFilter(
     VOID
     );
 
+VOID PhMwpToggleMicrosoftProcessTreeFilter(
+    VOID
+    );
+
 BOOLEAN PhMwpSignedProcessTreeFilter(
+    _In_ PPH_TREENEW_NODE Node,
+    _In_opt_ PVOID Context
+    );
+
+BOOLEAN PhMwpMicrosoftProcessTreeFilter(
     _In_ PPH_TREENEW_NODE Node,
     _In_opt_ PVOID Context
     );
@@ -327,7 +350,7 @@ BOOLEAN PhMwpExecuteProcessIoPriorityCommand(
 
 VOID PhMwpSetProcessMenuPriorityChecks(
     _In_ PPH_EMENU Menu,
-    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessId,
     _In_ BOOLEAN SetPriority,
     _In_ BOOLEAN SetIoPriority,
     _In_ BOOLEAN SetPagePriority

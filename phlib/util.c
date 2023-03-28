@@ -21,6 +21,7 @@
 #include <winsta.h>
 
 #include <apiimport.h>
+#include <appresolver.h>
 #include <mapimg.h>
 #include <mapldr.h>
 #include <lsasup.h>
@@ -175,7 +176,7 @@ LONG PhGetUserOrMachineDpi(
 
     if (NT_SUCCESS(PhOpenKey(&keyHandle, KEY_QUERY_VALUE, PH_KEY_USERS, &userKeyName, 0)))
     {
-        dpi = PhQueryRegistryUlong(keyHandle, L"LogPixels");
+        dpi = PhQueryRegistryUlongZ(keyHandle, L"LogPixels");
         NtClose(keyHandle);
     }
 
@@ -183,7 +184,7 @@ LONG PhGetUserOrMachineDpi(
     {
         if (NT_SUCCESS(PhOpenKey(&keyHandle, KEY_QUERY_VALUE, PH_KEY_LOCAL_MACHINE, &machineKeyName, 0)))
         {
-            dpi = PhQueryRegistryUlong(keyHandle, L"LogPixels");
+            dpi = PhQueryRegistryUlongZ(keyHandle, L"LogPixels");
             NtClose(keyHandle);
         }
     }
@@ -229,45 +230,50 @@ LONG PhGetTaskbarDpi(
     VOID
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static RECT windowRect = { 0 };
     LONG dpi = 0;
-    HWND shellWindow;
 
-    // Note: GetShellWindow is cached in TEB (dmex)
-    if (shellWindow = GetShellWindow())
+    if (PhBeginInitOnce(&initOnce))
     {
-        dpi = PhGetDpiValue(shellWindow, NULL);
-    }
+        RECT rect;
+        HWND windowHandle;
 
-    // SHAppBarMessage requires SendMessage and very slow (dmex)
-    //if (dpi == 0)
-    //{
-    //    APPBARDATA taskbarRect = { sizeof(APPBARDATA) };
-    //
-    //    if (SHAppBarMessage(ABM_GETTASKBARPOS, &taskbarRect))
-    //    {
-    //        dpi = PhGetMonitorDpi(&taskbarRect.rc);
-    //    }
-    //}
-
-    // SHAppBarMessage requires SendMessage and very slow (dmex)
-    if (dpi == 0)
-    {
-        static PH_INITONCE initOnce = PH_INITONCE_INIT;
-        static RECT taskbarRect = { 0 };
-
-        if (PhBeginInitOnce(&initOnce))
+        if (windowHandle = GetShellWindow())
         {
-            APPBARDATA appbarData = { sizeof(APPBARDATA) };
-
-            if (SHAppBarMessage(ABM_GETTASKBARPOS, &appbarData))
+            if (GetWindowRect(windowHandle, &rect))
             {
-                taskbarRect = appbarData.rc;
+                windowRect = rect;
             }
-
-            PhEndInitOnce(&initOnce);
         }
 
-        dpi = PhGetMonitorDpi(&taskbarRect);
+        if (!(windowRect.right && windowRect.bottom))
+        {
+            if (windowHandle = GetDesktopWindow())
+            {
+                if (GetWindowRect(windowHandle, &rect))
+                {
+                    windowRect = rect;
+                }
+            }
+        }
+
+        //if (!(windowRect.right && windowRect.bottom))
+        //{
+        //    APPBARDATA appbarData = { sizeof(APPBARDATA) };
+        //
+        //    if (SHAppBarMessage(ABM_GETTASKBARPOS, &appbarData))
+        //    {
+        //        windowRect = appbarData.rc;
+        //    }
+        //}
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (windowRect.right && windowRect.bottom)
+    {
+        dpi = PhGetMonitorDpi(&windowRect);
     }
 
     if (dpi == 0)
@@ -829,17 +835,70 @@ PPH_STRING PhGetWin32Message(
     message = PhGetMessage(PhGetLoaderEntryDllBaseZ(L"kernel32.dll"), 0xb, PhGetUserDefaultLangID(), Result);
 
     if (message)
+    {
+        ULONG_PTR index;
+
         PhTrimToNullTerminatorString(message);
 
-    // Remove any trailing newline.
-    if (message && message->Length >= 2 * sizeof(WCHAR) &&
-        message->Buffer[message->Length / sizeof(WCHAR) - 2] == L'\r' &&
-        message->Buffer[message->Length / sizeof(WCHAR) - 1] == L'\n')
+        // Remove any trailing newline.
+        //if (message && message->Length >= 2 * sizeof(WCHAR) &&
+        //    message->Buffer[message->Length / sizeof(WCHAR) - 2] == L'\r' &&
+        //    message->Buffer[message->Length / sizeof(WCHAR) - 1] == L'\n')
+        //{
+        //    PhMoveReference(&message, PhCreateStringEx(message->Buffer, message->Length - 2 * sizeof(WCHAR)));
+        //}
+
+        if ((index = PhFindStringInStringRefZ(&message->sr, L"\r\n", FALSE)) != SIZE_MAX)
+        {
+            PhMoveReference(&message, PhCreateStringEx(message->Buffer, index * sizeof(WCHAR)));
+        }
+    }
+    else
     {
-        PhMoveReference(&message, PhCreateStringEx(message->Buffer, message->Length - 2 * sizeof(WCHAR)));
+        message = PhGetWin32FormatMessage(Result);
     }
 
     return message;
+}
+
+PPH_STRING PhGetWin32FormatMessage(
+    _In_ ULONG Result
+    )
+{
+    PPH_STRING messageString = NULL;
+    ULONG messageLength = 0;
+    PWSTR messageBuffer = NULL;
+
+    messageLength = FormatMessage(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        Result,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (PWSTR)&messageBuffer,
+        0,
+        NULL
+        );
+
+    if (messageBuffer)
+    {
+        if (messageLength)
+        {
+            ULONG_PTR index;
+            PH_STRINGREF string;
+
+            string.Buffer = messageBuffer;
+            string.Length = messageLength * sizeof(WCHAR);
+
+            if ((index = PhFindStringInStringRefZ(&string, L"\r\n", FALSE)) != SIZE_MAX)
+                messageString = PhCreateStringEx(messageBuffer, index * sizeof(WCHAR));
+            else
+                messageString = PhCreateStringEx(messageBuffer, messageLength * sizeof(WCHAR));
+        }
+
+        LocalFree(messageBuffer);
+    }
+
+    return messageString;
 }
 
 /**
@@ -875,6 +934,16 @@ INT PhShowMessage(
     return result;
 }
 
+static const PH_FLAG_MAPPING PhShowMessageTaskDialogButtonFlagMappings[] =
+{
+    { PH_SHOW_MESSAGE_FLAG_OK_BUTTON, TDCBF_OK_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_YES_BUTTON, TDCBF_YES_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_NO_BUTTON, TDCBF_NO_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON, TDCBF_CANCEL_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON, TDCBF_RETRY_BUTTON },
+    { PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TDCBF_CLOSE_BUTTON },
+};
+
 INT PhShowMessage2(
     _In_opt_ HWND hWnd,
     _In_ ULONG Buttons,
@@ -888,16 +957,25 @@ INT PhShowMessage2(
     va_list argptr;
     PPH_STRING message;
     TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
+    ULONG buttonsFlags;
 
     va_start(argptr, Format);
     message = PhFormatString_V(Format, argptr);
     va_end(argptr);
 
     if (!message)
-        return -1;
+        return INT_ERROR;
+
+    buttonsFlags = 0;
+    PhMapFlags1(
+        &buttonsFlags, 
+        Buttons, 
+        PhShowMessageTaskDialogButtonFlagMappings,
+        ARRAYSIZE(PhShowMessageTaskDialogButtonFlagMappings)
+        );
 
     config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((hWnd && IsWindowVisible(hWnd) && !IsMinimized(hWnd)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
-    config.dwCommonButtons = Buttons;
+    config.dwCommonButtons = buttonsFlags;
     config.hwndParent = hWnd;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainIcon = Icon;
@@ -917,7 +995,7 @@ INT PhShowMessage2(
     else
     {
         PhDereferenceObject(message);
-        return -1;
+        return INT_ERROR;
     }
 }
 
@@ -1406,7 +1484,7 @@ ULONG64 PhGenerateRandomNumber64(
  */
 PPH_STRING PhEllipsisString(
     _In_ PPH_STRING String,
-    _In_ ULONG DesiredCount
+    _In_ SIZE_T DesiredCount
     )
 {
     if (
@@ -1439,7 +1517,7 @@ PPH_STRING PhEllipsisString(
  */
 PPH_STRING PhEllipsisStringPath(
     _In_ PPH_STRING String,
-    _In_ ULONG DesiredCount
+    _In_ SIZE_T DesiredCount
     )
 {
     ULONG_PTR secondPartIndex;
@@ -2477,7 +2555,7 @@ PPH_STRING PhGetFileVersionInfoString2(
 
     string = PhCreateStringEx(
         stringNameBlockValue,
-        (stringNameBlockInfo->ValueLength - 1) * sizeof(WCHAR)
+        UInt32x32To64((stringNameBlockInfo->ValueLength - 1), sizeof(WCHAR))
         );
     //PhTrimToNullTerminatorString(string); // length may include the null terminator.
 
@@ -2788,7 +2866,7 @@ static BOOLEAN PhpImageVersionInfoCacheHashtableEqualFunction(
     PPH_FILE_VERSIONINFO_CACHE_ENTRY entry1 = Entry1;
     PPH_FILE_VERSIONINFO_CACHE_ENTRY entry2 = Entry2;
 
-    return PhEqualString(entry1->FileName, entry2->FileName, TRUE);
+    return PhEqualString(entry1->FileName, entry2->FileName, FALSE);
 }
 
 static ULONG PhpImageVersionInfoCacheHashtableHashFunction(
@@ -2797,7 +2875,7 @@ static ULONG PhpImageVersionInfoCacheHashtableHashFunction(
 {
     PPH_FILE_VERSIONINFO_CACHE_ENTRY entry = Entry;
 
-    return PhHashStringRefEx(&entry->FileName->sr, TRUE, PH_STRING_HASH_X65599);
+    return PhHashStringRefEx(&entry->FileName->sr, FALSE, PH_STRING_HASH_X65599);
 }
 
 _Success_(return)
@@ -2835,13 +2913,23 @@ BOOLEAN PhInitializeImageVersionInfoCached(
 
     if (IsSubsystemProcess)
     {
-        if (!PhInitializeLxssImageVersionInfo(&versionInfo, FileName))
-            return FALSE;
+        if (!PhInitializeLxssImageVersionInfo(&versionInfo, &FileName->sr))
+        {
+            // Note: If the function fails the version info is empty. For extra performance
+            // we still update the cache with a reference to the filename (without version info)
+            // and just return the empty result from the cache instead of loading the same file again.
+            // We flush every few hours so the cache doesn't waste memory or become state. (dmex)
+        }
     }
     else
     {
         if (!PhInitializeImageVersionInfoEx(&versionInfo, &FileName->sr, ExtendedVersion))
-            return FALSE;
+        {
+            // Note: If the function fails the version info is empty. For extra performance
+            // we still update the cache with a reference to the filename (without version info)
+            // and just return the empty result from the cache instead of loading the same file again.
+            // We flush every few hours so the cache doesn't waste memory or become state. (dmex)
+        }
     }
 
     if (!PhpImageVersionInfoCacheHashtable)
@@ -3120,7 +3208,7 @@ PPH_STRING PhGetBaseName(
 }
 
 PPH_STRING PhGetBaseNameChangeExtension(
-    _In_ PPH_STRING FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PPH_STRINGREF FileExtension
     )
 {
@@ -3129,9 +3217,9 @@ PPH_STRING PhGetBaseNameChangeExtension(
     PH_STRINGREF baseFileName;
     PH_STRINGREF baseFilePath;
 
-    if ((indexOfBackslash = PhFindLastCharInString(FileName, 0, OBJ_NAME_PATH_SEPARATOR)) == SIZE_MAX)
+    if ((indexOfBackslash = PhFindLastCharInStringRef(FileName, OBJ_NAME_PATH_SEPARATOR, FALSE)) == SIZE_MAX)
         return NULL;
-    if ((indexOfLastDot = PhFindLastCharInString(FileName, 0, L'.')) == SIZE_MAX)
+    if ((indexOfLastDot = PhFindLastCharInStringRef(FileName, L'.', FALSE)) == SIZE_MAX)
         return NULL;
     if (indexOfLastDot < indexOfBackslash)
         return NULL;
@@ -3759,7 +3847,7 @@ PPH_STRING PhGetTemporaryDirectory(
     UNICODE_STRING variableValue;
     WCHAR variableBuffer[DOS_MAX_PATH_LENGTH];
 
-    if (RtlEqualSid(PhGetOwnTokenAttributes().TokenSid, &PhSeLocalSystemSid))
+    if (PhEqualSid(PhGetOwnTokenAttributes().TokenSid, &PhSeLocalSystemSid))
     {
         static PH_STRINGREF systemTemp = PH_STRINGREF_INIT(L"SystemTemp");
         PH_STRINGREF systemRoot;
@@ -4640,7 +4728,6 @@ NTSTATUS PhFilterTokenForLimitedUser(
     _Out_ PHANDLE NewTokenHandle
     )
 {
-    static SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
     static SID_IDENTIFIER_AUTHORITY mandatoryLabelAuthority = SECURITY_MANDATORY_LABEL_AUTHORITY;
     static LUID_AND_ATTRIBUTES defaultAllowedPrivileges[] =
     {
@@ -4652,10 +4739,8 @@ NTSTATUS PhFilterTokenForLimitedUser(
     };
 
     NTSTATUS status;
-    UCHAR administratorsSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG) * 2];
-    PSID administratorsSid;
-    UCHAR usersSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG) * 2];
-    PSID usersSid;
+    PSID administratorsSid = PhSeAdministratorsSid();
+    PSID usersSid = PhSeUsersSid();
     UCHAR sidsToDisableBuffer[FIELD_OFFSET(TOKEN_GROUPS, Groups) + sizeof(SID_AND_ATTRIBUTES)];
     PTOKEN_GROUPS sidsToDisable;
     ULONG i;
@@ -4681,18 +4766,6 @@ NTSTATUS PhFilterTokenForLimitedUser(
     HANDLE newTokenHandle;
 
     // Set up the SIDs to Disable structure.
-
-    // Initialize the Administrators SID.
-    administratorsSid = (PSID)administratorsSidBuffer;
-    RtlInitializeSid(administratorsSid, &ntAuthority, 2);
-    *RtlSubAuthoritySid(administratorsSid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
-    *RtlSubAuthoritySid(administratorsSid, 1) = DOMAIN_ALIAS_RID_ADMINS;
-
-    // Initialize the Users SID.
-    usersSid = (PSID)usersSidBuffer;
-    RtlInitializeSid(usersSid, &ntAuthority, 2);
-    *RtlSubAuthoritySid(usersSid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
-    *RtlSubAuthoritySid(usersSid, 1) = DOMAIN_ALIAS_RID_USERS;
 
     sidsToDisable = (PTOKEN_GROUPS)sidsToDisableBuffer;
     sidsToDisable->GroupCount = 1;
@@ -4765,8 +4838,8 @@ NTSTATUS PhFilterTokenForLimitedUser(
     // Set the integrity level to Low if we're on Vista and above.
     {
         lowMandatoryLevelSid = (PSID)lowMandatoryLevelSidBuffer;
-        RtlInitializeSid(lowMandatoryLevelSid, &mandatoryLabelAuthority, 1);
-        *RtlSubAuthoritySid(lowMandatoryLevelSid, 0) = SECURITY_MANDATORY_LOW_RID;
+        PhInitializeSid(lowMandatoryLevelSid, &mandatoryLabelAuthority, 1);
+        *PhSubAuthoritySid(lowMandatoryLevelSid, 0) = SECURITY_MANDATORY_LOW_RID;
 
         mandatoryLabel.Label.Sid = lowMandatoryLevelSid;
         mandatoryLabel.Label.Attributes = SE_GROUP_INTEGRITY;
@@ -4789,7 +4862,7 @@ NTSTATUS PhFilterTokenForLimitedUser(
                 currentDaclPresent = FALSE;
             }
 
-            newDaclLength = sizeof(ACL) + FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + RtlLengthSid(currentUser.User.Sid);
+            newDaclLength = sizeof(ACL) + FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) + PhLengthSid(currentUser.User.Sid);
 
             if (currentDaclPresent && currentDacl)
                 newDaclLength += currentDacl->AclSize - sizeof(ACL);
@@ -4964,6 +5037,7 @@ VOID PhShellExecute(
  * \param hWnd The window to display user interface components on.
  * \param FileName A file name or location.
  * \param Parameters The parameters to pass to the executed application.
+ * \param Directory The default working directory. If this value is NULL, the current process working directory is used.
  * \param ShowWindowType A value specifying how to show the application.
  * \param Flags A combination of the following:
  * \li \c PH_SHELL_EXECUTE_ADMIN Execute the application elevated.
@@ -4978,6 +5052,7 @@ BOOLEAN PhShellExecuteEx(
     _In_opt_ HWND hWnd,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
+    _In_opt_ PWSTR Directory,
     _In_ ULONG ShowWindowType,
     _In_ ULONG Flags,
     _In_opt_ ULONG Timeout,
@@ -4988,16 +5063,13 @@ BOOLEAN PhShellExecuteEx(
 
     info.lpFile = FileName;
     info.lpParameters = Parameters;
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+    info.lpDirectory = Directory;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | SEE_MASK_NOZONECHECKS;
     info.nShow = ShowWindowType;
     info.hwnd = hWnd;
 
     if (Flags & PH_SHELL_EXECUTE_ADMIN)
         info.lpVerb = L"runas";
-    if (Flags & PH_SHELL_EXECUTE_NOZONECHECKS)
-        info.fMask |= SEE_MASK_NOZONECHECKS;
-    if (Flags & PH_SHELL_EXECUTE_NOASYNC)
-        info.fMask |= SEE_MASK_NOASYNC;
 
     if (ShellExecuteEx(&info))
     {
@@ -5146,9 +5218,9 @@ PPH_STRING PhExpandKeyName(
  * \return A pointer to a string containing the value, or NULL if the function failed. You must free
  * the string using PhDereferenceObject() when you no longer need it.
  */
-PPH_STRING PhQueryRegistryStringRef(
+PPH_STRING PhQueryRegistryString(
     _In_ HANDLE KeyHandle,
-    _In_ PPH_STRINGREF ValueName
+    _In_opt_ PPH_STRINGREF ValueName
     )
 {
     PPH_STRING string = NULL;
@@ -5172,7 +5244,7 @@ PPH_STRING PhQueryRegistryStringRef(
     return string;
 }
 
-ULONG PhQueryRegistryUlongStringRef(
+ULONG PhQueryRegistryUlong(
     _In_ HANDLE KeyHandle,
     _In_opt_ PPH_STRINGREF ValueName
     )
@@ -5194,7 +5266,7 @@ ULONG PhQueryRegistryUlongStringRef(
     return ulong;
 }
 
-ULONG64 PhQueryRegistryUlong64StringRef(
+ULONG64 PhQueryRegistryUlong64(
     _In_ HANDLE KeyHandle,
     _In_opt_ PPH_STRINGREF ValueName
     )
@@ -6487,7 +6559,7 @@ PPH_STRING PhEscapeCommandLinePart(
         case L'\"':
             if (numberOfBackslashes != 0)
             {
-                PhAppendCharStringBuilder2(&stringBuilder, OBJ_NAME_PATH_SEPARATOR, UInt32Mul32To64(numberOfBackslashes, 2));
+                PhAppendCharStringBuilder2(&stringBuilder, OBJ_NAME_PATH_SEPARATOR, UInt32x32To64(numberOfBackslashes, 2));
                 numberOfBackslashes = 0;
             }
 
@@ -6663,6 +6735,27 @@ BOOLEAN PhParseCommandLineFuzzy(
     return FALSE;
 }
 
+PPH_LIST PhCommandLineToList(
+    _In_ PCWSTR CommandLine
+    )
+{
+    PPH_LIST commandLineList = NULL;
+    INT32 commandLineCount;
+    PWSTR* commandLineArray;
+
+    if (commandLineArray = CommandLineToArgvW(CommandLine, &commandLineCount))
+    {
+        commandLineList = PhCreateList(commandLineCount);
+
+        for (INT32 i = 0; i < commandLineCount; i++)
+            PhAddItemList(commandLineList, PhCreateString(commandLineArray[i]));
+
+        LocalFree(commandLineArray);
+    }
+
+    return commandLineList;
+}
+
 PPH_STRING PhSearchFilePath(
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Extension
@@ -6779,30 +6872,23 @@ HANDLE PhGetNamespaceHandle(
 
     if (PhBeginInitOnce(&initOnce))
     {
-        static SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
         UCHAR securityDescriptorBuffer[SECURITY_DESCRIPTOR_MIN_LENGTH + 0x80];
+        PSID administratorsSid = PhSeAdministratorsSid();
         OBJECT_ATTRIBUTES objectAttributes;
         PSECURITY_DESCRIPTOR securityDescriptor;
         ULONG sdAllocationLength;
-        UCHAR administratorsSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG) * 2];
-        PSID administratorsSid;
         PACL dacl;
 
         // Create the default namespace DACL.
 
-        administratorsSid = (PSID)administratorsSidBuffer;
-        RtlInitializeSid(administratorsSid, &ntAuthority, 2);
-        *RtlSubAuthoritySid(administratorsSid, 0) = SECURITY_BUILTIN_DOMAIN_RID;
-        *RtlSubAuthoritySid(administratorsSid, 1) = DOMAIN_ALIAS_RID_ADMINS;
-
         sdAllocationLength = SECURITY_DESCRIPTOR_MIN_LENGTH +
             (ULONG)sizeof(ACL) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-            RtlLengthSid(&PhSeLocalSid) +
+            PhLengthSid(&PhSeLocalSid) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-            RtlLengthSid(administratorsSid) +
+            PhLengthSid(administratorsSid) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-            RtlLengthSid(&PhSeInteractiveSid);
+            PhLengthSid(&PhSeInteractiveSid);
 
         securityDescriptor = (PSECURITY_DESCRIPTOR)securityDescriptorBuffer;
         dacl = (PACL)PTR_ADD_OFFSET(securityDescriptor, SECURITY_DESCRIPTOR_MIN_LENGTH);
@@ -6978,7 +7064,6 @@ PVOID PhFileReadAllTextWin32(
     return string;
 }
 
-_Success_(return == S_OK)
 HRESULT PhGetClassObjectDllBase(
     _In_ PVOID DllBase,
     _In_ REFCLSID Rclsid,
@@ -7013,23 +7098,231 @@ HRESULT PhGetClassObjectDllBase(
     return status;
 }
 
-_Success_(return == S_OK)
 HRESULT PhGetClassObject(
-    _In_ PWSTR DllName,
+    _In_ PCWSTR DllName,
     _In_ REFCLSID Rclsid,
     _In_ REFIID Riid,
     _Out_ PVOID* Ppv
     )
 {
+#if (PH_NATIVE_COM_CLASS_FACTORY)
+    HRESULT status;
+    IClassFactory* classFactory;
+
+    status = CoGetClassObject(
+        Rclsid,
+        CLSCTX_INPROC_SERVER,
+        NULL,
+        &IID_IClassFactory,
+        &classFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IClassFactory_CreateInstance(
+            classFactory,
+            NULL,
+            Riid,
+            Ppv
+            );
+        IClassFactory_Release(classFactory);
+    }
+
+    return status;
+#else
     PVOID baseAddress;
 
-    if (!(baseAddress = PhGetLoaderEntryDllBaseZ(DllName)))
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
     {
         if (!(baseAddress = PhLoadLibrary(DllName)))
             return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
     }
 
     return PhGetClassObjectDllBase(baseAddress, Rclsid, Riid, Ppv);
+#endif
+}
+
+HRESULT PhGetActivationFactoryDllBase(
+    _In_ PVOID DllBase,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+    HRESULT (WINAPI* DllGetActivationFactory_I)(_In_ HSTRING RuntimeClassId, _Out_ PVOID* ActivationFactory);
+    HRESULT status;
+    HSTRING_REFERENCE string;
+    IActivationFactory* activationFactory;
+
+    PhCreateWindowsRuntimeStringReference(RuntimeClass, &string);
+
+    if (!(DllGetActivationFactory_I = PhGetDllBaseProcedureAddress(DllBase, "DllGetActivationFactory", 0)))
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    status = DllGetActivationFactory_I(
+        HSTRING_FROM_STRING(string),
+        &activationFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IActivationFactory_QueryInterface(
+            activationFactory,
+            Riid,
+            Ppv
+            );
+        IActivationFactory_Release(activationFactory);
+    }
+
+    return status;
+}
+
+// rev from RoGetActivationFactory (dmex)
+HRESULT PhGetActivationFactory(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+#if (PH_NATIVE_COM_CLASS_FACTORY || PH_BUILD_MSIX)
+    #include <roapi.h>
+    #include <winstring.h>
+    HRESULT status;
+    HSTRING runtimeClassStringHandle = NULL;
+    HSTRING_HEADER runtimeClassStringHeader;
+
+    status = WindowsCreateStringReference(
+        RuntimeClass, 
+        (UINT32)PhCountStringZ((PWSTR)RuntimeClass), 
+        &runtimeClassStringHeader,
+        &runtimeClassStringHandle
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = RoGetActivationFactory(
+            runtimeClassStringHandle,
+            Riid,
+            Ppv
+            );
+    }
+
+    return status;
+#else
+    PVOID baseAddress;
+
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
+    {
+        if (!(baseAddress = PhLoadLibrary(DllName)))
+            return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
+    }
+
+    return PhGetActivationFactoryDllBase(baseAddress, RuntimeClass, Riid, Ppv);
+#endif
+}
+
+HRESULT PhActivateInstanceDllBase(
+    _In_ PVOID DllBase,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+    HRESULT (WINAPI* DllGetActivationFactory_I)(_In_ HSTRING RuntimeClassId, _Out_ PVOID * ActivationFactory);
+    HRESULT status;
+    HSTRING_REFERENCE string;
+    IActivationFactory* activationFactory;
+    IInspectable* inspectableObject;
+
+    if (FAILED(status = PhCreateWindowsRuntimeStringReference(RuntimeClass, &string)))
+        return status;
+
+    if (!(DllGetActivationFactory_I = PhGetDllBaseProcedureAddress(DllBase, "DllGetActivationFactory", 0)))
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    status = DllGetActivationFactory_I(
+        HSTRING_FROM_STRING(string),
+        &activationFactory
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = IActivationFactory_ActivateInstance(
+            activationFactory,
+            &inspectableObject
+            );
+
+        if (SUCCEEDED(status))
+        {
+            status = IInspectable_QueryInterface(
+                inspectableObject,
+                Riid,
+                Ppv
+                );
+
+            IInspectable_Release(inspectableObject);
+        }
+
+        IActivationFactory_Release(activationFactory);
+    }
+
+    return status;
+}
+
+// rev from RoActivateInstance (dmex)
+HRESULT PhActivateInstance(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    )
+{
+#if (PH_NATIVE_COM_CLASS_FACTORY || PH_BUILD_MSIX)
+    #include <roapi.h>
+    #include <winstring.h>
+    HRESULT status;
+    HSTRING runtimeClassStringHandle = NULL;
+    HSTRING_HEADER runtimeClassStringHeader;
+    IInspectable* inspectableObject;
+
+    status = WindowsCreateStringReference(
+        RuntimeClass,
+        (UINT32)PhCountStringZ((PWSTR)RuntimeClass),
+        &runtimeClassStringHeader,
+        &runtimeClassStringHandle
+        );
+
+    if (SUCCEEDED(status))
+    {
+        status = RoActivateInstance(
+            runtimeClassStringHandle,
+            &inspectableObject
+            );
+
+        if (SUCCEEDED(status))
+        {
+            status = IInspectable_QueryInterface(
+                inspectableObject,
+                Riid,
+                Ppv
+                );
+            IInspectable_Release(inspectableObject);
+        }
+    }
+
+    return status;
+#else
+    PVOID baseAddress;
+
+    if (!(baseAddress = PhGetLoaderEntryDllBaseZ((PWSTR)DllName)))
+    {
+        if (!(baseAddress = PhLoadLibrary(DllName)))
+            return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
+    }
+
+    return PhActivateInstanceDllBase(baseAddress, RuntimeClass, Riid, Ppv);
+#endif
 }
 
 #if (PH_NATIVE_RING_BUFFER)
@@ -7205,7 +7498,7 @@ CleanupExit:
 
 NTSTATUS PhDelayExecutionEx(
     _In_ BOOLEAN Alertable,
-    _In_opt_ PLARGE_INTEGER DelayInterval
+    _In_ PLARGE_INTEGER DelayInterval
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
@@ -7376,7 +7669,7 @@ HRESULT PhCreateProcessAsInteractiveUser(
 
     if (WdcRunTaskAsInteractiveUser_I)
     {
-        return WdcRunTaskAsInteractiveUser_I(CommandLine, CurrentDirectory, 0) == S_OK;
+        return WdcRunTaskAsInteractiveUser_I(CommandLine, CurrentDirectory, 0);
     }
 
     return E_NOTIMPL;

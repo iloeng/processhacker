@@ -204,12 +204,49 @@ VOID PvAddTreeViewSections(
     // Exports page
     if (NT_SUCCESS(PhGetMappedImageExports(&exports, &PvMappedImage)) && exports.NumberOfEntries != 0)
     {
+        PPV_EXPORTS_PAGECONTEXT exportsPageContext;
+        PPV_PROPPAGECONTEXT propPageContext;
+        LPPROPSHEETPAGE propSheetPage;
+
+        exportsPageContext = PhAllocateZero(sizeof(PV_EXPORTS_PAGECONTEXT));
+        exportsPageContext->FreePropPageContext = TRUE;
+        exportsPageContext->Context = ULongToPtr(0); // PhGetMappedImageExportsEx with no flags
+
+        propPageContext = PhAllocateZero(sizeof(PV_PROPPAGECONTEXT));
+        propPageContext->Context = exportsPageContext;
+        propSheetPage = PhAllocateZero(sizeof(PROPSHEETPAGE));
+        propSheetPage->lParam = (LPARAM)propPageContext;
+
         PvCreateTabSection(
             L"Exports",
             PhInstanceHandle,
             MAKEINTRESOURCE(IDD_PEEXPORTS),
             PvPeExportsDlgProc,
-            NULL
+            propSheetPage
+            );
+    }
+
+    if (NT_SUCCESS(PhGetMappedImageExportsEx(&exports, &PvMappedImage, PH_GET_IMAGE_EXPORTS_ARM64EC)) && exports.NumberOfEntries != 0)
+    {
+        PPV_EXPORTS_PAGECONTEXT exportsPageContext;
+        PPV_PROPPAGECONTEXT propPageContext;
+        LPPROPSHEETPAGE propSheetPage;
+
+        exportsPageContext = PhAllocateZero(sizeof(PV_EXPORTS_PAGECONTEXT));
+        exportsPageContext->FreePropPageContext = TRUE;
+        exportsPageContext->Context = ULongToPtr(PH_GET_IMAGE_EXPORTS_ARM64EC);
+
+        propPageContext = PhAllocateZero(sizeof(PV_PROPPAGECONTEXT));
+        propPageContext->Context = exportsPageContext;
+        propSheetPage = PhAllocateZero(sizeof(PROPSHEETPAGE));
+        propSheetPage->lParam = (LPARAM)propPageContext;
+
+        PvCreateTabSection(
+            L"Exports ARM64EC",
+            PhInstanceHandle,
+            MAKEINTRESOURCE(IDD_PEEXPORTS),
+            PvPeExportsDlgProc,
+            propSheetPage
             );
     }
 
@@ -357,6 +394,53 @@ VOID PvAddTreeViewSections(
             PvpPeRelocationDlgProc,
             NULL
             );
+    }
+
+    // Dynmic Relocations page
+    if (NT_SUCCESS(PhGetMappedImageDynamicRelocationsTable(&PvMappedImage, NULL)))
+    {
+        PvCreateTabSection(
+            L"Dynamic Relocations",
+            PhInstanceHandle,
+            MAKEINTRESOURCE(IDD_PERELOCATIONS),
+            PvpPeDynamicRelocationDlgProc,
+            NULL
+            );
+    }
+
+    // CHPE page
+    {
+        BOOLEAN hasCHPE = FALSE;
+
+        if (PvMappedImage.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+        {
+            if (NT_SUCCESS(PhGetMappedImageLoadConfig32(&PvMappedImage, &config32)) &&
+                RTL_CONTAINS_FIELD(config32, config32->Size, CHPEMetadataPointer))
+            {
+                if (config32->CHPEMetadataPointer)
+                    hasCHPE = TRUE;
+            }
+        }
+        else
+        {
+            if (NT_SUCCESS(PhGetMappedImageLoadConfig64(&PvMappedImage, &config64)) &&
+                RTL_CONTAINS_FIELD(config64, config64->Size, CHPEMetadataPointer))
+            {
+                if (config64->CHPEMetadataPointer)
+                    hasCHPE = TRUE;
+            }
+        }
+
+        if (hasCHPE)
+        {
+            PvCreateTabSection(
+                L"CHPE",
+                PhInstanceHandle,
+                MAKEINTRESOURCE(IDD_PELOADCONFIG),
+                PvpPeCHPEDlgProc,
+                NULL
+                );
+        }
     }
 
     // Certificates page
@@ -642,7 +726,7 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
             PhAddLayoutItem(&PvTabWindowLayoutManager, GetDlgItem(hwndDlg, IDC_SECURITY), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM);
             PhAddLayoutItem(&PvTabWindowLayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
-            if (PeEnableThemeSupport)
+            if (PhEnableThemeSupport)
                 PhInitializeWindowTheme(hwndDlg, TRUE);
 
             {
@@ -1067,5 +1151,5 @@ VOID PvCreateTabSectionDialog(
         Section->Parameter
         );
 
-    PhInitializeWindowTheme(Section->DialogHandle, PeEnableThemeSupport);
+    PhInitializeWindowTheme(Section->DialogHandle, PhEnableThemeSupport);
 }

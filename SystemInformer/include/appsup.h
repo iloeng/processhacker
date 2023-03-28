@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2016-2017
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef PH_APPSUP_H
 #define PH_APPSUP_H
 
@@ -26,6 +38,13 @@ PhIsProcessSuspended(
 BOOLEAN
 NTAPI
 PhIsProcessBackground(
+    _In_ ULONG PriorityClass
+    );
+
+PHAPPAPI
+PPH_STRINGREF
+NTAPI
+PhGetProcessPriorityClassString(
     _In_ ULONG PriorityClass
     );
 // end_phapppub
@@ -107,11 +126,6 @@ PhaGetProcessKnownCommandLine(
     _Out_ PPH_KNOWN_PROCESS_COMMAND_LINE KnownCommandLine
     );
 // end_phapppub
-
-PPH_STRING PhGetServiceRelevantFileName(
-    _In_ PPH_STRINGREF ServiceName,
-    _In_ SC_HANDLE ServiceHandle
-    );
 
 PPH_STRING PhEscapeStringForDelimiter(
     _In_ PPH_STRING String,
@@ -467,9 +481,47 @@ PhGetApplicationIcon(
     );
 
 PHAPPAPI
+HICON
+NTAPI
+PhGetApplicationIconEx(
+    _In_ BOOLEAN SmallIcon,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
 VOID
 NTAPI
 PhSetApplicationWindowIcon(
+    _In_ HWND WindowHandle
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhSetApplicationWindowIconEx(
+    _In_ HWND WindowHandle,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhDeleteApplicationWindowIcon(
+    _In_ HWND WindowHandle
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhSetStaticWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_opt_ LONG WindowDpi
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhDeleteStaticWindowIcon(
     _In_ HWND WindowHandle
     );
 // end_phapppub
@@ -498,13 +550,35 @@ PhWordMatchStringRef(
     _In_ PPH_STRINGREF Text
     );
 
-PHAPPAPI
+FORCEINLINE
 BOOLEAN
 NTAPI
 PhWordMatchStringZ(
     _In_ PPH_STRING SearchText,
     _In_ PWSTR Text
-    );
+    )
+{
+    PH_STRINGREF text;
+
+    PhInitializeStringRef(&text, Text);
+
+    return PhWordMatchStringRef(&SearchText->sr, &text);
+}
+
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhWordMatchStringLongHintZ(
+    _In_ PPH_STRING SearchText,
+    _In_ PWSTR Text
+    )
+{
+    PH_STRINGREF text;
+
+    PhInitializeStringRefLongHint(&text, Text);
+
+    return PhWordMatchStringRef(&SearchText->sr, &text);
+}
 
 PHAPPAPI
 PVOID
@@ -537,7 +611,7 @@ FORCEINLINE PVOID PhpGenericPropertyPageHeader(
             PhSetWindowContext(hwndDlg, ContextHash, context);
         }
         break;
-    case WM_DESTROY:
+    case WM_NCDESTROY:
         {
             context = PhGetWindowContext(hwndDlg, ContextHash);
             PhRemoveWindowContext(hwndDlg, ContextHash);

@@ -65,7 +65,7 @@ typedef enum _MANDATORY_LEVEL_RID {
     MandatoryUntrustedRID = SECURITY_MANDATORY_UNTRUSTED_RID,
     MandatoryLowRID = SECURITY_MANDATORY_LOW_RID,
     MandatoryMediumRID = SECURITY_MANDATORY_MEDIUM_RID,
-    //MandatoryMediumPlusRID = SECURITY_MANDATORY_MEDIUM_PLUS_RID,
+    MandatoryMediumPlusRID = SECURITY_MANDATORY_MEDIUM_PLUS_RID,
     MandatoryHighRID = SECURITY_MANDATORY_HIGH_RID,
     MandatorySystemRID = SECURITY_MANDATORY_SYSTEM_RID,
     MandatorySecureProcessRID = SECURITY_MANDATORY_PROTECTED_PROCESS_RID
@@ -90,7 +90,25 @@ PhOpenProcess(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhOpenProcessPublic(
+    _Out_ PHANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ProcessId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhOpenThread(
+    _Out_ PHANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ HANDLE ThreadId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenThreadPublic(
     _Out_ PHANDLE ThreadHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_ HANDLE ThreadId
@@ -111,6 +129,25 @@ NTAPI
 PhOpenProcessToken(
     _In_ HANDLE ProcessHandle,
     _In_ ACCESS_MASK DesiredAccess,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenProcessTokenPublic(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenThreadToken(
+    _In_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ BOOLEAN OpenAsSelf,
     _Out_ PHANDLE TokenHandle
     );
 
@@ -620,9 +657,26 @@ PhGetTokenSecurityAttributes(
     );
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetTokenSecurityAttribute(
+    _In_ HANDLE TokenHandle,
+    _In_ PPH_STRINGREF AttributeName,
+    _Out_ PTOKEN_SECURITY_ATTRIBUTES_INFORMATION* SecurityAttributes
+    );
+
+PHLIBAPI
 BOOLEAN
 NTAPI
-PhIsTokenFullTrustPackage(
+PhDoesTokenSecurityAttributeExist(
+    _In_ HANDLE TokenHandle,
+    _In_ PPH_STRINGREF AttributeName
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetTokenIsFullTrustPackage(
     _In_ HANDLE TokenHandle
     );
 
@@ -651,11 +705,174 @@ PhGetTokenPackageFullName(
     );
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetProcessIsStronglyNamed(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PBOOLEAN IsStronglyNamed
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetProcessIsFullTrustPackage(
+    _In_ HANDLE ProcessHandle
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetProcessPackageFullName(
     _In_ HANDLE ProcessHandle
     );
+
+// rev from RtlInitializeSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhInitializeSid(
+    _Out_ PSID Sid,
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthority,
+    _In_ UCHAR SubAuthorityCount
+    )
+{
+    ((PISID)Sid)->Revision = SID_REVISION;
+    ((PISID)Sid)->IdentifierAuthority = *IdentifierAuthority;
+    ((PISID)Sid)->SubAuthorityCount = SubAuthorityCount;
+
+    for (UCHAR i = 0; i < SubAuthorityCount; i++)
+    {
+        ((PISID)Sid)->SubAuthority[i] = 0;
+    }
+
+    return TRUE;
+}
+
+// rev from RtlLengthSid (dmex)
+FORCEINLINE
+ULONG
+NTAPI
+PhLengthSid(
+    _In_ PSID Sid
+    )
+{
+    //return UFIELD_OFFSET(SID, SubAuthority) + (((PISID)Sid)->SubAuthorityCount * sizeof(ULONG));
+    return UFIELD_OFFSET(SID, SubAuthority[((PISID)Sid)->SubAuthorityCount]);
+}
+
+// rev from RtlLengthRequiredSid (dmex)
+FORCEINLINE
+ULONG
+NTAPI
+PhLengthRequiredSid(
+    _In_ ULONG SubAuthorityCount
+    )
+{
+    return UFIELD_OFFSET(SID, SubAuthority[SubAuthorityCount]);
+}
+
+// rev from RtlEqualSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhEqualSid(
+    _In_ PSID Sid1,
+    _In_ PSID Sid2
+    )
+{
+    return (BOOLEAN)RtlEqualMemory(Sid1, Sid2, PhLengthSid(Sid1));
+}
+
+// rev from RtlValidSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhValidSid(
+    _In_ PSID Sid
+    )
+{
+    if (
+        ((PISID)Sid) &&
+        ((PISID)Sid)->Revision == SID_REVISION &&
+        ((PISID)Sid)->SubAuthorityCount <= SID_MAX_SUB_AUTHORITIES
+        )
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+// rev from RtlSubAuthoritySid (dmex)
+FORCEINLINE
+PULONG
+NTAPI
+PhSubAuthoritySid(
+    _In_ PSID Sid,
+    _In_ ULONG SubAuthority
+    )
+{
+    return &((PISID)Sid)->SubAuthority[SubAuthority];
+}
+
+// rev from RtlSubAuthorityCountSid (dmex)
+FORCEINLINE
+PUCHAR
+NTAPI
+PhSubAuthorityCountSid(
+    _In_ PSID Sid
+    )
+{
+    return &((PISID)Sid)->SubAuthorityCount;
+}
+
+// rev from RtlIdentifierAuthoritySid (dmex)
+FORCEINLINE
+PSID_IDENTIFIER_AUTHORITY
+NTAPI
+PhIdentifierAuthoritySid(
+    _In_ PSID Sid
+    )
+{
+    return &((PISID)Sid)->IdentifierAuthority;
+}
+
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhEqualIdentifierAuthoritySid(
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthoritySid1,
+    _In_ PSID_IDENTIFIER_AUTHORITY IdentifierAuthoritySid2
+    )
+{
+    return (BOOLEAN)RtlEqualMemory(IdentifierAuthoritySid1, IdentifierAuthoritySid2, sizeof(SID_IDENTIFIER_AUTHORITY));
+}
+
+// rev from RtlFreeSid (dmex)
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhFreeSid(
+    _In_ _Post_invalid_ PSID Sid
+    )
+{
+    return !!RtlFreeHeap(RtlProcessHeap(), 0, Sid);
+}
+
+// rev from RtlFreeUnicodeString (dmex)
+FORCEINLINE
+VOID
+NTAPI
+PhFreeUnicodeString(
+    _Inout_ _At_(UnicodeString->Buffer, _Frees_ptr_opt_ _Post_invalid_) PUNICODE_STRING UnicodeString
+    )
+{
+#ifdef PHNT_INLINE_FREE_UNICODE_STRING
+    RtlFreeUnicodeString(UnicodeString);
+#else
+    RtlFreeHeap(RtlProcessHeap(), 0, UnicodeString->Buffer);
+#endif
+}
 
 PHLIBAPI
 NTSTATUS
@@ -1250,6 +1467,37 @@ PhEnumProcessesEx(
     _In_ SYSTEM_INFORMATION_CLASS SystemInformationClass
     );
 
+typedef BOOLEAN (NTAPI *PPH_ENUM_NEXT_PROCESS)(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumNextProcess(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_PROCESS Callback,
+    _In_opt_ PVOID Context
+    );
+
+typedef BOOLEAN (NTAPI *PPH_ENUM_NEXT_THREAD)(
+    _In_ HANDLE ThreadHandle,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumNextThread(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ThreadHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ PPH_ENUM_NEXT_THREAD Callback,
+    _In_opt_ PVOID Context
+    );
+
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -1353,7 +1601,7 @@ PhGetProcessIsDotNet(
 #define PH_CLR_VERSION_2_0 0x4
 #define PH_CLR_VERSION_4_ABOVE 0x8
 #define PH_CLR_CORE_3_0_ABOVE 0x10
-#define PH_CLR_VERSION_MASK 0x20
+#define PH_CLR_VERSION_MASK 0x1f
 
 #define PH_CLR_MSCORLIB_PRESENT 0x10000
 #define PH_CLR_CORELIB_PRESENT 0x20000
@@ -1395,6 +1643,7 @@ PhEnumDirectoryObjects(
     );
 
 typedef BOOLEAN (NTAPI *PPH_ENUM_DIRECTORY_FILE)(
+    _In_ HANDLE RootDirectory,
     _In_ PVOID Information,
     _In_opt_ PVOID Context
     );
@@ -1553,7 +1802,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhResolveDevicePrefix(
-    _In_ PPH_STRING Name
+    _In_ PPH_STRINGREF Name
     );
 
 PHLIBAPI
@@ -1561,6 +1810,29 @@ PPH_STRING
 NTAPI
 PhGetFileName(
     _In_ PPH_STRING FileName
+    );
+
+// "X:\"
+#define PATH_IS_WIN32_DRIVE_PREFIX(s) ( \
+    (s)->Length >= 2 && \
+    (s)->Buffer[0] >= L'A' && \
+    (s)->Buffer[0] <= L'Z' && \
+    (s)->Buffer[1] == L':' && \
+    (s)->Buffer[2] == OBJ_NAME_PATH_SEPARATOR)
+
+// "\??\" or "\\?\" or "\\.\"
+#define PATH_IS_WIN32_DOSDEVICES_PREFIX(s) ( \
+    (s)->Length >= 3 && \
+    (s)->Buffer[0] == '\\' && \
+    ((s)->Buffer[1] == '?' || (s)->Buffer[1] == '\\') && \
+    (s)->Buffer[2] == '?' || (s)->Buffer[2] == '.'&& \
+    (s)->Buffer[3] == '\\')
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhDosPathNameToNtPathName(
+    _In_ PPH_STRINGREF Name
     );
 
 #define PH_MODULE_TYPE_MODULE 1
@@ -1580,7 +1852,6 @@ typedef struct _PH_MODULE_INFO
     PVOID EntryPoint;
     ULONG Flags;
     PPH_STRING Name;
-    PPH_STRING FileNameWin32;
     PPH_STRING FileName;
 
     USHORT LoadOrderIndex; // -1 if N/A
@@ -2209,6 +2480,14 @@ PhGetThreadLastSystemCall(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhCreateImpersonationToken(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PHANDLE TokenHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhImpersonateToken(
     _In_ HANDLE ThreadHandle,
     _In_ HANDLE TokenHandle
@@ -2456,8 +2735,20 @@ NTAPI
 PhGetFirmwareEnvironmentVariable(
     _In_ PPH_STRINGREF VariableName,
     _In_ PPH_STRINGREF VendorGuid,
-    _Out_ PVOID* VariableValueBuffer,
-    _Out_opt_ PULONG VariableValueLength
+    _Out_writes_bytes_opt_(*ValueLength) PVOID* ValueBuffer,
+    _Out_opt_ PULONG ValueLength,
+    _Out_opt_ PULONG ValueAttributes
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhSetFirmwareEnvironmentVariable(
+    _In_ PPH_STRINGREF VariableName,
+    _In_ PPH_STRINGREF VendorGuid,
+    _In_reads_bytes_opt_(ValueLength) PVOID ValueBuffer,
+    _In_ ULONG ValueLength,
+    _In_ ULONG Attributes
     );
 
 #define PH_FIRST_FIRMWARE_VALUE(Variables) ((PVARIABLE_NAME_AND_VALUE)(Variables))
@@ -2536,6 +2827,13 @@ PhGetSystemLogicalProcessorInformation(
     );
 
 PHLIBAPI
+BOOLEAN
+NTAPI
+PhIsProcessorFeaturePresent(
+    _In_ ULONG ProcessorFeature
+    );
+
+PHLIBAPI
 USHORT
 NTAPI
 PhGetActiveProcessorCount(
@@ -2589,7 +2887,7 @@ PhGetNumaProcessorNode(
 PHLIBAPI
 NTSTATUS
 NTAPI
-PhSetProcessValidCallTarget(
+PhGuardGrantSuppressedCallAccess(
     _In_ HANDLE ProcessHandle,
     _In_ PVOID VirtualAddress
     );

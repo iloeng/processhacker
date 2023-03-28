@@ -127,7 +127,7 @@ PPH_GET_CLIENT_ID_NAME PhSetHandleClientIdFunction(
 }
 
 NTSTATUS PhpGetObjectBasicInformation(
-    _In_opt_ HANDLE ProcessHandle,
+    _In_ HANDLE ProcessHandle,
     _In_ HANDLE Handle,
     _Out_ POBJECT_BASIC_INFORMATION BasicInformation
     )
@@ -259,7 +259,7 @@ NTSTATUS PhpGetObjectTypeName(
         }
 
         if (returnLength == 0)
-            return status;
+            return STATUS_UNSUCCESSFUL;
 
         buffer = PhAllocate(returnLength);
 
@@ -398,58 +398,21 @@ NTSTATUS PhQueryObjectName(
     _Out_ PPH_STRING *ObjectName
     )
 {
-    NTSTATUS status;
-    POBJECT_NAME_INFORMATION buffer;
-    ULONG bufferSize;
-    ULONG attempts = 8;
+    if (Handle == NULL || Handle == NtCurrentProcess() || Handle == NtCurrentThread())
+        return STATUS_INVALID_HANDLE;
 
-    bufferSize = sizeof(OBJECT_NAME_INFORMATION) + (MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR));
-    buffer = PhAllocate(bufferSize);
+    return PhpGetObjectName(NtCurrentProcess(), Handle, FALSE, ObjectName);
+}
 
-    do
-    {
-        if (KphLevel() >= KphLevelMed)
-        {
-            status = KphQueryInformationObject(
-                NtCurrentProcess(),
-                Handle,
-                KphObjectNameInformation,
-                buffer,
-                bufferSize,
-                &bufferSize
-                );
-        }
-        else
-        {
-            status = NtQueryObject(
-                Handle,
-                ObjectNameInformation,
-                buffer,
-                bufferSize,
-                &bufferSize
-                );
-        }
+NTSTATUS PhQueryObjectBasicInformation(
+    _In_ HANDLE Handle,
+    _Out_ POBJECT_BASIC_INFORMATION BasicInformation
+    )
+{
+    if (Handle == NULL || Handle == NtCurrentProcess() || Handle == NtCurrentThread())
+        return STATUS_INVALID_HANDLE;
 
-        if (status == STATUS_BUFFER_OVERFLOW || status == STATUS_INFO_LENGTH_MISMATCH ||
-            status == STATUS_BUFFER_TOO_SMALL)
-        {
-            PhFree(buffer);
-            buffer = PhAllocate(bufferSize);
-        }
-        else
-        {
-            break;
-        }
-    } while (--attempts);
-
-    if (NT_SUCCESS(status))
-    {
-        *ObjectName = PhCreateStringFromUnicodeString(&buffer->Name);
-    }
-
-    PhFree(buffer);
-
-    return status;
+    return PhpGetObjectBasicInformation(NtCurrentProcess(), Handle, BasicInformation);
 }
 
 NTSTATUS PhpGetEtwObjectName(
@@ -1064,8 +1027,7 @@ NTSTATUS PhpGetBestObjectName(
     PPH_STRING bestObjectName = NULL;
     PPH_GET_CLIENT_ID_NAME handleGetClientIdName = PhHandleGetClientIdName;
 
-    if (PhEqualString2(TypeName, L"EtwRegistration", TRUE) ||
-        PhEqualString2(TypeName, L"EtwConsumer", TRUE))
+    if (PhEqualString2(TypeName, L"EtwRegistration", TRUE))
     {
         if (KphLevel() >= KphLevelMed)
         {
@@ -1089,7 +1051,7 @@ NTSTATUS PhpGetBestObjectName(
     else if (PhEqualString2(TypeName, L"File", TRUE))
     {
         // Convert the file name to a DOS file name.
-        bestObjectName = PhResolveDevicePrefix(ObjectName);
+        bestObjectName = PhResolveDevicePrefix(&ObjectName->sr);
 
         if (!bestObjectName)
         {
@@ -1319,7 +1281,7 @@ NTSTATUS PhpGetBestObjectName(
 
         if (NT_SUCCESS(status))
         {
-            bestObjectName = PhResolveDevicePrefix(fileName);
+            bestObjectName = PhResolveDevicePrefix(&fileName->sr);
             PhDereferenceObject(fileName);
         }
         else
@@ -1867,7 +1829,7 @@ NTSTATUS PhGetHandleInformationEx(
 {
     NTSTATUS status = STATUS_SUCCESS;
     NTSTATUS subStatus = STATUS_SUCCESS;
-    HANDLE dupHandle = NULL;
+    HANDLE objectHandle = NULL;
     PPH_STRING typeName = NULL;
     PPH_STRING objectName = NULL;
     PPH_STRING bestObjectName = NULL;
@@ -1891,7 +1853,7 @@ NTSTATUS PhGetHandleInformationEx(
                 ProcessHandle,
                 Handle,
                 NtCurrentProcess(),
-                &dupHandle,
+                &objectHandle,
                 0,
                 0,
                 0
@@ -1902,8 +1864,12 @@ NTSTATUS PhGetHandleInformationEx(
         }
         else
         {
-            dupHandle = Handle;
+            objectHandle = Handle;
         }
+    }
+    else
+    {
+        objectHandle = Handle;
     }
 
     // Get basic information.
@@ -1911,7 +1877,7 @@ NTSTATUS PhGetHandleInformationEx(
     {
         status = PhpGetObjectBasicInformation(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             BasicInformation
             );
 
@@ -1926,7 +1892,7 @@ NTSTATUS PhGetHandleInformationEx(
     // Get the type name.
     status = PhpGetObjectTypeName(
         ProcessHandle,
-        useKph ? Handle : dupHandle,
+        objectHandle,
         ObjectTypeNumber,
         &typeName
         );
@@ -1944,12 +1910,12 @@ NTSTATUS PhGetHandleInformationEx(
     {
         status = PhpGetObjectName(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             TRUE,
             &objectName
             );
     }
-    else if ((PhEqualString2(typeName, L"EtwRegistration", TRUE) || PhEqualString2(typeName, L"EtwConsumer", TRUE)) && useKph)
+    else if (PhEqualString2(typeName, L"EtwRegistration", TRUE) && useKph)
     {
         status = PhpGetEtwObjectName(
             ProcessHandle,
@@ -1962,7 +1928,7 @@ NTSTATUS PhGetHandleInformationEx(
         // Query the object normally.
         status = PhpGetObjectName(
             ProcessHandle,
-            useKph ? Handle : dupHandle,
+            objectHandle,
             FALSE,
             &objectName
             );
@@ -2017,8 +1983,8 @@ CleanupExit:
             PhSetReference(BestObjectName, bestObjectName);
     }
 
-    if (dupHandle && ProcessHandle != NtCurrentProcess())
-        NtClose(dupHandle);
+    if (!useKph && objectHandle && ProcessHandle != NtCurrentProcess())
+        NtClose(objectHandle);
 
     PhClearReference(&typeName);
     PhClearReference(&objectName);

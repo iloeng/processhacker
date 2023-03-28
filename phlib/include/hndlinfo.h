@@ -39,6 +39,14 @@ PhQueryObjectName(
     );
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhQueryObjectBasicInformation(
+    _In_ HANDLE Handle,
+    _Out_ POBJECT_BASIC_INFORMATION BasicInformation
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetEtwPublisherName(

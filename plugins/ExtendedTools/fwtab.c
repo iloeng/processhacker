@@ -170,7 +170,7 @@ BOOLEAN FwTabPageCallback(
         return TRUE;
     case MainTabPageSaveSettings:
         {
-            SaveSettingsFwTreeList(FwTreeNewHandle);
+            SaveSettingsFwTreeList();
         }
         return TRUE;
     case MainTabPageSelected:
@@ -327,7 +327,7 @@ VOID LoadSettingsFwTreeList(
 }
 
 VOID SaveSettingsFwTreeList(
-    _In_ HWND TreeNewHandle
+    VOID
     )
 {
     PPH_STRING settings;
@@ -338,11 +338,11 @@ VOID SaveSettingsFwTreeList(
     if (!FwTreeNewCreated)
         return;
 
-    settings = PhCmSaveSettings(TreeNewHandle);
+    settings = PhCmSaveSettings(FwTreeNewHandle);
     PhSetStringSetting2(SETTING_NAME_FW_TREE_LIST_COLUMNS, &settings->sr);
     PhDereferenceObject(settings);
 
-    TreeNew_GetSort(TreeNewHandle, &sortColumn, &sortOrder);
+    TreeNew_GetSort(FwTreeNewHandle, &sortColumn, &sortOrder);
     sortSettings.X = sortColumn;
     sortSettings.Y = sortOrder;
     PhSetIntegerPairSetting(SETTING_NAME_FW_TREE_LIST_SORT, sortSettings);
@@ -1205,11 +1205,6 @@ BOOLEAN NTAPI FwTreeNewCallback(
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
 
             ShowFwContextMenu(WindowHandle, contextMenuEvent);
-        }
-        return TRUE;
-    case TreeNewDestroying:
-        {
-            //SaveSettingsTreeList();
         }
         return TRUE;
     case TreeNewCustomDraw:

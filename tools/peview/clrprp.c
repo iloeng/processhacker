@@ -165,6 +165,27 @@ PPH_STRING PvpPeGetClrVersionText(
         );
 }
 
+PPH_STRING PvpPeGetClrEntryPoint(
+    VOID
+    )
+{
+    WCHAR value[PH_INT64_STR_LEN_1] = L"";
+
+    if (PvImageCor20Header->Flags & COMIMAGE_FLAGS_NATIVE_ENTRYPOINT)
+    {
+        PhPrintPointer(value, UlongToPtr(PvImageCor20Header->EntryPointRVA));
+        return PhCreateString(value);
+    }
+    else if (PvImageCor20Header->EntryPointToken)
+    {
+        // TODO: Lookup EntryPointToken from metadata table.
+        PhPrintPointer(value, UlongToPtr(PvImageCor20Header->EntryPointToken));
+        return PhCreateString(value);
+    }
+
+    return PhCreateString(L"N/A");
+}
+
 PPH_STRING PvpPeGetClrStorageVersionText(
     _In_ PSTORAGESIGNATURE ClrMetaData
     )
@@ -273,30 +294,12 @@ VOID PvpPeClrEnumSections(
 
         if (streamHeader->Offset && streamHeader->Size)
         {
-            __try
+            PPH_STRING hashString;
+
+            if (hashString = PvHashBuffer(PTR_ADD_OFFSET(ClrMetaData, streamHeader->Offset), streamHeader->Size))
             {
-                PH_HASH_CONTEXT hashContext;
-                PPH_STRING hashString;
-                UCHAR hash[32];
-
-                PhInitializeHash(&hashContext, Md5HashAlgorithm); // PhGetIntegerSetting(L"HashAlgorithm")
-                PhUpdateHash(&hashContext, PTR_ADD_OFFSET(ClrMetaData, streamHeader->Offset), streamHeader->Size);
-
-                if (PhFinalHash(&hashContext, hash, 16, NULL))
-                {
-                    hashString = PhBufferToHexString(hash, 16);
-                    PhSetListViewSubItem(ListViewHandle, lvItemIndex, 5, hashString->Buffer);
-                    PhDereferenceObject(hashString);
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                PPH_STRING message;
-
-                //message = PH_AUTO(PhGetNtMessage(GetExceptionCode()));
-                message = PH_AUTO(PhGetWin32Message(PhNtStatusToDosError(GetExceptionCode()))); // WIN32_FROM_NTSTATUS
-
-                PhSetListViewSubItem(ListViewHandle, lvItemIndex, 5, PhGetStringOrEmpty(message));
+                PhSetListViewSubItem(ListViewHandle, lvItemIndex, 5, hashString->Buffer);
+                PhDereferenceObject(hashString);
             }
         }
 
@@ -484,11 +487,14 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
             {
                 PPH_STRING clrVersion = PvpPeGetClrVersionText();
                 PPH_STRING targetVersion = PvGetClrImageTargetFramework();
+                PPH_STRING entryPoint = PvpPeGetClrEntryPoint();
 
                 PhSetDialogItemText(hwndDlg, IDC_RUNTIMEVERSION, PhGetStringOrEmpty(clrVersion));
                 PhSetDialogItemText(hwndDlg, IDC_TARGETVERSION, PhGetStringOrEmpty(targetVersion));
                 PhSetDialogItemText(hwndDlg, IDC_FLAGS, PH_AUTO_T(PH_STRING, PvpPeGetClrFlagsText())->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_ENTRYPOINTSTRING, PhGetStringOrEmpty(entryPoint));
 
+                PhClearReference(&entryPoint);
                 PhClearReference(&targetVersion);
                 PhClearReference(&clrVersion);
             }
@@ -497,6 +503,7 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
                 PhSetDialogItemText(hwndDlg, IDC_RUNTIMEVERSION, L"");
                 PhSetDialogItemText(hwndDlg, IDC_TARGETVERSION, L"");
                 PhSetDialogItemText(hwndDlg, IDC_FLAGS, L"");
+                PhSetDialogItemText(hwndDlg, IDC_ENTRYPOINTSTRING, L"");
             }
 
             if (clrMetaData = PvpPeGetClrMetaDataHeader(context->PdbMetadataAddress))
@@ -513,7 +520,7 @@ INT_PTR CALLBACK PvpPeClrDlgProc(
                 PvpPeClrEnumSections(clrMetaData, context->ListViewHandle);
             }
 
-            PhInitializeWindowTheme(hwndDlg, PeEnableThemeSupport);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:

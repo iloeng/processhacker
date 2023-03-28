@@ -300,6 +300,13 @@ PhGetWin32Message(
     );
 
 PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetWin32FormatMessage(
+    _In_ ULONG Result
+    );
+
+PHLIBAPI
 INT
 NTAPI
 PhShowMessage(
@@ -325,9 +332,29 @@ PhShowMessage2(
     ...
     );
 
-#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
-#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
-#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, TDCBF_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
+#define PH_SHOW_MESSAGE_FLAG_OK_BUTTON      0x0001
+#define PH_SHOW_MESSAGE_FLAG_YES_BUTTON     0x0002
+#define PH_SHOW_MESSAGE_FLAG_NO_BUTTON      0x0004
+#define PH_SHOW_MESSAGE_FLAG_CANCEL_BUTTON  0x0008
+#define PH_SHOW_MESSAGE_FLAG_RETRY_BUTTON   0x0010
+#define PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON   0x0020
+
+#ifndef TD_WARNING_ICON
+#define TD_WARNING_ICON         MAKEINTRESOURCEW(-1)
+#endif
+#ifndef TD_ERROR_ICON
+#define TD_ERROR_ICON           MAKEINTRESOURCEW(-2)
+#endif
+#ifndef TD_INFORMATION_ICON
+#define TD_INFORMATION_ICON     MAKEINTRESOURCEW(-3)
+#endif
+#ifndef TD_SHIELD_ICON
+#define TD_SHIELD_ICON          MAKEINTRESOURCEW(-4)
+#endif
+
+#define PhShowError2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_ERROR_ICON, Title, Format, __VA_ARGS__)
+#define PhShowWarning2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_WARNING_ICON, Title, Format, __VA_ARGS__)
+#define PhShowInformation2(hWnd, Title, Format, ...) PhShowMessage2(hWnd, PH_SHOW_MESSAGE_FLAG_CLOSE_BUTTON, TD_INFORMATION_ICON, Title, Format, __VA_ARGS__)
 
 PHLIBAPI
 BOOLEAN
@@ -508,7 +535,7 @@ PPH_STRING
 NTAPI
 PhEllipsisString(
     _In_ PPH_STRING String,
-    _In_ ULONG DesiredCount
+    _In_ SIZE_T DesiredCount
     );
 
 PHLIBAPI
@@ -516,7 +543,7 @@ PPH_STRING
 NTAPI
 PhEllipsisStringPath(
     _In_ PPH_STRING String,
-    _In_ ULONG DesiredCount
+    _In_ SIZE_T DesiredCount
     );
 
 PHLIBAPI
@@ -829,7 +856,7 @@ PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetBaseNameChangeExtension(
-    _In_ PPH_STRING FileName,
+    _In_ PPH_STRINGREF FileName,
     _In_ PPH_STRINGREF FileExtension
     );
 
@@ -889,6 +916,20 @@ PhGetApplicationDirectoryFileName(
     _In_ PPH_STRINGREF FileName,
     _In_ BOOLEAN NativeFileName
     );
+
+FORCEINLINE
+PPH_STRING
+PhGetApplicationDirectoryFileNameZ(
+    _In_ PWSTR FileName,
+    _In_ BOOLEAN NativeFileName
+    )
+{
+    PH_STRINGREF string;
+
+    PhInitializeStringRef(&string, FileName);
+
+    return PhGetApplicationDirectoryFileName(&string, NativeFileName);
+}
 
 PHLIBAPI
 PPH_STRING
@@ -1168,10 +1209,9 @@ PhShellExecute(
     _In_opt_ PWSTR Parameters
     );
 
+#define PH_SHELL_EXECUTE_DEFAULT 0x0
 #define PH_SHELL_EXECUTE_ADMIN 0x1
 #define PH_SHELL_EXECUTE_PUMP_MESSAGES 0x2
-#define PH_SHELL_EXECUTE_NOZONECHECKS 0x4
-#define PH_SHELL_EXECUTE_NOASYNC 0x8
 
 PHLIBAPI
 _Success_(return)
@@ -1181,6 +1221,7 @@ PhShellExecuteEx(
     _In_opt_ HWND hWnd,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
+    _In_opt_ PWSTR Directory,
     _In_ ULONG ShowWindowType,
     _In_ ULONG Flags,
     _In_opt_ ULONG Timeout,
@@ -1214,23 +1255,7 @@ PhExpandKeyName(
 PHLIBAPI
 PPH_STRING
 NTAPI
-PhQueryRegistryStringRef(
-    _In_ HANDLE KeyHandle,
-    _In_ PPH_STRINGREF ValueName
-    );
-
-PHLIBAPI
-ULONG
-NTAPI
-PhQueryRegistryUlongStringRef(
-    _In_ HANDLE KeyHandle,
-    _In_opt_ PPH_STRINGREF ValueName
-    );
-
-PHLIBAPI
-ULONG64
-NTAPI
-PhQueryRegistryUlong64StringRef(
+PhQueryRegistryString(
     _In_ HANDLE KeyHandle,
     _In_opt_ PPH_STRINGREF ValueName
     );
@@ -1238,55 +1263,62 @@ PhQueryRegistryUlong64StringRef(
 FORCEINLINE
 PPH_STRING
 NTAPI
-PhQueryRegistryString(
+PhQueryRegistryStringZ(
     _In_ HANDLE KeyHandle,
-    _In_opt_ PWSTR ValueName
+    _In_ PWSTR ValueName
     )
 {
     PH_STRINGREF valueName;
 
-    if (ValueName)
-        PhInitializeStringRef(&valueName, ValueName);
-    else
-        PhInitializeEmptyStringRef(&valueName);
+    PhInitializeStringRef(&valueName, ValueName);
 
-    return PhQueryRegistryStringRef(KeyHandle, &valueName);
+    return PhQueryRegistryString(KeyHandle, &valueName);
 }
 
-FORCEINLINE
+PHLIBAPI
 ULONG
 NTAPI
 PhQueryRegistryUlong(
     _In_ HANDLE KeyHandle,
-    _In_opt_ PWSTR ValueName
+    _In_opt_ PPH_STRINGREF ValueName
+    );
+
+FORCEINLINE
+ULONG
+NTAPI
+PhQueryRegistryUlongZ(
+    _In_ HANDLE KeyHandle,
+    _In_ PWSTR ValueName
     )
 {
     PH_STRINGREF valueName;
 
-    if (ValueName)
-        PhInitializeStringRef(&valueName, ValueName);
-    else
-        PhInitializeEmptyStringRef(&valueName);
+    PhInitializeStringRef(&valueName, ValueName);
 
-    return PhQueryRegistryUlongStringRef(KeyHandle, &valueName);
+    return PhQueryRegistryUlong(KeyHandle, &valueName);
 }
 
-FORCEINLINE
+PHLIBAPI
 ULONG64
 NTAPI
 PhQueryRegistryUlong64(
     _In_ HANDLE KeyHandle,
-    _In_opt_ PWSTR ValueName
+    _In_opt_ PPH_STRINGREF ValueName
+    );
+
+FORCEINLINE
+ULONG64
+NTAPI
+PhQueryRegistryUlong64Z(
+    _In_ HANDLE KeyHandle,
+    _In_ PWSTR ValueName
     )
 {
     PH_STRINGREF valueName;
 
-    if (ValueName)
-        PhInitializeStringRef(&valueName, ValueName);
-    else
-        PhInitializeEmptyStringRef(&valueName);
+    PhInitializeStringRef(&valueName, ValueName);
 
-    return PhQueryRegistryUlong64StringRef(KeyHandle, &valueName);
+    return PhQueryRegistryUlong64(KeyHandle, &valueName);
 }
 
 typedef struct _PH_FLAG_MAPPING
@@ -1585,6 +1617,13 @@ PhParseCommandLineFuzzy(
     );
 
 PHLIBAPI
+PPH_LIST
+NTAPI
+PhCommandLineToList(
+    _In_ PCWSTR CommandLine
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhSearchFilePath(
@@ -1644,7 +1683,6 @@ PhFileReadAllTextWin32(
     _In_ BOOLEAN Unicode
     );
 
-_Success_(return == S_OK)
 PHLIBAPI
 HRESULT
 NTAPI
@@ -1655,13 +1693,32 @@ PhGetClassObjectDllBase(
     _Out_ PVOID * Ppv
     );
 
-_Success_(return == S_OK)
 PHLIBAPI
 HRESULT
 NTAPI
 PhGetClassObject(
-    _In_ PWSTR DllName,
+    _In_ PCWSTR DllName,
     _In_ REFCLSID Rclsid,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhGetActivationFactory(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Ppv
+    );
+
+PHLIBAPI
+HRESULT
+NTAPI
+PhActivateInstance(
+    _In_ PCWSTR DllName,
+    _In_ PCWSTR RuntimeClass,
     _In_ REFIID Riid,
     _Out_ PVOID* Ppv
     );
@@ -1775,6 +1832,44 @@ PhUpdateProcThreadAttribute(
     _In_ PVOID Buffer,
     _In_ SIZE_T BufferLength
     );
+
+FORCEINLINE
+BOOLEAN
+PhPtrAddOffset(
+    _Inout_ PVOID* Pointer,
+    _In_ SIZE_T Offset
+    )
+{
+    PVOID pointer;
+
+    pointer = PTR_ADD_OFFSET(*Pointer, Offset);
+    if (pointer < *Pointer)
+        return FALSE;
+
+    *Pointer = pointer;
+    return TRUE;
+}
+
+FORCEINLINE
+BOOLEAN
+PhPtrAdvance(
+    _Inout_ PVOID* Pointer,
+    _In_ PVOID EndPointer,
+    _In_ SIZE_T Offset
+    )
+{
+    PVOID pointer;
+
+    pointer = *Pointer;
+    if (!PhPtrAddOffset(&pointer, Offset))
+        return FALSE;
+
+    if (pointer >= EndPointer)
+        return FALSE;
+
+    *Pointer = pointer;
+    return TRUE;
+}
 
 EXTERN_C_END
 

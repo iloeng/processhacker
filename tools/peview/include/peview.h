@@ -49,6 +49,10 @@ BOOLEAN PvpLoadDbgHelp(
     _Inout_ PPH_SYMBOL_PROVIDER* SymbolProvider
     );
 
+VOID PvInitializeSuperclassControls(
+    VOID
+    );
+
 // peprp
 
 VOID PvPeProperties(
@@ -63,17 +67,6 @@ NTSTATUS PhpOpenFileSecurity(
     _Out_ PHANDLE Handle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ PVOID Context
-    );
-
-DOUBLE PvCalculateEntropyBuffer(
-    _In_ PBYTE Buffer,
-    _In_ SIZE_T BufferLength,
-    _Out_opt_ DOUBLE* BufferVariance
-    );
-
-PPH_STRING PvFormatDoubleCropZero(
-    _In_ DOUBLE Value,
-    _In_ USHORT Precision
     );
 
 // libprp
@@ -158,9 +151,12 @@ VOID PvSetTreeViewImageList(
     _In_ HWND TreeViewHandle
     );
 
-// settings
+PPH_STRING PvHashBuffer(
+    _In_reads_bytes_(Length) PVOID Buffer,
+    _In_ ULONG Length
+    );
 
-extern BOOLEAN PeEnableThemeSupport;
+// settings
 
 VOID PvInitializeSettings(
     VOID
@@ -431,6 +427,12 @@ INT_PTR CALLBACK PvPeImportsDlgProc(
     _In_ LPARAM lParam
     );
 
+typedef struct _PV_EXPORTS_PAGECONTEXT
+{
+    BOOLEAN FreePropPageContext;
+    PVOID Context;
+} PV_EXPORTS_PAGECONTEXT, *PPV_EXPORTS_PAGECONTEXT;
+
 INT_PTR CALLBACK PvPeExportsDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -571,6 +573,13 @@ INT_PTR CALLBACK PvpPeRelocationDlgProc(
     _In_ LPARAM lParam
     );
 
+INT_PTR CALLBACK PvpPeDynamicRelocationDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
 INT_PTR CALLBACK PvpPeSecurityDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -621,6 +630,13 @@ INT_PTR CALLBACK PvpPeHashesDlgProc(
     );
 
 INT_PTR CALLBACK PvpPeVersionInfoDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
+INT_PTR CALLBACK PvpPeCHPEDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,

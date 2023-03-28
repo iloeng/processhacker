@@ -112,8 +112,9 @@ BOOLEAN PvShellExecuteRestart(
         WindowHandle,
         PhGetString(filename),
         PhGetString(parameters),
+        NULL,
         SW_SHOW,
-        0,
+        PH_SHELL_EXECUTE_DEFAULT,
         0,
         NULL
         );
@@ -260,7 +261,7 @@ INT_PTR CALLBACK PvOptionsWndProc(
 
             PvLoadGeneralPage(context);
 
-            PhInitializeWindowTheme(hwndDlg, PeEnableThemeSupport);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:

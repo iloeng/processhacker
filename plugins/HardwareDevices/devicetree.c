@@ -376,6 +376,7 @@ static ULONG DeviceDisabledColor = 0;
 static ULONG DeviceDisconnectedColor = 0;
 static ULONG DeviceHighlightColor = 0;
 
+static BOOLEAN DeviceTreeCreated = FALSE;
 static HWND DeviceTreeHandle = NULL;
 static PDEVICE_TREE DeviceTree = NULL;
 static HIMAGELIST DeviceImageList = NULL;
@@ -3133,7 +3134,7 @@ VOID DevicesTreeLoadSettings(
 }
 
 VOID DevicesTreeSaveSettings(
-    _In_ HWND TreeNewHandle
+    VOID
     )
 {
     PPH_STRING settings;
@@ -3141,9 +3142,11 @@ VOID DevicesTreeSaveSettings(
     ULONG sortColumn;
     ULONG sortOrder;
 
-    PhSaveWindowPlacementToSetting(SETTING_NAME_DEVICE_TREE_WINDOW_POSITION, SETTING_NAME_DEVICE_TREE_WINDOW_SIZE, TreeNewHandle);
-    settings = PhCmSaveSettings(TreeNewHandle);
-    TreeNew_GetSort(TreeNewHandle, &sortColumn, &sortOrder);
+    if (!DeviceTreeCreated)
+        return;
+
+    settings = PhCmSaveSettings(DeviceTreeHandle);
+    TreeNew_GetSort(DeviceTreeHandle, &sortColumn, &sortOrder);
     sortSettings.X = sortColumn;
     sortSettings.Y = sortOrder;
     PhSetStringSetting2(SETTING_NAME_DEVICE_TREE_COLUMNS, &settings->sr);
@@ -3356,6 +3359,8 @@ BOOLEAN DevicesTabPageCallback(
             if (!hwnd)
                 return FALSE;
 
+            DeviceTreeCreated = TRUE;
+
             DevicesTreeInitialize(hwnd);
 
             if (Parameter1)
@@ -3371,13 +3376,7 @@ BOOLEAN DevicesTabPageCallback(
         return TRUE;
     case MainTabPageSaveSettings:
         {
-            if (DeviceTreeHandle)
-                DevicesTreeSaveSettings(DeviceTreeHandle);
-        }
-        return TRUE;
-    case MainTabPageDestroy:
-        {
-            NOTHING;
+            DevicesTreeSaveSettings();
         }
         return TRUE;
     case MainTabPageSelected:

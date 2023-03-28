@@ -218,6 +218,8 @@ INT_PTR CALLBACK OptionsDlgProc(
                     AddOrRemoveCollapseServicesOnStart(
                         Button_GetCheck(GET_WM_COMMAND_HWND(wParam, lParam)) == BST_CHECKED);
 
+                    SaveDb();
+
                     // uncomment for realtime toggle
                     //LoadCollapseServicesOnStart();
                     //PhExpandAllProcessNodes(TRUE);
@@ -244,7 +246,7 @@ INT_PTR CALLBACK OptionsDlgProc(
                 point.y = GET_Y_LPARAM(lParam);
 
                 if (point.x == -1 && point.y == -1)
-                    PhGetListViewContextMenuPoint((HWND)wParam, &point);
+                    PhGetListViewContextMenuPoint(listviewHandle, &point);
 
                 PhGetSelectedListViewItemParams(listviewHandle, &listviewItems, &numberOfItems);
 
@@ -286,6 +288,8 @@ INT_PTR CALLBACK OptionsDlgProc(
                                     }
 
                                     SendMessage(listviewHandle, WM_SETREDRAW, TRUE, 0);
+                                    
+                                    SaveDb();
                                 }
                                 break;
                             case 2:

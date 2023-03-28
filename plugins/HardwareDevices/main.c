@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2016
- *     dmex    2015-2022
+ *     dmex    2015-2023
  *
  */
 
@@ -16,6 +16,7 @@
 
 PPH_PLUGIN PluginInstance = NULL;
 BOOLEAN NetAdapterEnableNdis = FALSE;
+ULONG NetWindowsVersion = WINDOWS_ANCIENT;
 
 PPH_OBJECT_TYPE NetAdapterEntryType = NULL;
 PPH_LIST NetworkAdaptersList = NULL;
@@ -46,6 +47,7 @@ VOID NTAPI LoadSettings(
     )
 {
     NetAdapterEnableNdis = !!PhGetIntegerSetting(SETTING_NAME_ENABLE_NDIS);
+    NetWindowsVersion = PhWindowsVersion;
 }
 
 VOID NTAPI LoadCallback(
@@ -120,7 +122,7 @@ VOID NTAPI MainWindowShowingCallback(
     )
 {
     AddRemoveDeviceChangeCallback();
-    if (PhWindowsVersion >= WINDOWS_10)
+    if (NetWindowsVersion >= WINDOWS_10)
         InitializeDevicesTab();
 }
 
@@ -435,6 +437,7 @@ BOOLEAN HardwareDeviceShowProperties(
     //    GetParent(WindowHandle),
     //    L"DeviceProperties.exe", // auto-elevated (dmex)
     //    PhGetString(DeviceInstance),
+    //    NULL,
     //    SW_SHOWDEFAULT,
     //    0,
     //    0,
@@ -657,8 +660,6 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_GRAPHICS_LIST, L"" },
                 { IntegerPairSettingType, SETTING_NAME_GRAPHICS_NODES_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_GRAPHICS_NODES_WINDOW_SIZE, L"@96|850,490" },
-                { IntegerPairSettingType, SETTING_NAME_DEVICE_TREE_WINDOW_POSITION, L"0,0" },
-                { ScalableIntegerPairSettingType, SETTING_NAME_DEVICE_TREE_WINDOW_SIZE, L"@96|1065,627" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_TREE_AUTO_REFRESH, L"1" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_TREE_SHOW_DISCONNECTED, L"0" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_TREE_HIGHLIGHT_UPPER_FILTERED, L"0" },
@@ -689,12 +690,12 @@ LOGICAL DllMain(
                 NULL,
                 &PluginLoadCallbackRegistration
                 );
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
-                UnloadCallback,
-                NULL,
-                &PluginUnloadCallbackRegistration
-                );
+            //PhRegisterCallback(
+            //    PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
+            //    UnloadCallback,
+            //    NULL,
+            //    &PluginUnloadCallbackRegistration
+            //    );
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackOptionsWindowInitializing),
                 ShowOptionsCallback,

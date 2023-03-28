@@ -57,6 +57,7 @@
 #include <objbase.h>
 
 #include <phintrnl.h>
+#include <phnative.h>
 
 #define PH_VECTOR_LEVEL_NONE 0
 #define PH_VECTOR_LEVEL_SSE2 1
@@ -137,7 +138,7 @@ BOOLEAN PhBaseInitialization(
     else if (USER_SHARED_DATA->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE])
         PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;*/
 
-    if (IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
+    if (PhIsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
         PhpVectorLevel = PH_VECTOR_LEVEL_SSE2;
 
     PhStringType = PhCreateObjectType(L"String", 0, NULL);
@@ -1062,6 +1063,84 @@ BOOLEAN PhCopyStringZFromMultiByte(
     return copied;
 }
 
+_Success_(return)
+BOOLEAN PhCopyStringZFromUtf8(
+    _In_ PSTR InputBuffer,
+    _In_ SIZE_T InputCount,
+    _Out_writes_opt_z_(OutputCount) PWSTR OutputBuffer,
+    _In_ SIZE_T OutputCount,
+    _Out_opt_ PSIZE_T ReturnCount
+    )
+{
+    NTSTATUS status;
+    SIZE_T i;
+    ULONG unicodeBytes;
+    BOOLEAN copied;
+
+    // Determine the length of the input string.
+
+    if (InputCount != SIZE_MAX)
+    {
+        i = 0;
+
+        while (i < InputCount && InputBuffer[i])
+            i++;
+    }
+    else
+    {
+        i = strlen(InputBuffer);
+    }
+
+    // Determine the length of the output string.
+
+    status = RtlUTF8ToUnicodeN(
+        NULL,
+        0,
+        &unicodeBytes,
+        InputBuffer,
+        (ULONG)i
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        if (ReturnCount)
+            *ReturnCount = SIZE_MAX;
+
+        return FALSE;
+    }
+
+    // Convert the string to Unicode if there is enough room.
+
+    if (OutputBuffer && OutputCount >= unicodeBytes / sizeof(WCHAR) + sizeof(UNICODE_NULL))
+    {
+        status = RtlUTF8ToUnicodeN(
+            OutputBuffer,
+            unicodeBytes,
+            NULL,
+            InputBuffer,
+            (ULONG)i
+            );
+
+        if (NT_SUCCESS(status))
+        {
+            copied = TRUE;
+        }
+        else
+        {
+            copied = FALSE;
+        }
+    }
+    else
+    {
+        copied = FALSE;
+    }
+
+    if (ReturnCount)
+        *ReturnCount = unicodeBytes / sizeof(WCHAR) + sizeof(UNICODE_NULL);
+
+    return copied;
+}
+
 FORCEINLINE LONG PhpCompareRightNatural(
     _In_ PWSTR A,
     _In_ PWSTR B
@@ -1726,7 +1805,7 @@ FoundUString:
  * \param FirstPart A variable which receives the part of \a Input before the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * \a Input.
- * \param SecondPart A variable which recieves the part of \a Input after the separator. This may be
+ * \param SecondPart A variable which receives the part of \a Input after the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * an empty string.
  *
@@ -1773,7 +1852,7 @@ BOOLEAN PhSplitStringRefAtChar(
  * \param FirstPart A variable which receives the part of \a Input before the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * \a Input.
- * \param SecondPart A variable which recieves the part of \a Input after the separator. This may be
+ * \param SecondPart A variable which receives the part of \a Input after the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * an empty string.
  *
@@ -1821,7 +1900,7 @@ BOOLEAN PhSplitStringRefAtLastChar(
  * \param FirstPart A variable which receives the part of \a Input before the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * \a Input.
- * \param SecondPart A variable which recieves the part of \a Input after the separator. This may be
+ * \param SecondPart A variable which receives the part of \a Input after the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * an empty string.
  *
@@ -1883,7 +1962,7 @@ BOOLEAN PhSplitStringRefAtString(
  * \param FirstPart A variable which receives the part of \a Input before the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * \a Input.
- * \param SecondPart A variable which recieves the part of \a Input after the separator. This may be
+ * \param SecondPart A variable which receives the part of \a Input after the separator. This may be
  * the same variable as \a Input. If the separator is not found in \a Input, this variable is set to
  * an empty string.
  * \param SeparatorPart A variable which receives the part of \a Input that is the separator. If the
@@ -5886,6 +5965,41 @@ PPH_STRING PhBufferToHexStringEx(
     return string;
 }
 
+_Success_(return)
+BOOLEAN PhBufferToHexStringBuffer(
+    _In_reads_bytes_(InputLength) PUCHAR InputBuffer,
+    _In_ SIZE_T InputLength,
+    _In_ BOOLEAN UpperCase,
+    _Out_writes_bytes_to_opt_(OutputLength, *ReturnLength) PWSTR OutputBuffer,
+    _In_ SIZE_T OutputLength,
+    _Out_opt_ PSIZE_T ReturnLength
+    )
+{
+    PCHAR table;
+    ULONG i;
+
+    if (OutputLength < InputLength * sizeof(WCHAR) * 2)
+        return FALSE;
+
+    if (UpperCase)
+        table = PhIntegerToCharUpper;
+    else
+        table = PhIntegerToChar;
+
+    for (i = 0; i < InputLength; i++)
+    {
+        OutputBuffer[i * sizeof(WCHAR)] = table[InputBuffer[i] >> 4];
+        OutputBuffer[i * sizeof(WCHAR) + 1] = table[InputBuffer[i] & 0xf];
+    }
+
+    OutputBuffer[i * sizeof(WCHAR)] = UNICODE_NULL;
+
+    if (ReturnLength)
+        *ReturnLength = i * sizeof(WCHAR) * 2;
+
+    return TRUE;
+}
+
 /**
  * Converts a string to an integer.
  *
@@ -6430,4 +6544,80 @@ VOID PhDivideSinglesBySingle(
         break;
     }
 #endif
+}
+
+BOOLEAN PhCalculateEntropy(
+    _In_ PBYTE Buffer,
+    _In_ ULONG64 BufferLength,
+    _Out_opt_ DOUBLE* Entropy,
+    _Out_opt_ DOUBLE* Variance
+    )
+{
+    DOUBLE bufferEntropy = 0.0;
+    DOUBLE bufferMeanValue = 0.0;
+    ULONG64 bufferOffset = 0;
+    ULONG64 bufferSumValue = 0;
+    ULONG64 counts[UCHAR_MAX + 1];
+
+    memset(counts, 0, sizeof(counts));
+
+    while (bufferOffset < BufferLength)
+    {
+        BYTE value = *(PBYTE)PTR_ADD_OFFSET(Buffer, bufferOffset++);
+
+        bufferSumValue += value;
+        counts[value]++;
+    }
+
+    for (ULONG i = 0; i < ARRAYSIZE(counts); i++)
+    {
+        DOUBLE value = (DOUBLE)counts[i] / (DOUBLE)BufferLength;
+
+        if (value > 0.0)
+            bufferEntropy -= value * log2(value);
+    }
+
+    bufferMeanValue = (DOUBLE)bufferSumValue / (DOUBLE)BufferLength;
+
+    if (Entropy)
+        *Entropy = bufferEntropy;
+    if (Variance)
+        *Variance = bufferMeanValue;
+
+    return TRUE;
+}
+
+PPH_STRING PhFormatEntropy(
+    _In_ DOUBLE Entropy,
+    _In_ USHORT EntropyPrecision,
+    _In_opt_ DOUBLE Variance,
+    _In_opt_ USHORT VariancePrecision
+    )
+{
+    if (Entropy && Variance)
+    {
+        PH_FORMAT format[4];
+
+        // %s S (%s X)
+        format[0].Type = DoubleFormatType | FormatUsePrecision | FormatCropZeros;
+        format[0].u.Double = Entropy;
+        format[0].Precision = EntropyPrecision;
+        PhInitFormatS(&format[1], L" S (");
+        format[2].Type = DoubleFormatType | FormatUsePrecision | FormatCropZeros;
+        format[2].u.Double = Variance;
+        format[2].Precision = VariancePrecision;
+        PhInitFormatS(&format[3], L" X)");
+
+        return PhFormat(format, ARRAYSIZE(format), 0);
+    }
+    else
+    {
+        PH_FORMAT format;
+
+        format.Type = DoubleFormatType | FormatUsePrecision | FormatCropZeros;
+        format.u.Double = Entropy;
+        format.Precision = EntropyPrecision;
+
+        return PhFormat(&format, 1, 0);
+    }
 }

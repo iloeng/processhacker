@@ -52,6 +52,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnablePackageIconSupport", L"0");
     PhpAddIntegerSetting(L"EnableProcessHandlePnPDeviceNameSupport", L"0");
     PhpAddIntegerSetting(L"EnablePlugins", L"1");
+    PhpAddIntegerSetting(L"EnablePluginsNative", L"0");
     PhpAddIntegerSetting(L"EnableGraphMaxScale", L"0");
     PhpAddIntegerSetting(L"EnableGraphMaxText", L"1");
     PhpAddIntegerSetting(L"EnableServiceNonPoll", L"0");
@@ -107,10 +108,12 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"HideOnMinimize", L"0");
     PhpAddIntegerSetting(L"HideOtherUserProcesses", L"0");
     PhpAddIntegerSetting(L"HideSignedProcesses", L"0");
+    PhpAddIntegerSetting(L"HideMicrosoftProcesses", L"0");
     PhpAddIntegerSetting(L"HideWaitingConnections", L"0");
     PhpAddIntegerSetting(L"HighlightingDuration", L"3e8"); // 1000ms
     PhpAddStringSetting(L"IconTrayGuids", L"");
     PhpAddIntegerSetting(L"IconTrayPersistGuidEnabled", L"0");
+    PhpAddIntegerSetting(L"IconTrayLazyStartDelay", L"1");
     PhpAddIntegerSetting(L"IconIgnoreBalloonClick", L"0");
     PhpAddStringSetting(L"IconSettings", L"2|1");
     PhpAddIntegerSetting(L"IconNotifyMask", L"c"); // PH_NOTIFY_SERVICE_CREATE | PH_NOTIFY_SERVICE_DELETE
@@ -262,6 +265,8 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"ColorHandleFiltered", L"000000"); // Black
     PhpAddIntegerSetting(L"UseColorImmersiveProcesses", L"1");
     PhpAddIntegerSetting(L"ColorImmersiveProcesses", L"cbc0ff"); // Pink
+    PhpAddIntegerSetting(L"UseColorUIAccessProcesses", L"1");
+    PhpAddIntegerSetting(L"ColorUIAccessProcesses", L"00aaff"); // Orange
     PhpAddIntegerSetting(L"UseColorPicoProcesses", L"1");
     PhpAddIntegerSetting(L"ColorPicoProcesses", L"ff8000"); // Blue
     PhpAddIntegerSetting(L"UseColorSuspended", L"1");
@@ -355,6 +360,8 @@ VOID PhUpdateCachedSettings(
     PH_UPDATE_SETTING(ColorHandleFiltered);
     PH_UPDATE_SETTING(UseColorElevatedProcesses);
     PH_UPDATE_SETTING(ColorElevatedProcesses);
+    PH_UPDATE_SETTING(UseColorUIAccessProcesses);
+    PH_UPDATE_SETTING(ColorUIAccessProcesses);
     PH_UPDATE_SETTING(UseColorPicoProcesses);
     PH_UPDATE_SETTING(ColorPicoProcesses);
     PH_UPDATE_SETTING(UseColorImmersiveProcesses);
