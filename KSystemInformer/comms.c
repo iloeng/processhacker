@@ -42,7 +42,6 @@ typedef struct _KPHM_QUEUE_ITEM
     BOOLEAN NonPaged;
     PEPROCESS TargetClientProcess;
     PKPH_MESSAGE Message;
-
 } KPHM_QUEUE_ITEM, *PKPHM_QUEUE_ITEM;
 
 typedef struct _KPH_CLIENT
@@ -50,7 +49,6 @@ typedef struct _KPH_CLIENT
     LIST_ENTRY Entry;
     PKPH_PROCESS_CONTEXT Process;
     PFLT_PORT Port;
-
 } KPH_CLIENT, *PKPH_CLIENT;
 
 typedef const KPH_CLIENT* PCKPH_CLIENT;
@@ -303,7 +301,7 @@ NTSTATUS FLTAPI KphpCommsConnectNotifyCallback(
     process = NULL;
     client = NULL;
 
-    if (!KphSinglePrivilegeCheck(SeDebugPrivilege, UserMode))
+    if (!KphSinglePrivilegeCheck(SeExports->SeDebugPrivilege, UserMode))
     {
         KphTracePrint(TRACE_LEVEL_ERROR,
                       COMMS,
@@ -413,6 +411,48 @@ VOID FLTAPI KphpCommsDisconnectNotifyCallback(
                   HandleToULong(client->Process->ProcessId));
 
     KphDereferenceObject(client);
+}
+
+/**
+ * \brief Signals clients when a required state failure occurs on inbound requests. 
+ *
+ * \param[in] MessageId The message ID that failed.
+ * \param[in] ClientState The client state that was checked.
+ * \param[in] RequiredState The state that was required.
+ */
+_IRQL_requires_max_(PASSIVE_LEVEL)
+VOID KphpSendRequiredStateFailure(
+    _In_ KPH_MESSAGE_ID MessageId,
+    _In_ KPH_PROCESS_STATE ClientState,
+    _In_ KPH_PROCESS_STATE RequiredState
+    )
+{
+    PKPH_MESSAGE msg;
+
+    PAGED_PASSIVE();
+
+    msg = KphAllocateMessage();
+    if (!msg)
+    {
+        KphTracePrint(TRACE_LEVEL_ERROR,
+                      INFORMER,
+                      "Failed to allocate message");
+        return;
+    }
+
+    KphMsgInit(msg, KphMsgRequiredStateFailure);
+    msg->Kernel.RequiredStateFailure.ClientId.UniqueProcess = PsGetCurrentProcessId();
+    msg->Kernel.RequiredStateFailure.ClientId.UniqueThread = PsGetCurrentThreadId();
+    msg->Kernel.RequiredStateFailure.MessageId = MessageId;
+    msg->Kernel.RequiredStateFailure.ClientState = ClientState;
+    msg->Kernel.RequiredStateFailure.RequiredState = RequiredState;
+
+    if (KphInformerSettings.EnableStackTraces)
+    {
+        KphCaptureStackInMessage(msg);
+    }
+
+    KphCommsSendMessageAsync(msg);
 }
 
 /**
@@ -565,6 +605,10 @@ NTSTATUS FLTAPI KphpCommsMessageNotifyCallback(
                       HandleToULong(client->Process->ProcessId),
                       processState,
                       requiredState);
+
+        KphpSendRequiredStateFailure(handler->MessageId,
+                                     processState,
+                                     requiredState);
 
         status = STATUS_ACCESS_DENIED;
         goto Exit;

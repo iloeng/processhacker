@@ -18,7 +18,6 @@
 #include <mainwnd.h>
 #include <notifico.h>
 #include <phplug.h>
-#include <phsettings.h>
 #include <procprv.h>
 #include <proctree.h>
 
@@ -705,16 +704,9 @@ VOID PhMipCalculateWindowRectangle(
             HWND trayWindow;
             RECT taskbarRect;
 
-            //APPBARDATA appbarData = { sizeof(APPBARDATA) };
-            //
-            //if (SHAppBarMessage(ABM_GETTASKBARPOS, &appbarData))
-            //{
-            //    taskbarRect = appbarData.rc;
-            //}
-
             // The taskbar probably has auto-hide enabled. We need to adjust for that.
 
-            if ((trayWindow = GetShellWindow()) && // trayWindow = FindWindow(L"Shell_TrayWnd", NULL)
+            if ((trayWindow = FindWindow(L"Shell_TrayWnd", NULL)) &&
                 GetMonitorInfo(MonitorFromWindow(trayWindow, MONITOR_DEFAULTTOPRIMARY), &monitorInfo) && // Just in case
                 GetWindowRect(trayWindow, &taskbarRect))
             {
@@ -1203,7 +1195,7 @@ LRESULT CALLBACK PhMipSectionControlHookWndProc(
         break;
     case WM_SETCURSOR:
         {
-            SetCursor(LoadCursor(NULL, IDC_HAND));
+            PhSetCursor(PhLoadCursor(NULL, IDC_HAND));
         }
         return TRUE;
     }

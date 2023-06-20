@@ -190,9 +190,9 @@ BOOLEAN EtpDiskPageCallback(
                 &DiskItemsUpdatedRegistration
                 );
 
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
+            PhSetCursor(PhLoadCursor(NULL, IDC_WAIT));
             EtInitializeDiskInformation();
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            PhSetCursor(PhLoadCursor(NULL, IDC_ARROW));
 
             if (Parameter1)
             {
@@ -800,8 +800,8 @@ BOOLEAN NTAPI EtpDiskTreeNewCallback(
 
             data.TreeNewHandle = WindowHandle;
             data.MouseEvent = Parameter1;
-            data.DefaultSortColumn = 0;
-            data.DefaultSortOrder = AscendingSortOrder;
+            data.DefaultSortColumn = ETDSTNC_TOTALRATEAVERAGE;
+            data.DefaultSortOrder = DescendingSortOrder;
             PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, WindowHandle, PH_EMENU_SHOW_LEFTRIGHT,

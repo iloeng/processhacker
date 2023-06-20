@@ -207,6 +207,7 @@ NTAPI
 PhLoadRemoteMappedImage(
     _In_ HANDLE ProcessHandle,
     _In_ PVOID ViewBase,
+    _In_ SIZE_T Size,
     _Out_ PPH_REMOTE_MAPPED_IMAGE RemoteMappedImage
     );
 
@@ -223,6 +224,7 @@ NTAPI
 PhLoadRemoteMappedImageEx(
     _In_ HANDLE ProcessHandle,
     _In_ PVOID ViewBase,
+    _In_ SIZE_T Size,
     _In_ PPH_READ_VIRTUAL_MEMORY_CALLBACK ReadVirtualMemoryCallback,
     _Out_ PPH_REMOTE_MAPPED_IMAGE RemoteMappedImage
     );
@@ -241,8 +243,8 @@ PhGetRemoteMappedImageDebugEntryByType(
     _In_ HANDLE ProcessHandle,
     _In_ PPH_REMOTE_MAPPED_IMAGE RemoteMappedImage,
     _In_ ULONG Type,
-    _Out_opt_ ULONG* EntryLength,
-    _Out_ PVOID* EntryBuffer
+    _Out_opt_ ULONG* DataLength,
+    _Out_ PVOID* DataBuffer
     );
 
 PHLIBAPI
@@ -254,8 +256,8 @@ PhGetRemoteMappedImageDebugEntryByTypeEx(
     _In_ PPH_REMOTE_MAPPED_IMAGE RemoteMappedImage,
     _In_ ULONG Type,
     _In_ PPH_READ_VIRTUAL_MEMORY_CALLBACK ReadVirtualMemoryCallback,
-    _Out_opt_ ULONG* EntryLength,
-    _Out_ PVOID* EntryBuffer
+    _Out_opt_ ULONG* DataLength,
+    _Out_ PVOID* DataBuffer
     );
 
 PHLIBAPI
@@ -422,6 +424,15 @@ PhGetMappedImageImportEntry(
     );
 
 PHLIBAPI
+ULONG
+NTAPI
+PhGetMappedImageImportEntryRva(
+    _In_ PPH_MAPPED_IMAGE_IMPORT_DLL ImportDll,
+    _In_ ULONG Index,
+    _In_ BOOLEAN DelayImport
+    );
+
+PHLIBAPI
 NTSTATUS
 NTAPI
 PhGetMappedImageDelayImports(
@@ -455,6 +466,7 @@ typedef struct _IMAGE_CFG_ENTRY
         BOOLEAN Xfg : 1;
         BOOLEAN Reserved : 4;
     };
+    ULONG64 XfgHash;
 } IMAGE_CFG_ENTRY, *PIMAGE_CFG_ENTRY;
 
 typedef struct _PH_MAPPED_IMAGE_CFG

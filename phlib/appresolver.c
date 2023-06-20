@@ -88,13 +88,13 @@ static BOOLEAN PhpKernelAppCoreInitialized(
     {
         if (WindowsVersion >= WINDOWS_8)
         {
-            PVOID kernelBaseModuleHandle;
+            PVOID baseAddress;
 
-            if (kernelBaseModuleHandle = PhLoadLibrary(L"kernelbase.dll")) // kernel.appcore.dll
+            if (baseAddress = PhLoadLibrary(L"kernelbase.dll")) // kernel.appcore.dll
             {
-                AppContainerDeriveSidFromMoniker_I = PhGetDllBaseProcedureAddress(kernelBaseModuleHandle, "AppContainerDeriveSidFromMoniker", 0);
-                AppContainerLookupMoniker_I = PhGetDllBaseProcedureAddress(kernelBaseModuleHandle, "AppContainerLookupMoniker", 0);
-                AppContainerFreeMemory_I = PhGetDllBaseProcedureAddress(kernelBaseModuleHandle, "AppContainerFreeMemory", 0);
+                AppContainerDeriveSidFromMoniker_I = PhGetDllBaseProcedureAddress(baseAddress, "AppContainerDeriveSidFromMoniker", 0);
+                AppContainerLookupMoniker_I = PhGetDllBaseProcedureAddress(baseAddress, "AppContainerLookupMoniker", 0);
+                AppContainerFreeMemory_I = PhGetDllBaseProcedureAddress(baseAddress, "AppContainerFreeMemory", 0);
             }
 
             if (
@@ -558,13 +558,13 @@ PPH_STRING PhGetAppContainerPackageName(
     PPH_STRING keyPath;
     PPH_STRING packageName = NULL;
 
-    sidString = PhSidToStringSid(Sid);
-
-    if (PhEqualString2(sidString, L"S-1-15-3-4096", FALSE)) // HACK
+    if (PhEqualSid(Sid, PhSeInternetExplorerSid())) // S-1-15-3-4096 (dmex)
     {
-        PhDereferenceObject(sidString);
         return PhCreateString(L"InternetExplorer");
     }
+
+    if (!(sidString = PhSidToStringSid(Sid)))
+        return NULL;
 
     keyPath = PhConcatStringRef2(&appcontainerMappings, &sidString->sr);
 
@@ -646,7 +646,7 @@ PPH_STRING PhGetPackageAppDataPath(
     PTOKEN_SECURITY_ATTRIBUTES_INFORMATION info;
     HANDLE tokenHandle;
 
-    localAppDataPath = PhGetKnownLocationZ(PH_FOLDERID_LocalAppData, L"\\Packages\\");
+    localAppDataPath = PhGetKnownLocationZ(PH_FOLDERID_LocalAppData, L"\\Packages\\", FALSE);
 
     if (PhIsNullOrEmptyString(localAppDataPath))
         return NULL;
@@ -860,12 +860,12 @@ HRESULT PhAppResolverGetEdpContextForWindow(
     {
         if (WindowsVersion >= WINDOWS_10)
         {
-            PVOID edputilModuleHandle;
+            PVOID baseAddress;
 
-            if (edputilModuleHandle = PhLoadLibrary(L"edputil.dll"))
+            if (baseAddress = PhLoadLibrary(L"edputil.dll"))
             {
-                EdpGetContextForWindow_I = PhGetDllBaseProcedureAddress(edputilModuleHandle, "EdpGetContextForWindow", 0);
-                EdpFreeContext_I = PhGetDllBaseProcedureAddress(edputilModuleHandle, "EdpFreeContext", 0);
+                EdpGetContextForWindow_I = PhGetDllBaseProcedureAddress(baseAddress, "EdpGetContextForWindow", 0);
+                EdpFreeContext_I = PhGetDllBaseProcedureAddress(baseAddress, "EdpFreeContext", 0);
             }
         }
 
@@ -902,12 +902,12 @@ HRESULT PhAppResolverGetEdpContextForProcess(
     {
         if (WindowsVersion >= WINDOWS_10)
         {
-            PVOID edputilModuleHandle;
+            PVOID baseAddress;
 
-            if (edputilModuleHandle = PhLoadLibrary(L"edputil.dll"))
+            if (baseAddress = PhLoadLibrary(L"edputil.dll"))
             {
-                EdpGetContextForProcess_I = PhGetDllBaseProcedureAddress(edputilModuleHandle, "EdpGetContextForProcess", 0);
-                EdpFreeContext_I = PhGetDllBaseProcedureAddress(edputilModuleHandle, "EdpFreeContext", 0);
+                EdpGetContextForProcess_I = PhGetDllBaseProcedureAddress(baseAddress, "EdpGetContextForProcess", 0);
+                EdpFreeContext_I = PhGetDllBaseProcedureAddress(baseAddress, "EdpFreeContext", 0);
             }
         }
 
@@ -1023,7 +1023,7 @@ static BOOLEAN PhParseStartMenuAppShellItem(
 
         entry = PhAllocateZero(sizeof(PH_APPUSERMODELID_ENUM_ENTRY));
         entry->AppUserModelId = PhCreateString(packageAppUserModelID);
-        entry->DisplayName = PhCreateString(packageLongDisplayName);
+        entry->PackageDisplayName = PhCreateString(packageLongDisplayName);
         entry->PackageInstallPath = PhCreateString(packageInstallPath);
         entry->PackageFullName = PhCreateString(packageFullName);
 
@@ -1051,7 +1051,7 @@ static BOOLEAN PhParseStartMenuAppShellItem(
     return FALSE;
 }
 
-PPH_LIST PhEnumerateApplicationUserModelIds(
+PPH_LIST PhEnumApplicationUserModelIds(
     VOID
     )
 {
@@ -1316,17 +1316,29 @@ HRESULT PhCreateProcessDesktopPackage(
     HRESULT status;
     IDesktopAppXActivator* desktopAppXActivator;
 
-    status = PhGetClassObject(
-        L"twinui.appcore.dll",
-        &CLSID_IDesktopAppXActivator_I,
-        &IID_IDesktopAppXActivator2_I,
-        &desktopAppXActivator
-        );
+    if (WindowsVersion < WINDOWS_11)
+    {
+        status = PhGetClassObject(
+            L"twinui.dll",
+            &CLSID_IDesktopAppXActivator_I,
+            &IID_IDesktopAppXActivator1_I,
+            &desktopAppXActivator
+            );
+    }
+    else
+    {
+        status = PhGetClassObject(
+            L"twinui.appcore.dll",
+            &CLSID_IDesktopAppXActivator_I,
+            &IID_IDesktopAppXActivator2_I,
+            &desktopAppXActivator
+            );
+    }
 
     if (SUCCEEDED(status))
     {
         ULONG options = DAXAO_CHECK_FOR_APPINSTALLER_UPDATES | DAXAO_CENTENNIAL_PROCESS;
-        options |= (PreventBreakaway ? DAXAO_NONPACKAGED_EXE_PROCESS_TREE : DAXAO_NONPACKAGED_EXE);
+        SetFlag(options, PreventBreakaway ? DAXAO_NONPACKAGED_EXE_PROCESS_TREE : DAXAO_NONPACKAGED_EXE);
 
         status = IDesktopAppXActivator_ActivateWithOptions(
             desktopAppXActivator,

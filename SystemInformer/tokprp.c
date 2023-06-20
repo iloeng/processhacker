@@ -104,6 +104,8 @@ typedef struct _TOKEN_PAGE_CONTEXT
 
     HWND ListViewHandle;
     HIMAGELIST ListViewImageList;
+    PH_LAYOUT_MANAGER LayoutManager;
+    BOOLEAN SinglePageContext;
 
     PTOKEN_GROUPS Groups;
     PTOKEN_GROUPS RestrictedSids;
@@ -213,6 +215,66 @@ PPH_STRING PhpGetTokenRegistryPath(
     _In_ HANDLE TokenHandle
     );
 
+NTSTATUS PhpTokenDialogThread(
+    _In_ PVOID Context
+    )
+{
+    PH_AUTO_POOL autoPool;
+    LPPROPSHEETPAGE propSheetPage;
+
+    PhInitializeAutoPool(&autoPool);
+
+    propSheetPage = PhAllocateZero(sizeof(PROPSHEETPAGE));
+    propSheetPage->lParam = (LPARAM)Context;
+
+    PhDialogBox(
+        PhInstanceHandle,
+        MAKEINTRESOURCE(IDD_OBJTOKEN),
+        NULL,
+        PhpTokenPageProc,
+        propSheetPage
+        );
+
+    PhDeleteAutoPool(&autoPool);
+
+    return STATUS_SUCCESS;
+}
+
+VOID PhCreateTokenDialog(
+    _In_ PPH_OPEN_OBJECT OpenObject,
+    _In_ HANDLE ProcessId,
+    _In_ PVOID Context,
+    _In_opt_ DLGPROC HookProc
+    )
+{
+    PTOKEN_PAGE_CONTEXT tokenPageContext;
+    HANDLE tokenHandle = NULL;
+
+    if (!NT_SUCCESS(NtDuplicateObject(
+        NtCurrentProcess(),
+        Context,
+        NtCurrentProcess(),
+        &tokenHandle,
+        0,
+        0,
+        DUPLICATE_SAME_ACCESS | DUPLICATE_SAME_ATTRIBUTES
+        )))
+    {
+        PhShowError(NULL, L"%s", "Unable to duplicate the token.");
+        return;
+    }
+
+    tokenPageContext = PhCreateAlloc(sizeof(TOKEN_PAGE_CONTEXT));
+    memset(tokenPageContext, 0, sizeof(TOKEN_PAGE_CONTEXT));
+    tokenPageContext->OpenObject = OpenObject;
+    tokenPageContext->Context = tokenHandle;
+    //tokenPageContext->HookProc = HookProc;
+    tokenPageContext->ProcessId = ProcessId;
+    tokenPageContext->SinglePageContext = TRUE;
+
+    PhCreateThread2(PhpTokenDialogThread, tokenPageContext);
+}
+
 VOID PhShowTokenProperties(
     _In_ HWND ParentWindowHandle,
     _In_ PPH_OPEN_OBJECT OpenObject,
@@ -221,25 +283,7 @@ VOID PhShowTokenProperties(
     _In_opt_ PWSTR Title
     )
 {
-    PROPSHEETHEADER propSheetHeader = { sizeof(propSheetHeader) };
-    HPROPSHEETPAGE pages[1];
-
-    propSheetHeader.dwFlags =
-        PSH_NOAPPLYNOW |
-        PSH_NOCONTEXTHELP |
-        PSH_PROPTITLE |
-        PSH_USECALLBACK;
-    propSheetHeader.hInstance = PhInstanceHandle;
-    propSheetHeader.hwndParent = ParentWindowHandle;
-    propSheetHeader.pszCaption = Title ? Title : L"Token";
-    propSheetHeader.nPages = 1;
-    propSheetHeader.nStartPage = 0;
-    propSheetHeader.phpage = pages;
-    propSheetHeader.pfnCallback = PhpTokenSheetProc;
-
-    pages[0] = PhCreateTokenPage(OpenObject, ProcessId, Context, NULL);
-
-    PhModalPropertySheet(&propSheetHeader);
+    PhCreateTokenDialog(OpenObject, ProcessId, Context, NULL);
 }
 
 INT CALLBACK PhpTokenSheetProc(
@@ -864,7 +908,7 @@ BOOLEAN PhpUpdateTokenDangerousFlags(
         }
     }
 
-    if (NT_SUCCESS(PhGetTokenIsUIAccessEnabled(TokenHandle, &isUIAccess)))
+    if (NT_SUCCESS(PhGetTokenUIAccess(TokenHandle, &isUIAccess)))
     {
         // The presence of UIAccess flag is considered dangerous (diversenok)
         if (isUIAccess)
@@ -920,13 +964,23 @@ static VOID PhpTokenSetImageList(
 
     dpiValue = PhGetWindowDpi(WindowHandle);
 
-    if (TokenPageContext->ListViewImageList) PhImageListDestroy(TokenPageContext->ListViewImageList);
-    TokenPageContext->ListViewImageList = PhImageListCreate(
-        2,
-        PhGetDpi(20, dpiValue),
-        ILC_MASK | ILC_COLOR32,
-        1, 1
-        );
+    if (TokenPageContext->ListViewImageList)
+    {
+        PhImageListSetIconSize(
+            TokenPageContext->ListViewImageList,
+            2,
+            PhGetDpi(20, dpiValue)
+            );
+    }
+    else
+    {
+        TokenPageContext->ListViewImageList = PhImageListCreate(
+            2,
+            PhGetDpi(20, dpiValue),
+            ILC_MASK | ILC_COLOR32,
+            1, 1
+            );
+    }
 
     ListView_SetImageList(TokenPageContext->ListViewHandle, TokenPageContext->ListViewImageList, LVSIL_SMALL);
 }
@@ -1101,6 +1155,29 @@ INT_PTR CALLBACK PhpTokenPageProc(
                 NtClose(tokenHandle);
             }
 
+            if (tokenPageContext->SinglePageContext)
+            {
+                LPPROPSHEETPAGE page = (LPPROPSHEETPAGE)lParam;
+                if (page) PhFree(page);
+
+                PhSetApplicationWindowIcon(hwndDlg);
+                PhSetWindowText(hwndDlg, L"Linked Token");
+
+                PhInitializeLayoutManager(&tokenPageContext->LayoutManager, hwndDlg);
+                PhAddLayoutItem(&tokenPageContext->LayoutManager, tokenPageContext->ListViewHandle, NULL, PH_ANCHOR_ALL);
+                PhAddLayoutItem(&tokenPageContext->LayoutManager, GetDlgItem(hwndDlg, IDC_DEFAULTPERM), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddLayoutItem(&tokenPageContext->LayoutManager, GetDlgItem(hwndDlg, IDC_PERMISSIONS), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddLayoutItem(&tokenPageContext->LayoutManager, GetDlgItem(hwndDlg, IDC_INTEGRITY), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddLayoutItem(&tokenPageContext->LayoutManager, GetDlgItem(hwndDlg, IDC_ADVANCED), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+
+                if (PhGetIntegerPairSetting(L"TokenWindowPosition").X)
+                    PhLoadWindowPlacementFromSetting(L"TokenWindowPosition", L"TokenWindowSize", hwndDlg);
+                else
+                    PhCenterWindow(hwndDlg, NULL);
+
+                PhSetDialogFocus(hwndDlg, tokenPageContext->ListViewHandle);
+            }
+
             PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
@@ -1110,6 +1187,18 @@ INT_PTR CALLBACK PhpTokenPageProc(
             PhSaveListViewGroupStatesToSetting(L"TokenGroupsListViewStates", tokenPageContext->ListViewHandle);
             PhSaveListViewColumnsToSetting(L"TokenGroupsListViewColumns", tokenPageContext->ListViewHandle);
 
+            if (tokenPageContext->SinglePageContext)
+            {
+                PhSaveWindowPlacementToSetting(L"TokenWindowPosition", L"TokenWindowSize", hwndDlg);
+                PhDeleteLayoutManager(&tokenPageContext->LayoutManager);
+
+                if (tokenPageContext->Context)
+                {
+                    NtClose(tokenPageContext->Context);
+                    tokenPageContext->Context = NULL;
+                }
+            }
+
             PhpTokenPageFreeListViewEntries(tokenPageContext);
 
             if (tokenPageContext->ListViewImageList) PhImageListDestroy(tokenPageContext->ListViewImageList);
@@ -1118,6 +1207,15 @@ INT_PTR CALLBACK PhpTokenPageProc(
             if (tokenPageContext->Privileges) PhFree(tokenPageContext->Privileges);
         }
         break;
+    case WM_SIZE:
+        {
+            if (tokenPageContext->SinglePageContext)
+            {
+                PhLayoutManagerLayout(&tokenPageContext->LayoutManager);
+            }
+        }
+        break;
+    case WM_DPICHANGED:
     case WM_DPICHANGED_AFTERPARENT:
         {
             PhpTokenSetImageList(hwndDlg, tokenPageContext);
@@ -1127,6 +1225,15 @@ INT_PTR CALLBACK PhpTokenPageProc(
         {
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
+            case IDCANCEL:
+            case IDOK:
+                {
+                    if (tokenPageContext->SinglePageContext)
+                    {
+                        EndDialog(hwndDlg, IDOK);
+                    }
+                }
+                break;
             case ID_PRIVILEGE_ENABLE:
             case ID_PRIVILEGE_DISABLE:
             case ID_PRIVILEGE_RESET:
@@ -1226,11 +1333,11 @@ INT_PTR CALLBACK PhpTokenPageProc(
                             {
                                 INT lvItemIndex = PhFindListViewItemByParam(
                                     tokenPageContext->ListViewHandle,
-                                    -1,
+                                    INT_ERROR,
                                     listViewItems[i]
                                     );
 
-                                if (lvItemIndex != -1)
+                                if (lvItemIndex != INT_ERROR)
                                 {
                                     if (GET_WM_COMMAND_ID(wParam, lParam) != ID_PRIVILEGE_REMOVE)
                                     {
@@ -1372,11 +1479,11 @@ INT_PTR CALLBACK PhpTokenPageProc(
                                 attributesString = PhGetGroupAttributesString(newAttributes, FALSE);
                                 lvItemIndex = PhFindListViewItemByParam(
                                     tokenPageContext->ListViewHandle,
-                                    -1,
+                                    INT_ERROR,
                                     listViewItems[i]
                                     );
 
-                                if (lvItemIndex != -1)
+                                if (lvItemIndex != INT_ERROR)
                                 {
                                     // Refresh the status text (and background color).
                                     listViewItems[i]->TokenGroup->Attributes = newAttributes;
@@ -1479,17 +1586,17 @@ INT_PTR CALLBACK PhpTokenPageProc(
                     {
                         ExtendedListView_SetRedraw(tokenPageContext->ListViewHandle, FALSE);
 
-                        status = PhSetTokenUIAccessEnabled(tokenHandle, FALSE);
+                        status = PhSetTokenUIAccess(tokenHandle, FALSE);
 
                         if (NT_SUCCESS(status))
                         {
                             INT lvItemIndex = PhFindListViewItemByParam(
                                 tokenPageContext->ListViewHandle,
-                                -1,
+                                INT_ERROR,
                                 listViewItems[0]
                                 );
 
-                            if (lvItemIndex != -1)
+                            if (lvItemIndex != INT_ERROR)
                             {
                                 ListView_DeleteItem(tokenPageContext->ListViewHandle, lvItemIndex);
                             }
@@ -1874,6 +1981,24 @@ INT_PTR CALLBACK PhpTokenPageProc(
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+        {
+            if (tokenPageContext->SinglePageContext)
+                return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        }
+        break;
+    case WM_CTLCOLORDLG:
+        {
+            if (tokenPageContext->SinglePageContext)
+                return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        }
+        break;
+    case WM_CTLCOLORSTATIC:
+        {
+            if (tokenPageContext->SinglePageContext)
+                return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        }
+        break;
     }
 
     return FALSE;
@@ -2094,7 +2219,7 @@ INT_PTR CALLBACK PhpTokenGeneralPageProc(
                     }
                 }
 
-                if (NT_SUCCESS(PhGetTokenIsUIAccessEnabled(tokenHandle, &isUIAccessEnabled)))
+                if (NT_SUCCESS(PhGetTokenUIAccess(tokenHandle, &isUIAccessEnabled)))
                 {
                     tokenUIAccess = isUIAccessEnabled ? L"Enabled": L"Disabled";
                 }
@@ -2673,9 +2798,9 @@ VOID PhpRemoveAttributeNode(
 {
     ULONG index;
 
-    if ((index = PhFindItemList(Context->NodeList, Node)) != -1)
+    if ((index = PhFindItemList(Context->NodeList, Node)) != ULONG_MAX)
         PhRemoveItemList(Context->NodeList, index);
-    if ((index = PhFindItemList(Context->RootList, Node)) != -1)
+    if ((index = PhFindItemList(Context->RootList, Node)) != ULONG_MAX)
         PhRemoveItemList(Context->RootList, index);
 
     PhpDestroyAttributeNode(Node);
@@ -3640,7 +3765,7 @@ PPH_STRING PhpGetTokenAppContainerFolderPath(
     else if (TokenAppContainerSid)
     {
         PPH_STRING appContainerFolderPath;
-        PWSTR folderPath = NULL;
+        //PWSTR folderPath = NULL;
 
         appContainerFolderPath = PhGetKnownFolderPathEx(
             &FOLDERID_LocalAppData,
@@ -4262,9 +4387,12 @@ NTSTATUS PhGetAppModelPolicy(
 
         if (entry = PhFindLoaderEntry(NULL, NULL, &kernelBaseName))
         {
+            PH_STRINGREF fullName;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), entry->DllBase, &fileName)))
+            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+            if (fileName = PhDosPathNameToNtPathName(&fullName))
             {
                 PhLoadModuleSymbolProvider(symbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
                 PhDereferenceObject(fileName);
@@ -5288,26 +5416,19 @@ END_SORT_FUNCTION
 BOOLEAN NTAPI PhpAppPolicyTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PATTRIBUTE_TREE_CONTEXT context = Context;
     PATTRIBUTE_NODE node;
-
-    if (!context)
-        return FALSE;
 
     switch (Message)
     {
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PATTRIBUTE_NODE)getChildren->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -5353,21 +5474,14 @@ BOOLEAN NTAPI PhpAppPolicyTreeNewCallback(
     case TreeNewIsLeaf:
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
-
-            if (!isLeaf)
-                break;
-
             node = (PATTRIBUTE_NODE)isLeaf->Node;
+
             isLeaf->IsLeaf = TRUE;
         }
         return TRUE;
     case TreeNewGetCellText:
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
-
-            if (!getCellText)
-                break;
-
             node = (PATTRIBUTE_NODE)getCellText->Node;
 
             if (getCellText->Id == 0)
@@ -5410,9 +5524,6 @@ BOOLEAN NTAPI PhpAppPolicyTreeNewCallback(
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
 
-            if (!keyEvent)
-                break;
-
             switch (keyEvent->VirtualKey)
             {
             case 'C':
@@ -5432,15 +5543,7 @@ BOOLEAN NTAPI PhpAppPolicyTreeNewCallback(
         {
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
 
-            if (!contextMenuEvent)
-                break;
-
-            SendMessage(
-                context->WindowHandle,
-                WM_CONTEXTMENU,
-                0,
-                (LPARAM)contextMenuEvent
-                );
+            SendMessage(context->WindowHandle, WM_CONTEXTMENU, 0, (LPARAM)contextMenuEvent);
         }
         return TRUE;
     case TreeNewHeaderRightClick:

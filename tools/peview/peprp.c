@@ -137,7 +137,7 @@ VOID PvPeProperties(
             PhDereferenceObject(fileName);
         }
 
-        PhLoadModulesForProcessSymbolProvider(PvSymbolProvider, NtCurrentProcessId());
+        PhLoadModulesForVirtualSymbolProvider(PvSymbolProvider, NtCurrentProcessId());
     }
 
     if (propContext = PvCreatePropContext(PvFileName))
@@ -909,7 +909,7 @@ VOID PvpSetPeImageTimeStamp(
     SYSTEMTIME timeFields;
     PPH_STRING string;
 
-    RtlSecondsSince1970ToTime(PvMappedImage.NtHeaders->FileHeader.TimeDateStamp, &time);
+    PhSecondsSince1970ToTime(PvMappedImage.NtHeaders->FileHeader.TimeDateStamp, &time);
 
     if (NT_SUCCESS(PhGetMappedImageDebugEntryByType(
         &PvMappedImage,

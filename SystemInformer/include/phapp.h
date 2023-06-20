@@ -575,6 +575,11 @@ HPROPSHEETPAGE PhCreateTimerPage(
     _In_opt_ PVOID Context
     );
 
+HPROPSHEETPAGE PhCreateMappingsPage(
+    _In_ HANDLE ProcessId,
+    _In_ HANDLE SectionHandle
+    );
+
 // options
 
 VOID PhShowOptionsDialog(
@@ -625,11 +630,16 @@ typedef struct _PH_RUNAS_SERVICE_PARAMETERS
     PWSTR ServiceName;
     BOOLEAN CreateSuspendedProcess;
     HWND WindowHandle;
+    BOOLEAN CreateUIAccessProcess;
 } PH_RUNAS_SERVICE_PARAMETERS, *PPH_RUNAS_SERVICE_PARAMETERS;
 
 VOID PhShowRunAsDialog(
     _In_ HWND ParentWindowHandle,
     _In_opt_ HANDLE ProcessId
+    );
+
+VOID PhShowRunAsPackageDialog(
+    _In_ HWND ParentWindowHandle
     );
 
 // begin_phapppub
@@ -675,7 +685,8 @@ PhExecuteRunAsCommand3(
     _In_ ULONG SessionId,
     _In_ PWSTR DesktopName,
     _In_ BOOLEAN UseLinkedToken,
-    _In_ BOOLEAN CreateSuspendedProcess
+    _In_ BOOLEAN CreateSuspendedProcess,
+    _In_ BOOLEAN CreateUIAccessProcess
     );
 
 NTSTATUS PhRunAsServiceStart(

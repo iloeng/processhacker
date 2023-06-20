@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -79,11 +79,11 @@ BOOLEAN PhInitializeMitigationPolicy(
     VOID
     );
 
-BOOLEAN PhInitializeMitigationSignaturePolicy(
+BOOLEAN PhInitializeComPolicy(
     VOID
     );
 
-BOOLEAN PhInitializeComPolicy(
+BOOLEAN PhInitializeTimerPolicy(
     VOID
     );
 
@@ -163,6 +163,7 @@ INT WINAPI wWinMain(
 
     if (PhGetIntegerSetting(L"EnableKph") &&
         !PhStartupParameters.NoKph &&
+        !PhStartupParameters.ShowOptions &&
         !PhIsExecutingInWow64())
     {
         PhInitializeKsi();
@@ -199,6 +200,8 @@ INT WINAPI wWinMain(
     {
         PhLoadPlugins();
     }
+
+    PhInitializeMitigationPolicy();
 
     if (PhStartupParameters.PhSvc)
     {
@@ -588,34 +591,34 @@ BOOLEAN PhInitializeDirectoryPolicy(
     return TRUE;
 }
 
-#ifndef DEBUG
+#pragma region Error Reporting
 #include <symprv.h>
 #include <minidumpapiset.h>
 
+typedef enum _PH_DUMP_TYPE
+{
+    PhDumpTypeMinidump,
+    PhDumpTypeNormaldump,
+    PhDumpTypeFulldump,
+} PH_DUMP_TYPE;
+
 VOID PhpCreateUnhandledExceptionCrashDump(
     _In_ PEXCEPTION_POINTERS ExceptionInfo,
-    _In_ BOOLEAN MoreInfoDump
+    _In_ PH_DUMP_TYPE DumpType
     )
 {
     HANDLE fileHandle;
-    PPH_STRING dumpDirectory;
-    PPH_STRING dumpFileName;
+    PPH_STRING directory;
+    PPH_STRING fileName;
     WCHAR alphastring[16] = L"";
 
-    dumpDirectory = PhExpandEnvironmentStringsZ(L"%USERPROFILE%\\Desktop\\");
     PhGenerateRandomAlphaString(alphastring, RTL_NUMBER_OF(alphastring));
+    directory = PhExpandEnvironmentStringsZ(L"\\??\\%USERPROFILE%\\Desktop\\");
+    fileName = PhConcatStrings(5, PhGetString(directory), L"SystemInformer", L"_DumpFile_", alphastring, L".dmp");
 
-    dumpFileName = PhConcatStrings(
-        4,
-        PhGetString(dumpDirectory),
-        L"\\SystemInformer_",
-        alphastring,
-        L"_DumpFile.dmp"
-        );
-
-    if (NT_SUCCESS(PhCreateFileWin32(
+    if (NT_SUCCESS(PhCreateFile(
         &fileHandle,
-        PhGetString(dumpFileName),
+        &fileName->sr,
         FILE_GENERIC_WRITE,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_WRITE,
@@ -624,42 +627,60 @@ VOID PhpCreateUnhandledExceptionCrashDump(
         )))
     {
         MINIDUMP_EXCEPTION_INFORMATION exceptionInfo;
+        ULONG dumpType = PhDumpTypeNormaldump;
 
         exceptionInfo.ThreadId = HandleToUlong(NtCurrentThreadId());
         exceptionInfo.ExceptionPointers = ExceptionInfo;
         exceptionInfo.ClientPointers = TRUE;
 
-        if (MoreInfoDump)
+        switch (DumpType)
         {
-            // Note: This isn't a full dump, still very limited but just enough to see filenames on the stack. (dmex)
-            PhWriteMiniDumpProcess(
-                NtCurrentProcess(),
-                NtCurrentProcessId(),
-                fileHandle,
-                MiniDumpScanMemory | MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithProcessThreadData,
-                &exceptionInfo,
-                NULL,
-                NULL
-                );
+        case PhDumpTypeMinidump:
+            dumpType = MiniDumpWithDataSegs | MiniDumpWithUnloadedModules | MiniDumpWithProcessThreadData;
+            break;
+        case PhDumpTypeNormaldump:
+            dumpType =
+                MiniDumpWithDataSegs |
+                MiniDumpWithHandleData |
+                MiniDumpScanMemory |
+                MiniDumpWithUnloadedModules |
+                MiniDumpWithProcessThreadData |
+                MiniDumpWithFullMemoryInfo |
+                MiniDumpWithThreadInfo |
+                MiniDumpIgnoreInaccessibleMemory |
+                MiniDumpWithTokenInformation;
+            break;
+        case PhDumpTypeFulldump:
+            dumpType =
+                MiniDumpWithDataSegs |
+                MiniDumpWithFullMemory |
+                MiniDumpWithHandleData |
+                MiniDumpWithUnloadedModules |
+                MiniDumpWithIndirectlyReferencedMemory |
+                MiniDumpWithProcessThreadData |
+                MiniDumpWithFullMemoryInfo |
+                MiniDumpWithThreadInfo |
+                MiniDumpIgnoreInaccessibleMemory |
+                MiniDumpWithTokenInformation |
+                MiniDumpWithAvxXStateContext;
+            break;
         }
-        else
-        {
-            PhWriteMiniDumpProcess(
-                NtCurrentProcess(),
-                NtCurrentProcessId(),
-                fileHandle,
-                MiniDumpNormal | MiniDumpWithDataSegs,
-                &exceptionInfo,
-                NULL,
-                NULL
-                );
-        }
+
+        PhWriteMiniDumpProcess(
+            NtCurrentProcess(),
+            NtCurrentProcessId(),
+            fileHandle,
+            dumpType,
+            &exceptionInfo,
+            NULL,
+            NULL
+            );
 
         NtClose(fileHandle);
     }
 
-    PhDereferenceObject(dumpFileName);
-    PhDereferenceObject(dumpDirectory);
+    PhDereferenceObject(fileName);
+    PhDereferenceObject(directory);
 }
 
 ULONG CALLBACK PhpUnhandledExceptionCallback(
@@ -667,8 +688,25 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
     )
 {
     PPH_STRING errorMessage;
-    INT result;
     PPH_STRING message;
+    INT result;
+    TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
+    TASKDIALOG_BUTTON buttons[6] =
+    {
+        { 1, L"Fulldump\nA complete dump of the process, rarely needed most of the time." },
+        { 2, L"Normaldump\nFor most purposes, this dump file is the most useful." },
+        { 3, L"Minidump\nA very limited dump with limited data." },
+        { 4, L"Restart\nRestart the application." }, // and hope it doesn't crash again.";
+        { 5, L"Ignore" },  // \nTry ignore the exception and continue.";
+        { 6, L"Exit" }, // \nTerminate the program.";
+    };
+
+    // Let the debugger handle the exception. (dmex)
+    // NOTE: Disable this check when debugging this callback.
+    if (PhIsDebuggerPresent())
+    {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
 
     if (NT_NTWIN32(ExceptionInfo->ExceptionRecord->ExceptionCode))
         errorMessage = PhGetStatusMessage(0, PhNtStatusToDosError(ExceptionInfo->ExceptionRecord->ExceptionCode));
@@ -681,60 +719,50 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
         PhGetStringOrEmpty(errorMessage)
         );
 
-    PhEnableTerminationPolicy(FALSE);
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_USE_COMMAND_LINKS | TDF_EXPAND_FOOTER_AREA;
+    config.pszWindowTitle = PhApplicationName;
+    config.pszMainIcon = TD_ERROR_ICON;
+    config.pszMainInstruction = L"System Informer has crashed :(";
+    config.cButtons = RTL_NUMBER_OF(buttons);
+    config.pButtons = buttons;
+    config.nDefaultButton = 6;
+    config.cxWidth = 250;
+    config.pszContent = PhGetString(message);
+#ifdef DEBUG
+    config.pszExpandedInformation = PhGetString(PhGetStacktraceAsString());
+#endif
 
-    if (TaskDialogIndirect)
+    if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)))
     {
-        TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
-        TASKDIALOG_BUTTON buttons[4];
-
-        buttons[0].nButtonID = IDYES;
-        buttons[0].pszButtonText = L"Normaldump";
-        buttons[1].nButtonID = IDNO;
-        buttons[1].pszButtonText = L"Minidump";
-        buttons[2].nButtonID = IDABORT;
-        buttons[2].pszButtonText = L"Restart";
-        buttons[3].nButtonID = IDCANCEL;
-        buttons[3].pszButtonText = L"Exit";
-
-        config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
-        config.pszWindowTitle = PhApplicationName;
-        config.pszMainIcon = TD_ERROR_ICON;
-        config.pszMainInstruction = L"System Informer has crashed :(";
-        config.pszContent = PhGetStringOrEmpty(message);
-        config.cButtons = RTL_NUMBER_OF(buttons);
-        config.pButtons = buttons;
-        config.nDefaultButton = IDCANCEL;
-
-        if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)))
+        switch (result)
         {
-            switch (result)
+        case 1:
+            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeFulldump);
+            break;
+        case 2:
+            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeNormaldump);
+            break;
+        case 3:
+            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeMinidump);
+            break;
+        case 4:
             {
-            case IDCANCEL:
-                {
-                    PhExitApplication(ExceptionInfo->ExceptionRecord->ExceptionCode);
-                }
-                break;
-            case IDABORT:
-                {
-                    PhShellProcessHacker(
-                        NULL,
-                        NULL,
-                        SW_SHOW,
-                        PH_SHELL_EXECUTE_DEFAULT,
-                        PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
-                        0,
-                        NULL
-                        );
-                }
-                break;
-            case IDYES:
-                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, TRUE);
-                break;
-            case IDNO:
-                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, FALSE);
-                break;
+                PhShellProcessHacker(
+                    NULL,
+                    NULL,
+                    SW_SHOW,
+                    PH_SHELL_EXECUTE_DEFAULT,
+                    PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
+                    0,
+                    NULL
+                    );
             }
+            break;
+        case 5:
+            {
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            break;
         }
     }
     else
@@ -748,40 +776,31 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
         {
             PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, FALSE);
         }
-
-        PhShellProcessHacker(
-            NULL,
-            NULL,
-            SW_SHOW,
-            PH_SHELL_EXECUTE_DEFAULT,
-            PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
-            0,
-            NULL
-            );
     }
 
     PhExitApplication(ExceptionInfo->ExceptionRecord->ExceptionCode);
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
-#endif
+#pragma endregion
 
 BOOLEAN PhInitializeExceptionPolicy(
     VOID
     )
 {
-#ifndef DEBUG
-    //ULONG errorMode;
-    //
-    //if (NT_SUCCESS(PhGetProcessErrorMode(NtCurrentProcess(), &errorMode)))
-    //{
-    //    ClearFlag(errorMode, SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-    //    PhSetProcessErrorMode(NtCurrentProcess(), errorMode);
-    //}
-    PhSetProcessErrorMode(NtCurrentProcess(), 0);
+#if PHNT_MINIMAL_ERRORMODE
+    ULONG errorMode;
 
-    RtlSetUnhandledExceptionFilter(PhpUnhandledExceptionCallback);
+    if (NT_SUCCESS(PhGetProcessErrorMode(NtCurrentProcess(), &errorMode)))
+    {
+        ClearFlag(errorMode, SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        PhSetProcessErrorMode(NtCurrentProcess(), errorMode);
+    }
+#else
+    PhSetProcessErrorMode(NtCurrentProcess(), 0);
 #endif
+    RtlSetUnhandledExceptionFilter(PhpUnhandledExceptionCallback);
+
     return TRUE;
 }
 
@@ -835,152 +854,27 @@ BOOLEAN PhInitializeNamespacePolicy(
     return TRUE;
 }
 
-//BOOLEAN PhInitializeMitigationPolicy(
-//    VOID
-//    )
-//{
-//#ifndef DEBUG
-//    BOOLEAN PhpIsExploitProtectionEnabled(VOID);
-//#define DEFAULT_MITIGATION_POLICY_FLAGS \
-//    (PROCESS_CREATION_MITIGATION_POLICY_HEAP_TERMINATE_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_HIGH_ENTROPY_ASLR_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_EXTENSION_POINT_DISABLE_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_PROHIBIT_DYNAMIC_CODE_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_NO_REMOTE_ALWAYS_ON | \
-//     PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_NO_LOW_LABEL_ALWAYS_ON)
-//    static PH_STRINGREF nompCommandlinePart = PH_STRINGREF_INIT(L" -nomp");
-//    static PH_STRINGREF rasCommandlinePart = PH_STRINGREF_INIT(L" -ras");
-//    BOOLEAN success = TRUE;
-//    PH_STRINGREF commandlineSr;
-//    PPH_STRING commandline = NULL;
-//    ULONG64 options[2] = { 0 };
-//    PS_SYSTEM_DLL_INIT_BLOCK (*LdrSystemDllInitBlock_I) = NULL;
-//    STARTUPINFOEX startupInfo = { sizeof(STARTUPINFOEX) };
-//
-//    if (WindowsVersion < WINDOWS_10_RS3)
-//        return TRUE;
-//    if (!PhpIsExploitProtectionEnabled())
-//        return TRUE;
-//
-//    if (!NT_SUCCESS(PhGetProcessCommandLineStringRef(&commandlineSr)))
-//        goto CleanupExit;
-//    if (PhFindStringInStringRef(&commandlineSr, &rasCommandlinePart, FALSE) != SIZE_MAX)
-//        goto CleanupExit;
-//    if (PhEndsWithStringRef(&commandlineSr, &nompCommandlinePart, FALSE))
-//        goto CleanupExit;
-//
-//    commandline = PhConcatStringRef2(&commandlineSr, &nompCommandlinePart);
-//
-//    if (NT_SUCCESS(PhGetProcessSystemDllInitBlock(NtCurrentProcess(), &LdrSystemDllInitBlock_I)))
-//    {
-//        if (RTL_CONTAINS_FIELD(LdrSystemDllInitBlock_I, LdrSystemDllInitBlock_I->Size, MitigationOptionsMap))
-//        {
-//            if ((LdrSystemDllInitBlock_I->MitigationOptionsMap.Map[0] & DEFAULT_MITIGATION_POLICY_FLAGS) == DEFAULT_MITIGATION_POLICY_FLAGS)
-//                goto CleanupExit;
-//        }
-//    }
-//
-//    if (!NT_SUCCESS(PhInitializeProcThreadAttributeList(&startupInfo.lpAttributeList, 2)))
-//        goto CleanupExit;
-//
-//    if (!NT_SUCCESS(PhUpdateProcThreadAttribute(
-//        startupInfo.lpAttributeList,
-//        PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
-//        &(ULONG64){ DEFAULT_MITIGATION_POLICY_FLAGS },
-//        sizeof(ULONG64)
-//        )))
-//    {
-//        goto CleanupExit;
-//    }
-//
-//    {
-//        PROC_THREAD_BNOISOLATION_ATTRIBUTE bnoAttribute;
-//
-//        bnoAttribute.IsolationEnabled = TRUE;
-//        wcsncpy_s(bnoAttribute.IsolationPrefix, RTL_NUMBER_OF(bnoAttribute.IsolationPrefix), L"SystemInformer", _TRUNCATE);
-//
-//        if (!NT_SUCCESS(PhUpdateProcThreadAttribute(
-//            startupInfo.lpAttributeList,
-//            PROC_THREAD_ATTRIBUTE_BNO_ISOLATION,
-//            &bnoAttribute,
-//            sizeof(PROC_THREAD_BNOISOLATION_ATTRIBUTE)
-//            )))
-//        {
-//            goto CleanupExit;
-//        }
-//    }
-//
-//    if (NT_SUCCESS(PhCreateProcessWin32Ex(
-//        NULL,
-//        PhGetString(commandline),
-//        NULL,
-//        NULL,
-//        &startupInfo.StartupInfo,
-//        PH_CREATE_PROCESS_EXTENDED_STARTUPINFO | PH_CREATE_PROCESS_BREAKAWAY_FROM_JOB,
-//        NULL,
-//        NULL,
-//        NULL,
-//        NULL
-//        )))
-//    {
-//        success = FALSE;
-//    }
-//
-//CleanupExit:
-//
-//    if (commandline)
-//        PhDereferenceObject(commandline);
-//
-//    if (startupInfo.lpAttributeList)
-//        PhDeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-//
-//    return success;
-//#else
-//    return TRUE;
-//#endif
-//}
-//
-//BOOLEAN PhInitializeMitigationSignaturePolicy(
-//    VOID
-//    )
-//{
-//#ifndef DEBUG
-//    BOOLEAN PhpIsExploitProtectionEnabled(VOID); // Forwarded from options.c (dmex)
-//    // Starting with Win10 20H1 processes with uiAccess=true override the ProcessExtensionPointDisablePolicy
-//    // blocking hook DLL injection and inject the window hook anyway. This override doesn't check if the process has also enabled
-//    // the MicrosoftSignedOnly policy causing an infinite loop of APC messages and hook DLL loading/unloading
-//    // inside user32!_ClientLoadLibrary while calling the GetMessageW API for the window message loop.
-//    // ...
-//    // 1) GetMessageW processes the APC message for loading the window hook DLL with user32!_ClientLoadLibrary.
-//    // 2) user32!_ClientLoadLibrary calls LoadLibraryEx with the DLL path.
-//    // 3) LoadLibraryEx returns an error loading the window hook DLL because we enabled MicrosoftSignedOnly.
-//    // 4) SetWindowsHookEx ignores the result and re-queues the APC message from step 1.
-//    // ...
-//    // Mouse/keyboard/window messages passing through GetMessageW generate large volumes of calls to LoadLibraryEx
-//    // making the application unresponsive as each message processes the APC message and loads/unloads the hook DLL...
-//    // So don't use MicrosoftSignedOnly on versions of Windows where Process Hacker becomes unresponsive
-//    // because a third party application called SetWindowsHookEx on the machine. (dmex)
-//    if (
-//        WindowsVersion >= WINDOWS_10 &&
-//        PhpIsExploitProtectionEnabled()
-//        //WindowsVersion != WINDOWS_10_20H1 &&
-//        //WindowsVersion != WINDOWS_10_20H2
-//        )
-//    {
-//        PROCESS_MITIGATION_POLICY_INFORMATION policyInfo;
-//
-//        policyInfo.Policy = ProcessSignaturePolicy;
-//        policyInfo.SignaturePolicy.Flags = 0;
-//        policyInfo.SignaturePolicy.MicrosoftSignedOnly = TRUE;
-//
-//        NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
-//    }
-//#endif
-//
-//    return TRUE;
-//}
+BOOLEAN PhInitializeMitigationPolicy(
+    VOID
+    )
+{
+    if (WindowsVersion >= WINDOWS_10)
+    {
+        PROCESS_MITIGATION_POLICY_INFORMATION policyInfo;
+
+        policyInfo.Policy = ProcessSignaturePolicy;
+        policyInfo.SignaturePolicy.Flags = 0;
+        policyInfo.SignaturePolicy.MicrosoftSignedOnly = TRUE;
+        NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
+
+        policyInfo.Policy = ProcessRedirectionTrustPolicy;
+        policyInfo.RedirectionTrustPolicy.Flags = 0;
+        policyInfo.RedirectionTrustPolicy.EnforceRedirectionTrust = TRUE;
+        NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
+    }
+
+    return TRUE;
+}
 
 BOOLEAN PhInitializeComPolicy(
     VOID
@@ -1085,6 +979,15 @@ VOID PhEnableTerminationPolicy(
     }
 }
 
+BOOLEAN PhInitializeTimerPolicy(
+    VOID
+    )
+{
+    SetUserObjectInformation(NtCurrentProcess(), UOI_TIMERPROC_EXCEPTION_SUPPRESSION, &(BOOL){ FALSE }, sizeof(BOOL));
+
+    return TRUE;
+}
+
 BOOLEAN PhInitializeAppSystem(
     VOID
     )
@@ -1131,11 +1034,11 @@ VOID PhpInitializeSettings(
         {
             PPH_STRING applicationFileName;
 
-            if (applicationFileName = PhGetApplicationFileNameWin32())
+            if (applicationFileName = PhGetApplicationFileName())
             {
                 settingsFileName = PhConcatStringRef2(&applicationFileName->sr, &settingsSuffix);
 
-                if (PhDoesFileExistWin32(PhGetString(settingsFileName)))
+                if (PhDoesFileExist(&settingsFileName->sr))
                 {
                     PhSettingsFileName = settingsFileName;
                     PhPortableEnabled = TRUE;
@@ -1152,7 +1055,7 @@ VOID PhpInitializeSettings(
         // 3. Default location
         if (PhIsNullOrEmptyString(PhSettingsFileName))
         {
-            PhSettingsFileName = PhGetKnownLocationZ(PH_FOLDERID_RoamingAppData, L"\\SystemInformer\\settings.xml");
+            PhSettingsFileName = PhGetKnownLocationZ(PH_FOLDERID_RoamingAppData, L"\\SystemInformer\\settings.xml", TRUE);
         }
 
         if (!PhIsNullOrEmptyString(PhSettingsFileName))
@@ -1168,7 +1071,7 @@ VOID PhpInitializeSettings(
             {
                 if (PhShowMessage2(
                     NULL,
-                    TDCBF_YES_BUTTON | TDCBF_NO_BUTTON,
+                    TD_YES_BUTTON | TD_NO_BUTTON,
                     TD_WARNING_ICON,
                     L"System Informer's settings file is corrupt. Do you want to reset it?",
                     L"If you select No, the settings system will not function properly."
@@ -1180,9 +1083,9 @@ VOID PhpInitializeSettings(
 
                     // This used to delete the file. But it's better to keep the file there
                     // and overwrite it with some valid XML, especially with case (2) above.
-                    if (NT_SUCCESS(PhCreateFileWin32(
+                    if (NT_SUCCESS(PhCreateFile(
                         &fileHandle,
-                        PhGetString(PhSettingsFileName),
+                        &PhSettingsFileName->sr,
                         FILE_GENERIC_WRITE,
                         FILE_ATTRIBUTE_NORMAL,
                         FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -1215,6 +1118,7 @@ VOID PhpInitializeSettings(
     PhEnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
     PhEnableThemeAcrylicSupport = WindowsVersion >= WINDOWS_11 && !!PhGetIntegerSetting(L"EnableThemeAcrylicSupport");
     PhEnableThemeListviewBorder = !!PhGetIntegerSetting(L"TreeListBorderEnable");
+    PhEnableDeferredLayout = !!PhGetIntegerSetting(L"EnableDeferredLayout");
 
     if (PhGetIntegerSetting(L"SampleCountAutomatic"))
     {

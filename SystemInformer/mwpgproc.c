@@ -46,7 +46,7 @@ static PPH_TN_FILTER_ENTRY SignedFilterEntry = NULL;
 static PPH_TN_FILTER_ENTRY MicrosoftSignedFilterEntry = NULL;
 
 BOOLEAN PhMwpProcessesPageCallback(
-    _In_ struct _PH_MAIN_TAB_PAGE *Page,
+    _In_ PPH_MAIN_TAB_PAGE Page,
     _In_ PH_MAIN_TAB_PAGE_MESSAGE Message,
     _In_opt_ PVOID Parameter1,
     _In_opt_ PVOID Parameter2
@@ -434,7 +434,6 @@ VOID PhMwpSetProcessMenuPriorityChecks(
     UCHAR priorityClass = PROCESS_PRIORITY_CLASS_UNKNOWN;
     IO_PRIORITY_HINT ioPriority = ULONG_MAX;
     ULONG pagePriority = ULONG_MAX;
-    BOOLEAN priorityBoostDisabled = FALSE;
     ULONG id = 0;
 
     if (NT_SUCCESS(PhOpenProcess(

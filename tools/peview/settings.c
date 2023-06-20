@@ -42,10 +42,10 @@ VOID PvAddDefaultSettings(
     PhpAddStringSetting(L"ImageGeneralPropertiesListViewGroupStates", L"");
     PhpAddStringSetting(L"ImageDirectoryTreeListColumns", L"");
     PhpAddStringSetting(L"ImageDirectoryTreeListSort", L"0,1"); // 0, AscendingSortOrder
-    PhpAddStringSetting(L"ImageExportsTreeListColumns", L"");
-    PhpAddStringSetting(L"ImageExportsTreeListSort", L"0,1"); // 0, AscendingSortOrder
-    PhpAddStringSetting(L"ImageImportsTreeListColumns", L"");
-    PhpAddStringSetting(L"ImageImportsTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddStringSetting(L"ImageExportTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageExportTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddStringSetting(L"ImageImportTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageImportTreeListSort", L"0,1"); // 0, AscendingSortOrder
     PhpAddStringSetting(L"ImageSectionsTreeListColumns", L"");
     PhpAddStringSetting(L"ImageSectionsTreeListSort", L"0,1"); // 0, AscendingSortOrder
     PhpAddIntegerSetting(L"ImageSectionsTreeListFlags", L"0");
@@ -80,8 +80,12 @@ VOID PvAddDefaultSettings(
     PhpAddStringSetting(L"ImageDebugListViewColumns", L"");
     PhpAddStringSetting(L"ImageDebugCrtListViewColumns", L"");
     PhpAddStringSetting(L"ImageDebugPogoListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDisasmTreeColumns", L"");
+    PhpAddIntegerPairSetting(L"ImageDisasmWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"ImageDisasmWindowSize", L"@96|0,0");
     PhpAddStringSetting(L"ImageEhContListViewColumns", L"");
     PhpAddStringSetting(L"ImageVolatileListViewColumns", L"");
+    PhpAddStringSetting(L"ImageVersionInfoListViewColumns", L"");
     PhpAddStringSetting(L"LibListViewColumns", L"");
     PhpAddStringSetting(L"PdbTreeListColumns", L"");
     PhpAddIntegerSetting(L"TreeListBorderEnable", L"0");
@@ -98,6 +102,7 @@ VOID PvUpdateCachedSettings(
     )
 {
     PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
+    PhEnableSecurityAdvancedDialog = !!PhGetIntegerSetting(L"EnableSecurityAdvancedDialog");
     PhEnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
     PhEnableThemeListviewBorder = !!PhGetIntegerSetting(L"TreeListBorderEnable");
 }
@@ -119,11 +124,11 @@ VOID PvInitializeSettings(
 
     // 1. File in program directory
 
-    if (appFileName = PhGetApplicationFileNameWin32())
+    if (appFileName = PhGetApplicationFileName())
     {
         tempFileName = PhConcatStringRefZ(&appFileName->sr, L".settings.xml");
 
-        if (PhDoesFileExistWin32(PhGetString(tempFileName)))
+        if (PhDoesFileExist(&tempFileName->sr))
         {
             PvSettingsFileName = tempFileName;
         }
@@ -138,7 +143,7 @@ VOID PvInitializeSettings(
     // 2. Default location
     if (PhIsNullOrEmptyString(PvSettingsFileName))
     {
-        PvSettingsFileName = PhGetRoamingAppDataDirectoryZ(L"peview.xml");
+        PvSettingsFileName = PhGetRoamingAppDataDirectoryZ(L"peview.xml", TRUE);
     }
 
     if (!PhIsNullOrEmptyString(PvSettingsFileName))
@@ -164,9 +169,9 @@ VOID PvInitializeSettings(
 
                 // This used to delete the file. But it's better to keep the file there
                 // and overwrite it with some valid XML, especially with case (2) above.
-                if (NT_SUCCESS(PhCreateFileWin32(
+                if (NT_SUCCESS(PhCreateFile(
                     &fileHandle,
-                    PhGetString(PvSettingsFileName),
+                    &PvSettingsFileName->sr,
                     FILE_GENERIC_WRITE,
                     FILE_ATTRIBUTE_NORMAL,
                     FILE_SHARE_READ | FILE_SHARE_DELETE,

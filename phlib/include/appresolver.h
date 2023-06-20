@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2017-2018
+ *     dmex    2017-2023
  *
  */
 
@@ -78,13 +78,16 @@ PPH_LIST PhGetPackageAssetsFromResourceFile(
 typedef struct _PH_APPUSERMODELID_ENUM_ENTRY
 {
     PPH_STRING AppUserModelId;
-    PPH_STRING DisplayName;
+    PPH_STRING PackageName;
+    PPH_STRING PackageDisplayName;
+    PPH_STRING PackageFamilyName;
     PPH_STRING PackageInstallPath;
     PPH_STRING PackageFullName;
+    PPH_STRING PackageVersion;
     PPH_STRING SmallLogoPath;
 } PH_APPUSERMODELID_ENUM_ENTRY, *PPH_APPUSERMODELID_ENUM_ENTRY;
 
-PPH_LIST PhEnumerateApplicationUserModelIds(
+PPH_LIST PhEnumApplicationUserModelIds(
     VOID
     );
 
@@ -250,6 +253,36 @@ PhGetProcessSystemIdentification(
     _Out_ PPH_STRING* SystemIdForUser
     );
 
+PHLIBAPI
+PPH_LIST
+NTAPI
+PhEnumPackageApplicationUserModelIds(
+    VOID
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhDestroyEnumPackageApplicationUserModelIds(
+    _In_ PPH_LIST PackageList
+    );
+
+typedef LONG (WINAPI* _OpenPackageInfoByFullNameForUser)(
+    _In_opt_ PSID userSid,
+    _In_ PCWSTR packageFullName,
+    _Reserved_ const UINT32 reserved,
+    _Out_ PHANDLE packageInfoReference // PACKAGE_INFO_REFERENCE
+    );
+typedef LONG (WINAPI* _GetPackageApplicationIds)(
+    _In_ HANDLE packageInfoReference, // PACKAGE_INFO_REFERENCE
+    _Inout_ PUINT32 bufferLength,
+    _Out_writes_bytes_opt_(*bufferLength) PBYTE buffer,
+    _Out_opt_ PUINT32 count
+    );
+typedef LONG (WINAPI* _ClosePackageInfo)(
+    _In_ HANDLE packageInfoReference // PACKAGE_INFO_REFERENCE
+    );
+
 #pragma region Activation Factory
 
 // 00000035-0000-0000-C000-000000000046
@@ -322,17 +355,17 @@ interface IInspectable
 
 #ifdef COBJMACROS
 #define IInspectable_QueryInterface(This,riid,ppvObject) \
-    ((This)->lpVtbl->QueryInterface(This,riid,ppvObject)) 
+    ((This)->lpVtbl->QueryInterface(This,riid,ppvObject))
 #define IInspectable_AddRef(This) \
-    ((This)->lpVtbl->AddRef(This)) 
+    ((This)->lpVtbl->AddRef(This))
 #define IInspectable_Release(This) \
-    ((This)->lpVtbl->Release(This)) 
+    ((This)->lpVtbl->Release(This))
 #define IInspectable_GetIids(This,iidCount,iids) \
-    ((This)->lpVtbl->GetIids(This,iidCount,iids)) 
+    ((This)->lpVtbl->GetIids(This,iidCount,iids))
 #define IInspectable_GetRuntimeClassName(This,className) \
-    ((This)->lpVtbl->GetRuntimeClassName(This,className)) 
-#define IInspectable_GetTrustLevel(This,trustLevel)	\
-    ((This)->lpVtbl->GetTrustLevel(This,trustLevel)) 
+    ((This)->lpVtbl->GetRuntimeClassName(This,className))
+#define IInspectable_GetTrustLevel(This,trustLevel) \
+    ((This)->lpVtbl->GetTrustLevel(This,trustLevel))
 #endif
 #endif
 #endif
@@ -402,19 +435,19 @@ interface IActivationFactory
 
 #ifdef COBJMACROS
 #define IActivationFactory_QueryInterface(This,riid,ppvObject) \
-    ((This)->lpVtbl->QueryInterface(This,riid,ppvObject)) 
+    ((This)->lpVtbl->QueryInterface(This,riid,ppvObject))
 #define IActivationFactory_AddRef(This) \
-    ((This)->lpVtbl->AddRef(This)) 
+    ((This)->lpVtbl->AddRef(This))
 #define IActivationFactory_Release(This) \
-    ((This)->lpVtbl->Release(This)) 
+    ((This)->lpVtbl->Release(This))
 #define IActivationFactory_GetIids(This,iidCount,iids) \
-    ((This)->lpVtbl->GetIids(This,iidCount,iids)) 
+    ((This)->lpVtbl->GetIids(This,iidCount,iids))
 #define IActivationFactory_GetRuntimeClassName(This,className) \
-    ((This)->lpVtbl->GetRuntimeClassName(This,className)) 
+    ((This)->lpVtbl->GetRuntimeClassName(This,className))
 #define IActivationFactory_GetTrustLevel(This,trustLevel) \
-    ((This)->lpVtbl->GetTrustLevel(This,trustLevel)) 
+    ((This)->lpVtbl->GetTrustLevel(This,trustLevel))
 #define IActivationFactory_ActivateInstance(This,instance) \
-    ((This)->lpVtbl->ActivateInstance(This,instance)) 
+    ((This)->lpVtbl->ActivateInstance(This,instance))
 #endif
 #endif
 #endif

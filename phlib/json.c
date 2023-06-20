@@ -14,8 +14,8 @@
 #include <phutil.h>
 #include <json.h>
 
-#include "..\tools\thirdparty\jsonc\json.h"
-#include "..\tools\thirdparty\mxml\mxml.h"
+#include "../tools/thirdparty/jsonc/json.h"
+#include "../tools/thirdparty/mxml/mxml.h"
 
 static json_object_ptr json_get_object(
     _In_ json_object_ptr rootObj,
@@ -430,9 +430,9 @@ NTSTATUS PhLoadXmlObjectFromFile(
     LARGE_INTEGER fileSize;
     mxml_node_t* currentNode;
 
-    status = PhCreateFileWin32(
+    status = PhCreateFile(
         &fileHandle,
-        PhGetStringRefZ(FileName),
+        FileName,
         FILE_GENERIC_READ,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -485,14 +485,14 @@ NTSTATUS PhSaveXmlObjectToFile(
 
     // Create the directory if it does not exist.
 
-    status = PhCreateDirectoryFullPathWin32(FileName);
+    status = PhCreateDirectoryFullPath(FileName);
 
     if (!NT_SUCCESS(status))
         return status;
 
-    status = PhCreateFileWin32(
+    status = PhCreateFile(
         &fileHandle,
-        PhGetStringRefZ(FileName),
+        FileName,
         FILE_GENERIC_WRITE,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ,

@@ -78,7 +78,7 @@ BOOLEAN PhGraphControlInitialization(
     c.cbWndExtra = sizeof(PVOID);
     c.hInstance = PhInstanceHandle;
     c.hIcon = NULL;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
+    c.hCursor = PhLoadCursor(NULL, IDC_ARROW);
     c.hbrBackground = NULL;
     c.lpszMenuName = NULL;
     c.lpszClassName = PH_GRAPH_CLASSNAME;
@@ -945,12 +945,12 @@ LRESULT CALLBACK PhpGraphWndProc(
 {
     PPHP_GRAPH_CONTEXT context;
 
-    context = PhGetWindowContext(hwnd, MAXCHAR);
+    context = PhGetWindowContextEx(hwnd);
 
     if (uMsg == WM_CREATE)
     {
         PhpCreateGraphContext(&context);
-        PhSetWindowContext(hwnd, MAXCHAR, context);
+        PhSetWindowContextEx(hwnd, context);
     }
 
     if (!context)
@@ -987,14 +987,14 @@ LRESULT CALLBACK PhpGraphWndProc(
             CREATESTRUCT *createStruct = (CREATESTRUCT *)lParam;
 
             context->Handle = hwnd;
-            context->ParentHandle = GetParent(hwnd);
+            context->ParentHandle = createStruct->hwndParent;
             context->Style = createStruct->style;
             context->Id = (ULONG_PTR)createStruct->hMenu;
         }
         break;
     case WM_DESTROY:
         {
-            PhRemoveWindowContext(hwnd, MAXCHAR);
+            PhRemoveWindowContextEx(hwnd);
 
             if (context->TooltipHandle)
                 DestroyWindow(context->TooltipHandle);
@@ -1158,7 +1158,7 @@ LRESULT CALLBACK PhpGraphWndProc(
         {
             if (context->Options.DefaultCursor)
             {
-                SetCursor(context->Options.DefaultCursor);
+                PhSetCursor(context->Options.DefaultCursor);
                 return TRUE;
             }
         }

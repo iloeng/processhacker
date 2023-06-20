@@ -109,7 +109,9 @@
 #define IDD_HEAPS                       255
 #define IDD_PROCVDMHOST                 257
 #define IDD_OPTSYMBOLS                  258
+#define IDD_OBJMAPPINGS                 258
 #define IDI_UACSHIELD                   261
+#define IDD_RUNPACKAGE                  263
 #define IDB_SEARCH_ACTIVE_SMALL         265
 #define IDB_SEARCH_INACTIVE_SMALL       266
 #define IDC_TERMINATE                   1003
@@ -399,6 +401,7 @@
 #define IDC_TOGGLEELEVATION             1254
 #define IDC_TOGGLESUSPENDED             1255
 #define IDC_TRUSTEDINSTALLER            1255
+#define IDC_TOGGLEUIACCESS              1256
 #define IDC_PARENT                      1263
 #define IDC_PROCESSNAME                 1264
 #define IDC_SERVICES_LAYOUT             1266
@@ -514,6 +517,9 @@
 #define IDC_SECTION                     1375
 #define IDC_REGEX                       1377
 #define IDC_DESCRIPTIONLABEL            1378
+#define IDC_IOREAD_L                    1378
+#define IDC_IOWRITE_L                   1379
+#define IDC_IOOTHER_L                   1380
 #define IDC_VIEWCOMMANDLINE             1381
 #define IDC_DELETE                      1382
 #define IDC_EDIT                        1383
@@ -603,6 +609,7 @@
 #define ID_HACKER_RUNASADMINISTRATOR    40077
 #define ID_HACKER_RUNAS                 40078
 #define ID_HACKER_SHOWDETAILSFORALLPROCESSES 40079
+#define ID_HACKER_RUNASPACKAGE          40080
 #define ID_HACKER_FINDHANDLESORDLLS     40082
 #define ID_HACKER_OPTIONS               40083
 #define ID_PROCESS_FREEZE               40084
@@ -795,9 +802,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        267
+#define _APS_NEXT_RESOURCE_VALUE        273
 #define _APS_NEXT_COMMAND_VALUE         40298
-#define _APS_NEXT_CONTROL_VALUE         1416
+#define _APS_NEXT_CONTROL_VALUE         1418
 #define _APS_NEXT_SYMED_VALUE           170
 #endif
 #endif

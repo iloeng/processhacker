@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *     jxy-s   2021
  *
  */
@@ -30,11 +30,13 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"DisabledPlugins", L"");
     PhpAddIntegerSetting(L"ElevationLevel", L"1"); // PromptElevateAction
     PhpAddIntegerSetting(L"EnableAdvancedOptions", L"0");
+    PhpAddIntegerSetting(L"EnableArmCycleCpuUsage", L"0");
+    PhpAddIntegerSetting(L"EnableAvxSupport", L"0");
     PhpAddIntegerSetting(L"EnableBitmapSupport", L"1");
     PhpAddIntegerSetting(L"EnableBreakOnTermination", L"0");
     PhpAddIntegerSetting(L"EnableBootObjectsEnumerate", L"0");
     PhpAddIntegerSetting(L"EnableCycleCpuUsage", L"1");
-    PhpAddIntegerSetting(L"EnableArmCycleCpuUsage", L"0");
+    PhpAddIntegerSetting(L"EnableDeferredLayout", L"1");
     PhpAddIntegerSetting(L"EnableImageCoherencySupport", L"0");
     PhpAddIntegerSetting(L"EnableInstantTooltips", L"0");
     PhpAddIntegerSetting(L"EnableHeapReflection", L"0");
@@ -192,6 +194,8 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"RunAsProgram", L"");
     PhpAddStringSetting(L"RunAsUserName", L"");
     PhpAddIntegerPairSetting(L"RunAsWindowPosition", L"0,0");
+    PhpAddIntegerPairSetting(L"RunAsPackageWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"RunAsPackageWindowSize", L"@96|500,300");
     PhpAddIntegerSetting(L"RunFileDlgState", L"0");
     PhpAddIntegerSetting(L"SampleCount", L"200"); // 512
     PhpAddIntegerSetting(L"SampleCountAutomatic", L"1");
@@ -224,6 +228,8 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"ThreadTreeListFlags", L"0");
     PhpAddStringSetting(L"ThreadStackTreeListColumns", L"");
     PhpAddScalableIntegerPairSetting(L"ThreadStackWindowSize", L"@96|420,400");
+    PhpAddIntegerPairSetting(L"TokenWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"TokenWindowSize", L"@96|0,0");
     PhpAddStringSetting(L"TokenGroupsListViewColumns", L"");
     PhpAddStringSetting(L"TokenGroupsListViewStates", L"");
     PhpAddStringSetting(L"TokenGroupsListViewSort", L"1,2");
@@ -408,9 +414,9 @@ VOID PhUpdateCachedSettings(
 
     PH_UPDATE_SETTING(ImageCoherencyScanLevel);
 
+    PhCsEnableAvxSupport = !!PhGetIntegerSetting(L"EnableAvxSupport");
     PhCsEnableGraphMaxScale = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
     PhCsEnableGraphMaxText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
     PhEnableNetworkResolveDoHSupport = !!PhGetIntegerSetting(L"EnableNetworkResolveDoH");
     PhEnableVersionShortText = !!PhGetIntegerSetting(L"EnableVersionSupport");
-    PhEnableWindowText = !!PhGetIntegerSetting(L"EnableWindowText");
 }

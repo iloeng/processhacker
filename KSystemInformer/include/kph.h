@@ -25,7 +25,6 @@
 #include <ntldr.h>
 #include <ntwow64.h>
 #include <kphapi.h>
-#include <kphosver.h>
 
 #define KSIAPI NTAPI
 
@@ -96,6 +95,10 @@ SIZE_T InterlockedExchangeIfGreaterSizeT(
 _Pragma("warning(suppress : 6001)")\
 ProbeForWrite(pointer, sizeof(type), TYPE_ALIGNMENT(type))
 
+#define ProbeInputType(pointer, type)\
+_Pragma("warning(suppress : 6001)")\
+ProbeForRead(pointer, sizeof(type), TYPE_ALIGNMENT(type))
+
 #define C_2sTo4(x) ((unsigned int)(signed short)(x))
 
 #define RebaseUnicodeString(string, oldBase, newBase)\
@@ -105,22 +108,24 @@ typedef struct _KPH_SIZED_BUFFER
 {
     ULONG Size;
     PBYTE Buffer;
-
 } KPH_SIZED_BUFFER, *PKPH_SIZED_BUFFER;
 
 // main
 
 extern PDRIVER_OBJECT KphDriverObject;
+extern RTL_OSVERSIONINFOEXW KphOsVersionInfo;
+extern USHORT KphOsRevision;
 extern KPH_INFORMER_SETTINGS KphInformerSettings;
-extern BOOLEAN KphIgnoreDebuggerPresence;
+extern BOOLEAN KphIgnoreProtectionSuppression;
 extern SYSTEM_SECUREBOOT_INFORMATION KphSecureBootInfo;
+extern SYSTEM_CODEINTEGRITY_INFORMATION KphCodeIntegrityInfo;
 
 FORCEINLINE
-BOOLEAN KphKdPresent(
+BOOLEAN KphSuppressProtections(
     VOID
     )
 {
-    if (KphIgnoreDebuggerPresence)
+    if (KphIgnoreProtectionSuppression)
     {
         return FALSE;
     }
@@ -131,7 +136,18 @@ BOOLEAN KphKdPresent(
         return FALSE;
     }
 
-    return !KD_DEBUGGER_NOT_PRESENT;
+    if (!KD_DEBUGGER_ENABLED)
+    {
+        return FALSE;
+    }
+
+    if (!FlagOn(KphCodeIntegrityInfo.CodeIntegrityOptions,
+                CODEINTEGRITY_OPTION_TESTSIGN))
+    {
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 // alloc
@@ -266,12 +282,6 @@ PVOID KphGetSystemRoutineAddress(
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
-PVOID KphFindExportedRoutineByName(
-    _In_ PVOID BaseAddress,
-    _In_z_ PCSTR RoutineName
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
 PVOID KphGetRoutineAddress(
     _In_z_ PCWSTR ModuleName,
     _In_z_ PCSTR RoutineName
@@ -293,6 +303,8 @@ NTSTATUS KphLocateKernelImage(
 
 #define IsKernelHandle(Handle) ((LONG_PTR)(Handle) < 0)
 #define MakeKernelHandle(Handle) ((HANDLE)((ULONG_PTR)(Handle) | KERNEL_HANDLE_BIT))
+#define IsPseudoHandle(Handle) (((ULONG_PTR)(Handle) <= (ULONG_PTR)-1) &&\
+                                ((ULONG_PTR)(Handle) >= (ULONG_PTR)-6))
 
 _Acquires_lock_(Process)
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -457,13 +469,6 @@ NTSTATUS KphSetInformationProcess(
     _In_ KPROCESSOR_MODE AccessMode
     );
 
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphGetProcessProtection(
-    _In_ PEPROCESS Process,
-    _Out_ PPS_PROTECTION Protection
-    );
-
 // qrydrv
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -521,8 +526,6 @@ VOID KphInitializeStackBackTrace(
     VOID
     );
 
-#define KPH_STACK_TRACE_CAPTURE_USER_STACK 0x00000001
-
 _IRQL_requires_max_(APC_LEVEL)
 _Success_(return != 0)
 ULONG KphCaptureStackBackTrace(
@@ -568,6 +571,17 @@ NTSTATUS KphSetInformationThread(
     _In_ KPH_THREAD_INFORMATION_CLASS ThreadInformationClass,
     _In_reads_bytes_(ThreadInformationLength) PVOID ThreadInformation,
     _In_ ULONG ThreadInformationLength,
+    _In_ KPROCESSOR_MODE AccessMode
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphQueryInformationThread(
+    _In_ HANDLE ThreadHandle,
+    _In_ KPH_THREAD_INFORMATION_CLASS ThreadInformationClass,
+    _Out_writes_bytes_opt_(ThreadInformationLength) PVOID ThreadInformation,
+    _In_ ULONG ThreadInformationLength,
+    _Out_opt_ PULONG ReturnLength,
     _In_ KPROCESSOR_MODE AccessMode
     );
 
@@ -636,33 +650,9 @@ VOID KphReleaseRWLock(
 
 _IRQL_requires_max_(APC_LEVEL)
 _Must_inspect_result_
-NTSTATUS KphGetSystemModules(
-    _Outptr_allocatesMem_ PRTL_PROCESS_MODULES *Modules
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-VOID KphFreeSystemModules(
-    _In_freesMem_ PRTL_PROCESS_MODULES Modules
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
 NTSTATUS KphValidateAddressForSystemModules(
     _In_ PVOID Address,
     _In_ SIZE_T Length
-    );
-
-_IRQL_requires_max_(PASSIVE_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphGetProcessMappedFileName(
-    _In_ HANDLE ProcessHandle,
-    _In_ PVOID BaseAddress,
-    _Outptr_allocatesMem_ PUNICODE_STRING* FileName
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-VOID KphFreeProcessMappedFileName(
-    _In_freesMem_ PUNICODE_STRING FileName
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -700,74 +690,20 @@ NTSTATUS KphQueryRegistryULong(
     _Out_ PULONG Value
     );
 
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS
-KphImageNtHeader(
-    _In_ PVOID Base,
-    _In_ ULONG64 Size,
-    _Out_ PIMAGE_NT_HEADERS* OutHeaders
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphPtrAddOffset(
-    _Inout_ PVOID* Pointer,
-    _In_ SIZE_T Offset
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphAdvancePointer(
-    _Inout_ PVOID* Pointer,
-    _In_ PVOID EndPointer,
-    _In_ SIZE_T Offset
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphAdvanceBuffer(
-    _Inout_ PVOID* Pointer,
-    _Inout_ PSIZE_T Size,
-    _In_ SIZE_T Offset
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphMappedImageRvaToSection(
-    _In_ PIMAGE_SECTION_HEADER SectionHeaders,
-    _In_ ULONG NumberOfSections,
-    _In_ ULONG Rva,
-    _Out_ PIMAGE_SECTION_HEADER* Section
-    );
-
-_IRQL_requires_max_(APC_LEVEL)
-_Must_inspect_result_
-NTSTATUS KphMappedImageRvaToVa(
-    _In_ PVOID MappedBase,
-    _In_ SIZE_T ViewSize,
-    _In_ PIMAGE_SECTION_HEADER SectionHeaders,
-    _In_ ULONG NumberOfSections,
-    _In_ ULONG Rva,
-    _Out_ PVOID* Va
-    );
-
 #define KPH_MAP_IMAGE    0x00000001ul
 
 _IRQL_always_function_max_(PASSIVE_LEVEL)
 _Must_inspect_result_
-NTSTATUS KphMapViewOfFileInSystemProcess(
+NTSTATUS KphMapViewInSystem(
     _In_ HANDLE FileHandle,
     _In_ ULONG Flags,
     _Outptr_result_bytebuffer_(*ViewSize) PVOID *MappedBase,
-    _Inout_ PSIZE_T ViewSize,
-    _Out_ PKAPC_STATE ApcState
+    _Inout_ PSIZE_T ViewSize
     );
 
 _IRQL_always_function_max_(PASSIVE_LEVEL)
-VOID KphUnmapViewInSystemProcess(
-    _In_ PVOID MappedBase,
-    _In_ PKAPC_STATE ApcState
+VOID KphUnmapViewInSystem(
+    _In_ PVOID MappedBase
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -794,11 +730,6 @@ VOID KphFreeNameFileObject(
     _In_freesMem_ PUNICODE_STRING FileName
     );
 
-_IRQL_requires_max_(APC_LEVEL)
-NTSTATUS KphGetThreadExitStatus(
-    _In_ PETHREAD Thread
-    );
-
 _IRQL_requires_max_(PASSIVE_LEVEL)
 BOOLEAN KphSinglePrivilegeCheckEx(
     _In_ LUID PrivilegeValue,
@@ -812,21 +743,24 @@ BOOLEAN KphSinglePrivilegeCheck(
     _In_ KPROCESSOR_MODE AccessMode
     );
 
-_IRQL_requires_max_(APC_LEVEL)
-BOOLEAN KphSuffixUnicodeString(
-    _In_ PUNICODE_STRING Suffix,
-    _In_ PUNICODE_STRING String,
-    _In_ BOOLEAN CaseInSensitive
-    );
-
 _IRQL_requires_max_(PASSIVE_LEVEL)
 BOOLEAN KphProcessIsLsass(
     _In_ PEPROCESS Process
     );
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
 NTSTATUS KphLocateKernelRevision(
     _Out_ PUSHORT Revision
+    );
+
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphGuardGrantSuppressedCallAccess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID VirtualAddress,
+    _In_ ULONG Flags
     );
 
 // vm
@@ -854,6 +788,17 @@ NTSTATUS KphReadVirtualMemoryUnsafe(
     _In_ KPROCESSOR_MODE AccessMode
     );
 
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphQuerySection(
+    _In_ HANDLE SectionHandle,
+    _In_ KPH_SECTION_INFORMATION_CLASS SectionInformationClass,
+    _Out_writes_bytes_(SectionInformationLength) PVOID SectionInformation,
+    _In_ ULONG SectionInformationLength,
+    _Out_opt_ PULONG ReturnLength,
+    _In_ KPROCESSOR_MODE AccessMode
+    );
+
 // hash
 
 typedef struct _KPH_HASH
@@ -861,7 +806,6 @@ typedef struct _KPH_HASH
     ALG_ID AlgorithmId;
     ULONG Size;
     BYTE Buffer[MINCRYPT_MAX_HASH_LEN];
-
 } KPH_HASH, *PKPH_HASH;
 
 typedef struct _KPH_AUTHENTICODE_INFO
@@ -870,7 +814,6 @@ typedef struct _KPH_AUTHENTICODE_INFO
     BYTE SHA256[MINCRYPT_SHA256_HASH_LEN];
     PBYTE Signature;
     ULONG SignatureSize;
-
 } KPH_AUTHENTICODE_INFO, *PKPH_AUTHENTICODE_INFO;
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -947,7 +890,6 @@ typedef struct _KPH_SIGNING_INFO
     LARGE_INTEGER SigningTime;
     MINCRYPT_POLICY_INFO TimeStampPolicyInfo;
     UNICODE_STRING CatalogName;
-
 } KPH_SIGNING_INFO, *PKPH_SIGNING_INFO;
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -998,7 +940,6 @@ typedef struct _KPH_OBJECT_HEADER
     UCHAR TypeIndex;
 
     QUAD Body;
-
 } KPH_OBJECT_HEADER, *PKPH_OBJECT_HEADER;
 
 #define KphObjectToObjectHeader(x) ((PKPH_OBJECT_HEADER)CONTAINING_RECORD((PCHAR)Object, KPH_OBJECT_HEADER, Body))
@@ -1050,7 +991,6 @@ typedef struct _KPH_OBJECT_TYPE_INFO
     PKPH_TYPE_INITIALIZE_PROCEDURE Initialize;
     PKPH_TYPE_DELETE_PROCEDURE Delete;
     PKPH_TYPE_FREE_PROCEDURE Free;
-
 } KPH_OBJECT_TYPE_INFO, *PKPH_OBJECT_TYPE_INFO;
 
 typedef struct _KPH_OBJECT_TYPE
@@ -1060,7 +1000,6 @@ typedef struct _KPH_OBJECT_TYPE
     volatile SIZE_T TotalNumberOfObjects;
     volatile SIZE_T HighWaterNumberOfObjects;
     KPH_OBJECT_TYPE_INFO TypeInfo;
-
 } KPH_OBJECT_TYPE, *PKPH_OBJECT_TYPE;
 
 VOID
@@ -1129,13 +1068,16 @@ typedef struct _KPH_PROCESS_CONTEXT
             ULONG Protected : 1;
             ULONG IsLsass : 1;
             ULONG IsWow64 : 1;
-            ULONG Reserved : 25;
+            ULONG IsSubsystemProcess : 1;
+            ULONG Reserved : 24;
         };
     };
 
     KPH_RWLOCK ThreadListLock;
+    struct _KPH_THREAD_CONTEXT* InitialThread;
     SIZE_T NumberOfThreads;
     LIST_ENTRY ThreadListHead;
+    SIZE_T NumberOfUnlinkedThreads;
 
     //
     // Masks are only valid if Protected flag is set.
@@ -1154,6 +1096,17 @@ typedef struct _KPH_PROCESS_CONTEXT
 
     PKNORMAL_ROUTINE ApcNoopRoutine;
 
+    SUBSYSTEM_INFORMATION_TYPE SubsystemType;
+
+    //
+    // SubsystemInformationTypeWSL information
+    //
+    struct
+    {
+        BOOLEAN ValidProcessId;
+        ULONG ProcessId;
+
+    } WSL;
 } KPH_PROCESS_CONTEXT, *PKPH_PROCESS_CONTEXT;
 
 extern PKPH_OBJECT_TYPE KphProcessContextType;
@@ -1177,7 +1130,9 @@ typedef struct _KPH_THREAD_CONTEXT
             ULONG ExitNotification : 1;
             ULONG InThreadList : 1;
             ULONG IsCreatingProcess : 1;
-            ULONG Reserved : 27;
+            ULONG InitApcQueued : 1;
+            ULONG InitApcExecuted : 1;
+            ULONG Reserved : 25;
         };
     };
 
@@ -1188,6 +1143,17 @@ typedef struct _KPH_THREAD_CONTEXT
     //
     HANDLE IsCreatingProcessId;
 
+    SUBSYSTEM_INFORMATION_TYPE SubsystemType;
+
+    //
+    // SubsystemInformationTypeWSL information
+    //
+    struct
+    {
+        BOOLEAN ValidThreadId;
+        ULONG ThreadId;
+
+    } WSL;
 } KPH_THREAD_CONTEXT, *PKPH_THREAD_CONTEXT;
 
 extern PKPH_OBJECT_TYPE KphThreadContextType;
@@ -1305,6 +1271,12 @@ VOID KphEnumerateCidContexts(
     _In_opt_ PVOID Parameter
     );
 
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphCheckProcessApcNoopRoutine(
+    _In_ PKPH_PROCESS_CONTEXT ProcessContext
+    );
+
 // protection
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
@@ -1322,6 +1294,11 @@ NTSTATUS KphStartProtectingProcess(
 
 _IRQL_requires_max_(PASSIVE_LEVEL)
 VOID KphStopProtectingProcess(
+    _In_ PKPH_PROCESS_CONTEXT Process
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+BOOLEAN KphIsProtectedProcess(
     _In_ PKPH_PROCESS_CONTEXT Process
     );
 
@@ -1392,7 +1369,6 @@ typedef struct _KSI_KAPC
     PVOID InternalRoutine;
     PVOID InternalCleanup;
     PVOID InternalContext;
-
 } KSI_KAPC, *PKSI_KAPC;
 
 typedef enum _KSI_KAPC_CLEANUP_REASON
@@ -1400,7 +1376,6 @@ typedef enum _KSI_KAPC_CLEANUP_REASON
     KsiApcCleanupKernel,
     KsiApcCleanupNormal,
     KsiApcCleanupRundown
-
 } KSI_KAPC_CLEANUP_REASON;
 
 typedef
@@ -1506,6 +1481,24 @@ NTSTATUS KphQueryVolumeInformationFile(
     _Out_writes_bytes_(FsInformationLength) PVOID FsInformation,
     _In_ ULONG FsInformationLength,
     _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+    _In_ KPROCESSOR_MODE AccessMode
+    );
+
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS KphCreateFile(
+    _Out_ PHANDLE FileHandle,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _Out_ PIO_STATUS_BLOCK IoStatusBlock,
+    _In_opt_ PLARGE_INTEGER AllocationSize,
+    _In_ ULONG FileAttributes,
+    _In_ ULONG ShareAccess,
+    _In_ ULONG CreateDisposition,
+    _In_ ULONG CreateOptions,
+    _In_reads_bytes_opt_(EaLength) PVOID EaBuffer,
+    _In_ ULONG EaLength,
+    _In_ ULONG Options,
     _In_ KPROCESSOR_MODE AccessMode
     );
 

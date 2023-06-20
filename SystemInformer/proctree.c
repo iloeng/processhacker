@@ -237,6 +237,8 @@ VOID PhInitializeProcessTreeList(
     PhAddTreeNewColumnEx(hwnd, PHPRTLC_CPUKERNEL, FALSE, L"CPU (kernel)", 50, PH_ALIGN_RIGHT, ULONG_MAX, DT_RIGHT, TRUE);
     PhAddTreeNewColumnEx(hwnd, PHPRTLC_CPUUSER, FALSE, L"CPU (user)", 50, PH_ALIGN_LEFT, ULONG_MAX, DT_RIGHT, TRUE);
     PhAddTreeNewColumn(hwnd, PHPRTLC_GRANTEDACCESS, FALSE, L"Granted access (symbolic)", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHPRTLC_TLSBITMAPDELTA, FALSE, L"Thread local storage", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHPRTLC_REFERENCEDELTA, FALSE, L"References", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
 
     TreeNew_SetRedraw(hwnd, TRUE);
 
@@ -668,6 +670,8 @@ VOID PhpRemoveProcessNode(
     PhClearReference(&ProcessNode->CpuKernelText);
     PhClearReference(&ProcessNode->CpuUserText);
     PhClearReference(&ProcessNode->GrantedAccessText);
+    PhClearReference(&ProcessNode->TlsBitmapDeltaText);
+    PhClearReference(&ProcessNode->ReferenceCountText);
 
     PhDeleteGraphBuffers(&ProcessNode->CpuGraphBuffers);
     PhDeleteGraphBuffers(&ProcessNode->PrivateGraphBuffers);
@@ -1612,6 +1616,61 @@ static VOID PhpUpdateProcessNodeGrantedAccess(
     }
 }
 
+static VOID PhpUpdateProcessNodeTlsBitmapDelta(
+    _Inout_ PPH_PROCESS_NODE ProcessNode
+    )
+{
+    if (!(ProcessNode->ValidMask & PHPN_TLSBITMAPDELTA))
+    {
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
+        {
+            HANDLE processHandle;
+
+            if (NT_SUCCESS(PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                ProcessNode->ProcessId
+                )))
+            {
+                ULONG bitmapCount;
+                ULONG bitmapExpansionCount;
+
+                if (NT_SUCCESS(PhGetProcessTlsBitMapCounters(processHandle, &bitmapCount, &bitmapExpansionCount)))
+                {
+                    ProcessNode->TlsBitmapCount = (USHORT)(bitmapCount + bitmapExpansionCount);
+                }
+
+                NtClose(processHandle);
+            }
+        }
+
+        ProcessNode->ValidMask |= PHPN_TLSBITMAPDELTA;
+    }
+}
+
+static VOID PhpUpdateProcessNodeObjectReferences(
+    _Inout_ PPH_PROCESS_NODE ProcessNode
+    )
+{
+    if (!(ProcessNode->ValidMask & PHPN_REFERENCEDELTA))
+    {
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
+        {
+            if (ProcessNode->ProcessItem->QueryHandle)
+            {
+                OBJECT_BASIC_INFORMATION basicInfo;
+
+                if (NT_SUCCESS(PhQueryObjectBasicInformation(ProcessNode->ProcessItem->QueryHandle, &basicInfo)))
+                {
+                    ProcessNode->ReferenceCount = basicInfo.HandleCount;
+                }
+            }
+        }
+
+        ProcessNode->ValidMask |= PHPN_REFERENCEDELTA;
+    }
+}
+
 #define SORT_FUNCTION(Column) PhpProcessTreeNewCompare##Column
 
 #define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpProcessTreeNewCompare##Column( \
@@ -2376,6 +2435,22 @@ BEGIN_SORT_FUNCTION(GrantedAccess)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(TlsBitmapDelta)
+{
+    PhpUpdateProcessNodeTlsBitmapDelta(node1);
+    PhpUpdateProcessNodeTlsBitmapDelta(node2);
+    sortResult = ushortcmp(node1->TlsBitmapCount, node2->TlsBitmapCount);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(ReferenceDelta)
+{
+    PhpUpdateProcessNodeObjectReferences(node1);
+    PhpUpdateProcessNodeObjectReferences(node2);
+    sortResult = uintcmp(node1->ReferenceCount, node2->ReferenceCount);
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI PhpProcessTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -2517,6 +2592,8 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                         SORT_FUNCTION(CpuKernel),
                         SORT_FUNCTION(CpuUser),
                         SORT_FUNCTION(GrantedAccess),
+                        SORT_FUNCTION(TlsBitmapDelta),
+                        SORT_FUNCTION(ReferenceDelta),
                     };
                     int (__cdecl *sortFunction)(const void *, const void *);
 
@@ -2574,7 +2651,10 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 {
                     if (PH_IS_REAL_PROCESS_ID(processItem->ProcessId))
                     {
-                        PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
+                        if (processItem->AlternateProcessIdString)
+                            getCellText->Text = processItem->AlternateProcessIdString->sr;
+                        else
+                            PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
                     }
                 }
                 break;
@@ -3342,7 +3422,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     LARGE_INTEGER time;
                     SYSTEMTIME systemTime;
 
-                    RtlSecondsSince1970ToTime(node->ImageTimeDateStamp, &time);
+                    PhSecondsSince1970ToTime(node->ImageTimeDateStamp, &time);
                     PhLargeIntegerToLocalSystemTime(&systemTime, &time);
 
                     PhMoveReference(&node->TimeStampText, PhFormatDateTime(&systemTime));
@@ -3682,6 +3762,60 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     getCellText->Text = PhGetStringRef(node->GrantedAccessText);
                 }
                 break;
+            case PHPRTLC_TLSBITMAPDELTA:
+                {
+                    PhpUpdateProcessNodeTlsBitmapDelta(node);
+
+                    if (node->TlsBitmapCount != 0)
+                    {
+                        if (node->TlsBitmapCount > TLS_MINIMUM_AVAILABLE)
+                        {
+                            PH_FORMAT format[8];
+
+                            // 64 (100%) | 1024 (100%)
+                            PhInitFormatU(&format[0], 64);
+                            PhInitFormatS(&format[1], L" (");
+                            PhInitFormatF(&format[2], 100.0, 2);
+                            PhInitFormatS(&format[3], L"%) | ");
+                            PhInitFormatU(&format[4], node->TlsBitmapCount - TLS_MINIMUM_AVAILABLE);
+                            PhInitFormatS(&format[5], L" (");
+                            PhInitFormatF(&format[6], (node->TlsBitmapCount - TLS_MINIMUM_AVAILABLE) * 100 / TLS_EXPANSION_SLOTS, 2);
+                            PhInitFormatS(&format[7], L"%)");
+
+                            PhMoveReference(&node->TlsBitmapDeltaText, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                        }
+                        else
+                        {
+                            PH_FORMAT format[8];
+
+                            // 64 (100%) | 0 (0%)
+                            PhInitFormatU(&format[0], node->TlsBitmapCount);
+                            PhInitFormatS(&format[1], L" (");
+                            PhInitFormatF(&format[2], node->TlsBitmapCount * 100 / TLS_MINIMUM_AVAILABLE, 2);
+                            PhInitFormatS(&format[3], L"%) | ");
+                            PhInitFormatU(&format[4], 0);
+                            PhInitFormatS(&format[5], L" (");
+                            PhInitFormatF(&format[6], 0.0, 2);
+                            PhInitFormatS(&format[7], L"%)");
+
+                            PhMoveReference(&node->TlsBitmapDeltaText, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                        }
+
+                        getCellText->Text = PhGetStringRef(node->TlsBitmapDeltaText);
+                    }
+                }
+                break;
+            case PHPRTLC_REFERENCEDELTA:
+                {
+                    PhpUpdateProcessNodeObjectReferences(node);
+
+                    if (node->ReferenceCount != 0)
+                    {
+                        PhMoveReference(&node->ReferenceCountText, PhFormatUInt64(node->ReferenceCount, FALSE));
+                        getCellText->Text = node->ReferenceCountText->sr;
+                    }
+                }
+                break;
             default:
                 return FALSE;
             }
@@ -3865,22 +3999,30 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 
                     if (!node->CpuGraphBuffers.Valid)
                     {
-                        PhCopyCircularBuffer_FLOAT(&processItem->CpuKernelHistory,
-                            node->CpuGraphBuffers.Data1, drawInfo.LineDataCount);
-                        PhCopyCircularBuffer_FLOAT(&processItem->CpuUserHistory,
-                            node->CpuGraphBuffers.Data2, drawInfo.LineDataCount);
+                        PhCopyCircularBuffer_FLOAT(&processItem->CpuKernelHistory, node->CpuGraphBuffers.Data1, drawInfo.LineDataCount);
+                        PhCopyCircularBuffer_FLOAT(&processItem->CpuUserHistory, node->CpuGraphBuffers.Data2, drawInfo.LineDataCount);
 
                         if (PhCsEnableGraphMaxScale)
                         {
                             FLOAT max = 0;
 
-                            for (ULONG i = 0; i < drawInfo.LineDataCount; i++)
+                            if (PhCsEnableAvxSupport && drawInfo.LineDataCount > 128)
                             {
-                                FLOAT data = node->CpuGraphBuffers.Data1[i] +
-                                    node->CpuGraphBuffers.Data2[i]; // HACK
+                                max = PhAddPlusMaxMemorySingles(
+                                    node->CpuGraphBuffers.Data1,
+                                    node->CpuGraphBuffers.Data2,
+                                    drawInfo.LineDataCount
+                                    );
+                            }
+                            else
+                            {
+                                for (ULONG i = 0; i < drawInfo.LineDataCount; i++)
+                                {
+                                    FLOAT data = node->CpuGraphBuffers.Data1[i] + node->CpuGraphBuffers.Data2[i];
 
-                                if (max < data)
-                                    max = data;
+                                    if (max < data)
+                                        max = data;
+                                }
                             }
 
                             if (max != 0)
@@ -3916,11 +4058,10 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 
                     if (!node->PrivateGraphBuffers.Valid)
                     {
-                        ULONG i;
                         FLOAT total;
                         FLOAT max;
 
-                        for (i = 0; i < drawInfo.LineDataCount; i++)
+                        for (ULONG i = 0; i < drawInfo.LineDataCount; i++)
                         {
                             node->PrivateGraphBuffers.Data1[i] =
                                 (FLOAT)PhGetItemCircularBuffer_SIZE_T(&processItem->PrivateBytesHistory, i);
@@ -3964,11 +4105,10 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 
                     if (!node->IoGraphBuffers.Valid)
                     {
-                        ULONG i;
                         FLOAT total;
                         FLOAT max = 0;
 
-                        for (i = 0; i < drawInfo.LineDataCount; i++)
+                        for (ULONG i = 0; i < drawInfo.LineDataCount; i++)
                         {
                             FLOAT data1;
                             FLOAT data2;
@@ -4668,11 +4808,7 @@ VOID PhGetSelectedProcessItems(
     {
         PPH_PROCESS_NODE node = ProcessNodeList->Items[i];
 
-        // HACK workaround issue with multiple select->search->termination and Searchbox->PhApplyTreeNewFilters (dmex)
-        if (!node->Node.Visible)
-            continue;
-
-        if (node->Node.Selected)
+        if (node->Node.Visible && node->Node.Selected)
             PhAddItemArray(&array, &node->ProcessItem);
     }
 
@@ -4898,10 +5034,10 @@ VOID PhpPopulateTableWithProcessNodes(
             // If this is the first column in the row, add some indentation.
             text = PhaCreateStringEx(
                 NULL,
-                getCellText.Text.Length + Level * sizeof(WCHAR) * sizeof(WCHAR)
+                getCellText.Text.Length + UInt32x32To64(Level, 2) * sizeof(WCHAR)
                 );
-            wmemset(text->Buffer, L' ', Level * sizeof(WCHAR));
-            memcpy(&text->Buffer[Level * sizeof(WCHAR)], getCellText.Text.Buffer, getCellText.Text.Length);
+            wmemset(text->Buffer, L' ', UInt32x32To64(Level, 2));
+            memcpy(&text->Buffer[UInt32x32To64(Level, 2)], getCellText.Text.Buffer, getCellText.Text.Length);
         }
 
         Table[*Index][i] = text;

@@ -1003,6 +1003,7 @@ INT_PTR CALLBACK PhpThreadStackDlgProc(
                 control.u.Initializing.ProcessId = context->ProcessId;
                 control.u.Initializing.ThreadId = context->ThreadId;
                 control.u.Initializing.ThreadHandle = context->ThreadHandle;
+                control.u.Initializing.ProcessHandle = context->SymbolProvider->ProcessHandle;
                 control.u.Initializing.SymbolProvider = context->SymbolProvider;
                 control.u.Initializing.CustomWalk = FALSE;
                 PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackThreadStackControl), &control);
@@ -1771,7 +1772,7 @@ BOOLEAN PhpShowThreadStackWindow(
     return SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)) && result != IDCANCEL;
 }
 
-static NTSTATUS PhpRefreshThreadStack(
+NTSTATUS PhpRefreshThreadStack(
     _In_ HWND hwnd,
     _In_ PPH_THREAD_STACK_CONTEXT Context
     )

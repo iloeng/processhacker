@@ -56,6 +56,8 @@ PSID PhSeAdministratorsSid( // WinBuiltinAdministratorsSid (dmex)
         PhEndInitOnce(&initOnce);
     }
 
+    assert(PhLengthSid(administratorsSid) == sizeof(administratorsSidBuffer));
+
     return administratorsSid;
 }
 
@@ -75,6 +77,8 @@ PSID PhSeUsersSid( // WinBuiltinUsersSid (dmex)
 
         PhEndInitOnce(&initOnce);
     }
+
+    assert(PhLengthSid(usersSid) == sizeof(usersSidBuffer));
 
     return usersSid;
 }
@@ -96,7 +100,31 @@ PSID PhSeAnyPackageSid( // WinBuiltinAnyPackageSid (dmex)
         PhEndInitOnce(&initOnce);
     }
 
+    assert(PhLengthSid(anyAppPackagesSid) == sizeof(anyAppPackagesSidBuffer));
+
     return anyAppPackagesSid;
+}
+
+PSID PhSeInternetExplorerSid( // S-1-15-3-4096 (dmex)
+    VOID
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static UCHAR internetExplorerSidBuffer[FIELD_OFFSET(SID, SubAuthority) + sizeof(ULONG[2])];
+    PSID internetExplorerSid = (PSID)internetExplorerSidBuffer;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhInitializeSid(internetExplorerSid, &(SID_IDENTIFIER_AUTHORITY){ SECURITY_APP_PACKAGE_AUTHORITY }, SECURITY_BUILTIN_APP_PACKAGE_RID_COUNT);
+        *PhSubAuthoritySid(internetExplorerSid, 0) = SECURITY_CAPABILITY_BASE_RID;
+        *PhSubAuthoritySid(internetExplorerSid, 1) = SECURITY_CAPABILITY_INTERNET_EXPLORER;
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    assert(PhLengthSid(internetExplorerSid) == sizeof(internetExplorerSidBuffer));
+
+    return internetExplorerSid;
 }
 
 // Unicode
@@ -292,3 +320,8 @@ WCHAR *PhKWaitReasonNames[MaximumWaitReason] =
     L"WrIoRing",
     L"WrMdlCache",
 };
+
+static_assert(ARRAYSIZE(PhIoPriorityHintNames) == MaxIoPriorityTypes, "PhIoPriorityHintNames must equal MaxIoPriorityTypes");
+static_assert(ARRAYSIZE(PhPagePriorityNames) == MEMORY_PRIORITY_NORMAL + 1, "PhPagePriorityNames must equal MEMORY_PRIORITY");
+static_assert(ARRAYSIZE(PhKThreadStateNames) == MaximumThreadState, "PhKThreadStateNames must equal MaximumThreadState");
+static_assert(ARRAYSIZE(PhKWaitReasonNames) == MaximumWaitReason, "PhKWaitReasonNames must equal MaximumWaitReason");

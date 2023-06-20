@@ -12,6 +12,7 @@
 
 #include <ph.h>
 
+#include <combaseapi.h>
 #include <dbghelp.h>
 
 #include <symprv.h>
@@ -21,6 +22,9 @@
 #include <verify.h>
 #include <mapimg.h>
 #include <mapldr.h>
+
+#include "../tools/thirdparty/winsdk/dia2.h"
+#include "../tools/thirdparty/winsdk/dia3.h"
 
 #if defined(_ARM64_)
 static const ULONG NativeMachine = IMAGE_FILE_MACHINE_ARM64;
@@ -281,8 +285,8 @@ static VOID PhpSymbolProviderEventCallback(
 
                     valueString = PhSubstring(
                         string,
-                        progressStartIndex + wcslen(L"percent=\""),
-                        progressValueLength - wcslen(L"percent=\"")
+                        progressStartIndex + (RTL_NUMBER_OF(L"percent=\"") - 1),
+                        progressValueLength - (RTL_NUMBER_OF(L"percent=\"") - 1)
                         );
 
                     if (PhStringToInteger64(&valueString->sr, 10, &integer))
@@ -402,10 +406,7 @@ VOID PhpSymbolProviderCompleteInitialization(
     )
 {
     static PH_STRINGREF windowsKitsRootKeyName = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows Kits\\Installed Roots");
-#ifdef _WIN64
-    static PH_STRINGREF windowsKitsRootKeyNameWow64 = PH_STRINGREF_INIT(L"Software\\Wow6432Node\\Microsoft\\Windows Kits\\Installed Roots");
-#endif
-    static PH_STRINGREF dbgcoreFileName = PH_STRINGREF_INIT(L"dbgcore.dll"); // required by dbghelp (dmex)
+    static PH_STRINGREF dbgcoreFileName = PH_STRINGREF_INIT(L"dbgcore.dll"); // dbghelp.dll dependency required for MiniDumpWriteDump (dmex)
     static PH_STRINGREF dbghelpFileName = PH_STRINGREF_INIT(L"dbghelp.dll");
     static PH_STRINGREF symsrvFileName = PH_STRINGREF_INIT(L"symsrv.dll");
     PPH_STRING winsdkPath;
@@ -442,28 +443,6 @@ VOID PhpSymbolProviderCompleteInitialization(
 
         NtClose(keyHandle);
     }
-
-#ifdef _WIN64
-    if (PhIsNullOrEmptyString(winsdkPath))
-    {
-        if (NT_SUCCESS(PhOpenKey(
-            &keyHandle,
-            KEY_READ,
-            PH_KEY_LOCAL_MACHINE,
-            &windowsKitsRootKeyNameWow64,
-            0
-            )))
-        {
-            PhMoveReference(&winsdkPath, PhQueryRegistryStringZ(keyHandle, L"KitsRoot10")); // Windows 10 SDK
-            if (PhIsNullOrEmptyString(winsdkPath))
-                PhMoveReference(&winsdkPath, PhQueryRegistryStringZ(keyHandle, L"KitsRoot81")); // Windows 8.1 SDK
-            if (PhIsNullOrEmptyString(winsdkPath))
-                PhMoveReference(&winsdkPath, PhQueryRegistryStringZ(keyHandle, L"KitsRoot")); // Windows 8 SDK
-
-            NtClose(keyHandle);
-        }
-    }
-#endif
 
     if (winsdkPath)
     {
@@ -586,7 +565,7 @@ VOID PhpFreeSymbolModule(
     PhFree(SymbolModule);
 }
 
-static LONG NTAPI PhpSymbolModuleCompareFunction(
+LONG NTAPI PhpSymbolModuleCompareFunction(
     _In_ PPH_AVL_LINKS Links1,
     _In_ PPH_AVL_LINKS Links2
     )
@@ -1085,7 +1064,7 @@ PPH_SYMBOL_MODULE PhpCreateSymbolModule(
 
     if (symbolModule->Machine == IMAGE_FILE_MACHINE_ARM64)
     {
-        if (NT_SUCCESS(PhLoadRemoteMappedImage(ProcessHandle, (PVOID)BaseAddress, &remoteMappedImage)))
+        if (NT_SUCCESS(PhLoadRemoteMappedImage(ProcessHandle, (PVOID)BaseAddress, Size, &remoteMappedImage)))
         {
             if (remoteMappedImage.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
                 remoteMappedImage.NtHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
@@ -1131,9 +1110,6 @@ BOOLEAN PhLoadModuleSymbolProvider(
 
     PH_LOCK_SYMBOLS();
 
-    // NOTE: Don't pass a filename or filehandle. We'll get a CBA_DEFERRED_SYMBOL_LOAD_START callback event
-    // and we'll open the file during the callback instead. This allows us to mitigate dbghelp's legacy
-    // Win32 path limitations and instead use NT path handling for improved support on newer Windows. (dmex)
     baseAddress = SymLoadModuleExW_I(
         SymbolProvider->ProcessHandle,
         NULL,
@@ -1261,9 +1237,9 @@ static BOOLEAN NTAPI PhpSymbolProviderEnumModulesCallback(
     return TRUE;
 }
 
-VOID PhLoadModulesForProcessSymbolProvider(
+VOID PhLoadModulesForVirtualSymbolProvider(
     _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
-    _In_ HANDLE ProcessId
+    _In_opt_ HANDLE ProcessId
     )
 {
     PHP_LOAD_PROCESS_SYMBOLS_CONTEXT context;
@@ -1271,17 +1247,36 @@ VOID PhLoadModulesForProcessSymbolProvider(
     memset(&context, 0, sizeof(PHP_LOAD_PROCESS_SYMBOLS_CONTEXT));
     context.SymbolProvider = SymbolProvider;
 
-    if (SymbolProvider->IsRealHandle)
+    if (ProcessId)
     {
-        // Load symbols for the process.
-        context.LoadingSymbolsForProcessId = ProcessId;
-        PhEnumGenericModules(
-            ProcessId,
-            SymbolProvider->ProcessHandle,
-            0,
-            PhpSymbolProviderEnumModulesCallback,
-            &context
-            );
+        HANDLE processHandle = NULL;
+
+        if (SymbolProvider->IsRealHandle)
+        {
+            processHandle = SymbolProvider->ProcessHandle;
+        }
+        else
+        {
+            PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, ProcessId);
+        }
+
+        if (processHandle)
+        {
+            // Load symbols for the process.
+            context.LoadingSymbolsForProcessId = ProcessId;
+            PhEnumGenericModules(
+                ProcessId,
+                processHandle,
+                PH_ENUM_GENERIC_MAPPED_IMAGES,
+                PhpSymbolProviderEnumModulesCallback,
+                &context
+                );
+        }
+
+        if (!SymbolProvider->IsRealHandle && processHandle)
+        {
+            NtClose(processHandle);
+        }
     }
 
     // Load symbols for kernel modules.
@@ -1296,26 +1291,32 @@ VOID PhLoadModulesForProcessSymbolProvider(
 
     // Load symbols for ntdll.dll and kernel32.dll (dmex)
     {
-        static PH_STRINGREF ntdllSr = PH_STRINGREF_INIT(L"ntdll.dll");
-        static PH_STRINGREF kernel32Sr = PH_STRINGREF_INIT(L"kernel32.dll");
+        static PH_STRINGREF ntdllFileName = PH_STRINGREF_INIT(L"ntdll.dll");
+        static PH_STRINGREF kernel32FileName = PH_STRINGREF_INIT(L"kernel32.dll");
         PLDR_DATA_TABLE_ENTRY entry;
 
-        if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllSr))
+        if (entry = PhFindLoaderEntry(NULL, NULL, &ntdllFileName))
         {
+            PH_STRINGREF fullName;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), entry->DllBase, &fileName)))
+            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+            if (fileName = PhDosPathNameToNtPathName(&fullName))
             {
                 PhLoadModuleSymbolProvider(SymbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
                 PhDereferenceObject(fileName);
             }
         }
 
-        if (entry = PhFindLoaderEntry(NULL, NULL, &kernel32Sr))
+        if (entry = PhFindLoaderEntry(NULL, NULL, &kernel32FileName))
         {
+            PH_STRINGREF fullName;
             PPH_STRING fileName;
 
-            if (NT_SUCCESS(PhGetProcessMappedFileName(NtCurrentProcess(), entry->DllBase, &fileName)))
+            PhUnicodeStringToStringRef(&entry->FullDllName, &fullName);
+
+            if (fileName = PhDosPathNameToNtPathName(&fullName))
             {
                 PhLoadModuleSymbolProvider(SymbolProvider, fileName, (ULONG64)entry->DllBase, entry->SizeOfImage);
                 PhDereferenceObject(fileName);
@@ -1815,6 +1816,26 @@ PVOID __stdcall PhFunctionTableAccess64(
     return entry;
 }
 
+/**
+ * Walks a thread's stack.
+ *
+ * \param MachineType The architecture type of the computer for which the stack trace is generated.
+ * \param ProcessHandle A handle to the thread's parent process. The handle must have
+ * PROCESS_QUERY_INFORMATION and PROCESS_VM_READ access. If a symbol provider is being used, pass
+ * its process handle and specify the symbol provider in \a SymbolProvider.
+ * \param ThreadHandle A handle to a thread. The handle must have THREAD_QUERY_LIMITED_INFORMATION,
+ * THREAD_GET_CONTEXT and THREAD_SUSPEND_RESUME access. The handle can have any access for kernel
+ * stack walking.
+ * \param StackFrame A pointer to a STACKFRAME_EX structure. This structure receives information for the next frame, if the function call succeeds.
+ * \param ContextRecord A pointer to a CONTEXT structure.
+ * \param SymbolProvider The associated symbol provider.
+ * \param ReadMemoryRoutine A callback routine that provides memory read services.
+ * \param FunctionTableAccessRoutine A callback routine that provides access to the run-time function table for the process.
+ * \param GetModuleBaseRoutine A callback routine that provides a module base for any given virtual address.
+ * \param TranslateAddress A callback routine that provides address translation for 16-bit addresses.
+ *
+ * \return Successful or errant status.
+ */
 BOOLEAN PhStackWalk(
     _In_ ULONG MachineType,
     _In_ HANDLE ProcessHandle,
@@ -2066,7 +2087,8 @@ NTSTATUS PhWalkThreadStack(
             sizeof(stack) / sizeof(PVOID),
             stack,
             &capturedFrames,
-            NULL
+            NULL,
+            0
             )))
         {
             PH_THREAD_STACK_FRAME threadStackFrame;
@@ -2213,6 +2235,16 @@ NTSTATUS PhWalkThreadStack(
 
             if (!Callback(&threadStackFrame, Context))
                 goto ResumeExit;
+
+#if defined(_X86_)
+            // (x86 only) Allow the user to change Eip, Esp and Ebp.
+            u.Context.Eip = PtrToUlong(threadStackFrame.PcAddress);
+            stackFrame.AddrPC.Offset = PtrToUlong(threadStackFrame.PcAddress);
+            u.Context.Ebp = PtrToUlong(threadStackFrame.FrameAddress);
+            stackFrame.AddrFrame.Offset = PtrToUlong(threadStackFrame.FrameAddress);
+            u.Context.Esp = PtrToUlong(threadStackFrame.StackAddress);
+            stackFrame.AddrStack.Offset = PtrToUlong(threadStackFrame.StackAddress);
+#endif
         }
     }
 
@@ -2514,16 +2546,16 @@ BOOLEAN PhGetSymbolProviderDiaSource(
     if (!SymGetDiaSource_I)
         return FALSE;
 
-    PH_LOCK_SYMBOLS();
+    //PH_LOCK_SYMBOLS();
 
-    result = SymGetDiaSource_I(
+    result = !!SymGetDiaSource_I(
         SymbolProvider->ProcessHandle,
         BaseOfDll,
         &source
         );
     //GetLastError(); // returns HRESULT
 
-    PH_UNLOCK_SYMBOLS();
+    //PH_UNLOCK_SYMBOLS();
 
     if (result)
     {
@@ -2551,16 +2583,16 @@ BOOLEAN PhGetSymbolProviderDiaSession(
     if (!SymGetDiaSession_I)
         return FALSE;
 
-    PH_LOCK_SYMBOLS();
+    //PH_LOCK_SYMBOLS();
 
-    result = SymGetDiaSession_I(
+    result = !!SymGetDiaSession_I(
         SymbolProvider->ProcessHandle,
         BaseOfDll,
         &session
         );
     //GetLastError(); // returns HRESULT
 
-    PH_UNLOCK_SYMBOLS();
+    //PH_UNLOCK_SYMBOLS();
 
     if (result)
     {
@@ -3089,3 +3121,262 @@ BOOLEAN PhGetLineFromInlineContext(
 //
 //    PhDereferenceObject(InlineSymbolList);
 //}
+
+CV_CFL_LANG PhGetDiaSymbolCompilandInformation(
+    _In_ IDiaLineNumber* LineNumber
+    )
+{
+    CV_CFL_LANG compilandLanguage = ULONG_MAX;
+    ULONG count;
+    IDiaSymbol* compiland;
+    IDiaSymbol* symbol;
+    IDiaEnumSymbols* enumSymbols;
+
+    if (IDiaLineNumber_get_compiland(LineNumber, &compiland) == S_OK)
+    {
+        if (IDiaSymbol_findChildren(compiland, SymTagCompilandDetails, NULL, nsNone, &enumSymbols) == S_OK)
+        {
+            while (IDiaEnumSymbols_Next(enumSymbols, 1, &symbol, &count) == S_OK)
+            {
+                ULONG language;
+
+                if (IDiaSymbol_get_language(symbol, &language) == S_OK)
+                {
+                    compilandLanguage = language;
+                    break;
+                }
+
+                IDiaSymbol_Release(symbol);
+            }
+
+            IDiaEnumSymbols_Release(enumSymbols);
+        }
+
+        IDiaSymbol_Release(compiland);
+    }
+
+    return compilandLanguage;
+}
+
+PPH_STRING PhGetDiaSymbolLineInformation(
+    _In_ IDiaSession* Session,
+    _In_ IDiaSymbol* Symbol,
+    _In_ ULONG64 Address,
+    _In_ ULONG64 Length
+    )
+{
+    IDiaLineNumber* symbolLineNumber;
+    CV_CFL_LANG language = ULONG_MAX;
+
+    if (IDiaSymbol_getSrcLineOnTypeDefn(Symbol, &symbolLineNumber) == S_OK)
+    {
+        language = PhGetDiaSymbolCompilandInformation(symbolLineNumber);
+        IDiaLineNumber_Release(symbolLineNumber);
+    }
+    else
+    {
+        ULONG count;
+        IDiaEnumLineNumbers* enumLineNumbers;
+
+        if (IDiaSession_findLinesByVA(Session, Address, (ULONG)Length, &enumLineNumbers) == S_OK)
+        {
+            if (IDiaEnumLineNumbers_Next(enumLineNumbers, 1, &symbolLineNumber, &count) == S_OK)
+            {
+                language = PhGetDiaSymbolCompilandInformation(symbolLineNumber);
+                IDiaLineNumber_Release(symbolLineNumber);
+            }
+
+            IDiaEnumLineNumbers_Release(enumLineNumbers);
+        }
+    }
+
+    switch (language)
+    {
+    case CV_CFL_C:
+        return PhCreateString(L"C");
+    case CV_CFL_CXX:
+        return PhCreateString(L"C++");
+    case CV_CFL_FORTRAN:
+        return PhCreateString(L"FORTRAN");
+    case CV_CFL_MASM:
+        return PhCreateString(L"MASM");
+    case CV_CFL_PASCAL:
+        return PhCreateString(L"PASCAL");
+    case CV_CFL_BASIC:
+        return PhCreateString(L"BASIC");
+    case CV_CFL_COBOL:
+        return PhCreateString(L"COBOL");
+    case CV_CFL_LINK:
+        return PhCreateString(L"LINK");
+    case CV_CFL_CVTRES:
+        return PhCreateString(L"CVTRES");
+    case CV_CFL_CVTPGD:
+        return PhCreateString(L"CVTPGD");
+    case CV_CFL_CSHARP:
+        return PhCreateString(L"C#");
+    case CV_CFL_VB:
+        return PhCreateString(L"Visual Basic");
+    case CV_CFL_ILASM:
+        return PhCreateString(L"ILASM (CLR)");
+    case CV_CFL_JAVA:
+        return PhCreateString(L"JAVA");
+    case CV_CFL_JSCRIPT:
+        return PhCreateString(L"JSCRIPT");
+    case CV_CFL_MSIL:
+        return PhCreateString(L"MSIL");
+    case CV_CFL_HLSL:
+        return PhCreateString(L"HLSL (High Level Shader Language)");
+    case CV_CFL_OBJC:
+        return PhCreateString(L"Objective-C");
+    case CV_CFL_OBJCXX:
+        return PhCreateString(L"Objective-C++");
+    case CV_CFL_SWIFT:
+        return PhCreateString(L"SWIFT");
+    case CV_CFL_ALIASOBJ:
+        return PhCreateString(L"ALIASOBJ");
+    case CV_CFL_RUST:
+        return PhCreateString(L"RUST");
+    }
+
+    return NULL;
+}
+
+// SymTagCompilandDetails : https://learn.microsoft.com/en-us/visualstudio/debugger/debug-interface-access/compilanddetails
+// SymTagFunction: https://learn.microsoft.com/en-us/visualstudio/debugger/debug-interface-access/function-debug-interface-access-sdk
+PPH_STRING PhGetDiaSymbolExtraInformation(
+    _In_ IDiaSymbol* Symbol
+    )
+{
+    PH_STRING_BUILDER stringBuilder;
+    BOOL symbolBoolean = FALSE;
+    ULONG64 symbolValue = 0;
+
+    PhInitializeStringBuilder(&stringBuilder, 0x100);
+
+    if (IDiaSymbol_get_isStripped(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Stripped, ");
+    }
+
+    if (IDiaSymbol_get_isStatic(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Static, ");
+    }
+
+    if (IDiaSymbol_get_inlSpec(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Inline, ");
+    }
+
+    if (IDiaSymbol_get_isHotpatchable(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Hotpatchable, ");
+    }
+
+    if (IDiaSymbol_get_hasAlloca(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has Alloca, ");
+    }
+
+    if (IDiaSymbol_get_hasInlAsm(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has Inline ASM, ");
+    }
+
+    if (IDiaSymbol_get_hasSetJump(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has SetJump, ");
+    }
+
+    if (IDiaSymbol_get_hasLongJump(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has LongJump, ");
+    }
+
+    if (IDiaSymbol_get_hasSEH(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has SEH, ");
+    }
+
+    if (IDiaSymbol_get_hasSecurityChecks(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has SecurityChecks, ");
+    }
+
+    if (IDiaSymbol_get_hasControlFlowCheck(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"Has CFG, ");
+    }
+
+    if (IDiaSymbol_get_isOptimizedForSpeed(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"OptimizedForSpeed, ");
+    }
+
+    if (IDiaSymbol_get_isPGO(Symbol, &symbolBoolean) == S_OK && symbolBoolean)
+    {
+        PhAppendStringBuilder2(&stringBuilder, L"PGO, ");
+    }
+
+    if (IDiaSymbol_get_exceptionHandlerVirtualAddress(Symbol, &symbolValue) == S_OK && symbolValue)
+    {
+        PhAppendFormatStringBuilder(&stringBuilder, L"Has exception handler (0x%p), ", (PVOID)symbolValue);
+    }
+
+    if (PhEndsWithString2(stringBuilder.String, L", ", FALSE))
+        PhRemoveEndStringBuilder(&stringBuilder, 2);
+
+    return PhFinalStringBuilderString(&stringBuilder);
+}
+
+_Success_(return)
+BOOLEAN PhGetDiaSymbolInformation(
+    _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
+    _In_ ULONG64 Address,
+    _Out_ PPH_DIA_SYMBOL_INFORMATION SymbolInformation
+    )
+{
+    PH_DIA_SYMBOL_INFORMATION symbolInfo = { 0 };
+    ULONG64 baseAddress;
+    IDiaSession* datasession;
+    IDiaSymbol* symbol;
+
+    baseAddress = PhGetModuleFromAddress(SymbolProvider, Address, NULL);
+
+    if (baseAddress == 0)
+        return FALSE;
+
+    if (!PhGetSymbolProviderDiaSession(SymbolProvider, baseAddress, &datasession))
+        return FALSE;
+
+    if (IDiaSession_findSymbolByVA(datasession, Address, SymTagFunction, &symbol) == S_OK)
+    {
+        BSTR symbolUndecoratedName = NULL;
+        ULONG64 symbolLength = 0;
+
+        if (IDiaSymbol_get_length(symbol, &symbolLength) == S_OK)
+        {
+            symbolInfo.FunctionLength = symbolLength;
+            symbolInfo.SymbolLangugage = PhGetDiaSymbolLineInformation(
+                datasession,
+                symbol,
+                Address,
+                symbolLength
+                );
+        }
+
+        if (IDiaSymbol_get_undecoratedName(symbol, &symbolUndecoratedName) == S_OK)
+        {
+            symbolInfo.UndecoratedName = PhCreateString(symbolUndecoratedName);
+            PhSymbolProviderFreeDiaString(symbolUndecoratedName);
+        }
+
+        symbolInfo.SymbolInformation = PhGetDiaSymbolExtraInformation(symbol);
+    }
+
+    IDiaSession_Release(datasession);
+
+    memcpy(SymbolInformation, &symbolInfo, sizeof(PH_DIA_SYMBOL_INFORMATION));
+
+    return TRUE;
+}

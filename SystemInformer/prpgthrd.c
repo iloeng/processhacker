@@ -82,7 +82,7 @@ static VOID NTAPI ThreadsLoadingStateChangedHandler(
     //    TNM_SETCURSOR,
     //    0,
     //    // Parameter contains TRUE if loading symbols
-    //    (LPARAM)(Parameter ? LoadCursor(NULL, IDC_APPSTARTING) : NULL)
+    //    (LPARAM)(Parameter ? PhLoadCursor(NULL, IDC_APPSTARTING) : NULL)
     //    );
 }
 
@@ -338,7 +338,12 @@ BOOLEAN PhpThreadTreeFilterCallback(
 
     // thread properties
 
-    if (threadItem->ThreadIdString[0])
+    if (threadItem->AlternateThreadIdString)
+    {
+        if (PhWordMatchStringRef(&Context->SearchboxText->sr, &threadItem->AlternateThreadIdString->sr))
+            return TRUE;
+    }
+    else if (threadItem->ThreadIdString[0])
     {
         if (PhWordMatchStringLongHintZ(Context->SearchboxText, threadItem->ThreadIdString))
             return TRUE;
@@ -576,10 +581,10 @@ VOID PhpPopulateTableWithProcessThreadNodes(
             // If this is the first column in the row, add some indentation.
             text = PhaCreateStringEx(
                 NULL,
-                getCellText.Text.Length + Level * sizeof(WCHAR) * sizeof(WCHAR)
+                getCellText.Text.Length + UInt32x32To64(Level, 2) * sizeof(WCHAR)
                 );
-            wmemset(text->Buffer, L' ', Level * sizeof(WCHAR));
-            memcpy(&text->Buffer[Level * sizeof(WCHAR)], getCellText.Text.Buffer, getCellText.Text.Length);
+            wmemset(text->Buffer, L' ', UInt32x32To64(Level, 2));
+            memcpy(&text->Buffer[UInt32x32To64(Level, 2)], getCellText.Text.Buffer, getCellText.Text.Length);
         }
 
         Table[*Index][i] = text;
@@ -1121,7 +1126,11 @@ INT_PTR CALLBACK PhpProcessThreadsDlgProc(
                         }
                         else
                         {
-                            PhShowStatus(hwndDlg, L"Unable to open the thread", status, 0);
+                            PhShowStatus(hwndDlg, PhaFormatString(
+                                L"Unable to %s thread %lu", // string pooling optimization (dmex)
+                                L"set the boost priority of",
+                                HandleToUlong(threadItem->ThreadId)
+                                )->Buffer, status, 0);
                         }
                     }
                 }

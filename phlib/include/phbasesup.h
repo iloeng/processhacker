@@ -44,6 +44,22 @@ extern PH_QUEUED_LOCK PhDbgThreadListLock;
 #endif
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhCreateUserThread(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PSECURITY_DESCRIPTOR ThreadSecurityDescriptor,
+    _In_opt_ ULONG CreateFlags,
+    _In_opt_ SIZE_T ZeroBits,
+    _In_opt_ SIZE_T StackSize,
+    _In_opt_ SIZE_T MaximumStackSize,
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
+    _In_opt_ PVOID Argument,
+    _Out_opt_ PHANDLE ThreadHandle,
+    _Out_opt_ PCLIENT_ID ClientId
+    );
+
+PHLIBAPI
 HANDLE
 NTAPI
 PhCreateThread(
@@ -99,6 +115,41 @@ NTAPI
 PhLocalTimeToSystemTime(
     _In_ PLARGE_INTEGER LocalTime,
     _Out_ PLARGE_INTEGER SystemTime
+    );
+
+#define SecondsToStartOf1980 11960006400
+#define SecondsToStartOf1970 11644473600
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhTimeToSecondsSince1980(
+    _In_ PLARGE_INTEGER Time,
+    _Out_ PULONG ElapsedSeconds
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhTimeToSecondsSince1970(
+    _In_ PLARGE_INTEGER Time,
+    _Out_ PULONG ElapsedSeconds
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhSecondsSince1980ToTime(
+    _In_ ULONG ElapsedSeconds,
+    _Out_ PLARGE_INTEGER Time
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhSecondsSince1970ToTime(
+    _In_ ULONG ElapsedSeconds,
+    _Out_ PLARGE_INTEGER Time
     );
 
 // Heap
@@ -1173,6 +1224,98 @@ PhCreateString2(
     return PhCreateStringEx(String->Buffer, String->Length);
 }
 
+#define PH_STRING_TRIM_START_ONLY PH_TRIM_START_ONLY
+#define PH_STRING_TRIM_END_ONLY   PH_TRIM_END_ONLY
+#define PH_STRING_TRIM_MASK       (PH_STRING_TRIM_START_ONLY | PH_STRING_TRIM_END_ONLY)
+#define PH_STRING_UPPER_CASE      0x4
+#define PH_STRING_LOWER_CASE      0x8
+#define PH_STRING_CASE_MASK       (PH_STRING_UPPER_CASE | PH_STRING_LOWER_CASE)
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhCreateString3(
+    _In_ PPH_STRINGREF String,
+    _In_ ULONG Flags,
+    _In_opt_ PPH_STRINGREF TrimCharSet
+    );
+
+FORCEINLINE
+WCHAR
+NTAPI
+PhUpcaseUnicodeChar(
+    _In_ WCHAR SourceCharacter
+    )
+{
+    WCHAR c;
+
+    //c = towupper(c);
+    //c = __ascii_towupper(c);
+    c = RtlUpcaseUnicodeChar(SourceCharacter);
+
+    return c;
+}
+
+FORCEINLINE
+WCHAR
+NTAPI
+PhDowncaseUnicodeChar(
+    _In_ WCHAR SourceCharacter
+    )
+{
+    WCHAR c;
+
+    c = RtlDowncaseUnicodeChar(SourceCharacter);
+
+    return c;
+}
+
+FORCEINLINE
+VOID
+PhUpperStringRefInto(
+    _Inout_ PPH_STRINGREF Destination,
+    _In_ PPH_STRINGREF Source
+    )
+{
+    assert(Destination->Length >= Source->Length);
+    SIZE_T numberOfChars = Source->Length / sizeof(WCHAR);
+    for (SIZE_T i = 0; i < numberOfChars; i++)
+        Destination->Buffer[i] = PhUpcaseUnicodeChar(Source->Buffer[i]);
+    Destination->Length = Source->Length;
+}
+
+FORCEINLINE
+VOID
+PhUpperStringRef(
+    _Inout_ PPH_STRINGREF String
+    )
+{
+    PhUpperStringRefInto(String, String);
+}
+
+FORCEINLINE
+VOID
+PhLowerStringRefInto(
+    _Inout_ PPH_STRINGREF Destination,
+    _In_ PPH_STRINGREF Source
+    )
+{
+    assert(Destination->Length >= Source->Length);
+    SIZE_T numberOfChars = Source->Length / sizeof(WCHAR);
+    for (SIZE_T i = 0; i < numberOfChars; i++)
+        Destination->Buffer[i] = PhDowncaseUnicodeChar(Source->Buffer[i]);
+    Destination->Length = Source->Length;
+}
+
+FORCEINLINE
+VOID
+PhLowerStringRef(
+    _Inout_ PPH_STRINGREF String
+    )
+{
+    PhLowerStringRefInto(String, String);
+}
+
 FORCEINLINE
 PPH_STRING
 PhCreateStringFromUnicodeString(
@@ -1219,12 +1362,23 @@ PhConcatStringRef2(
     _In_ PPH_STRINGREF String2
     );
 
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhConcatStringRef3(
     _In_ PPH_STRINGREF String1,
     _In_ PPH_STRINGREF String2,
     _In_ PPH_STRINGREF String3
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhConcatStringRef4(
+    _In_ PPH_STRINGREF String1,
+    _In_ PPH_STRINGREF String2,
+    _In_ PPH_STRINGREF String3,
+    _In_ PPH_STRINGREF String4
     );
 
 FORCEINLINE
@@ -3493,6 +3647,26 @@ PhPrintTimeSpanToBuffer(
     );
 
 PHLIBAPI
+BOOLEAN
+NTAPI
+PhCalculateEntropy(
+    _In_ PBYTE Buffer,
+    _In_ ULONG64 BufferLength,
+    _Out_opt_ DOUBLE *Entropy,
+    _Out_opt_ DOUBLE *Variance
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhFormatEntropy(
+    _In_ DOUBLE Entropy,
+    _In_ USHORT EntropyPrecision,
+    _In_opt_ DOUBLE Variance,
+    _In_opt_ USHORT VariancePrecision
+    );
+
+PHLIBAPI
 VOID
 NTAPI
 PhFillMemoryUlong(
@@ -3511,23 +3685,63 @@ PhDivideSinglesBySingle(
     );
 
 PHLIBAPI
-BOOLEAN
+FLOAT
 NTAPI
-PhCalculateEntropy(
-    _In_ PBYTE Buffer,
-    _In_ ULONG64 BufferLength,
-    _Out_opt_ DOUBLE *Entropy,
-    _Out_opt_ DOUBLE *Variance
+PhMaxMemorySingles(
+    _In_ PFLOAT A,
+    _In_ SIZE_T Count
     );
 
 PHLIBAPI
-PPH_STRING
+FLOAT
 NTAPI
-PhFormatEntropy(
-    _In_ DOUBLE Entropy,
-    _In_ USHORT EntropyPrecision,
-    _In_opt_ DOUBLE Variance,
-    _In_opt_ USHORT VariancePrecision
+PhAddPlusMaxMemorySingles(
+    _Inout_updates_(Count) PFLOAT A,
+    _Inout_updates_(Count) PFLOAT B,
+    _In_ SIZE_T Count
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhConvertCopyMemoryUlong(
+    _Inout_updates_(Count) PULONG From,
+    _Inout_updates_(Count) PFLOAT To,
+    _In_ SIZE_T Count
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhConvertCopyMemorySingles(
+    _Inout_updates_(Count) PFLOAT From,
+    _Inout_updates_(Count) PULONG To,
+    _In_ SIZE_T Count
+    );
+
+typedef struct _PH_CIRCULAR_BUFFER_ULONG* PPH_CIRCULAR_BUFFER_ULONG;
+
+PHLIBAPI
+VOID
+NTAPI
+PhCopyConvertCircularBufferULONG(
+    _Inout_ PPH_CIRCULAR_BUFFER_ULONG Buffer,
+    _Out_writes_(Count) FLOAT* Destination,
+    _In_ ULONG Count
+    );
+
+PHLIBAPI
+ULONG
+NTAPI
+PhCountBits(
+    _In_ ULONG Value
+    );
+
+PHLIBAPI
+ULONG
+NTAPI
+PhCountBitsUlongPtr(
+    _In_ ULONG_PTR Value
     );
 
 // Auto-dereference convenience functions
@@ -3604,12 +3818,7 @@ PhLowerString(
     _In_ PPH_STRING String
     )
 {
-    PPH_STRING newString;
-
-    newString = PhDuplicateString(String);
-    _wcslwr(newString->Buffer);
-
-    return newString;
+    return PhCreateString3(&String->sr, PH_STRING_LOWER_CASE, NULL);
 }
 
 FORCEINLINE
@@ -3618,12 +3827,7 @@ PhaLowerString(
     _In_ PPH_STRING String
     )
 {
-    PPH_STRING newString;
-
-    newString = PhaDuplicateString(String);
-    _wcslwr(newString->Buffer);
-
-    return newString;
+    return PH_AUTO_T(PH_STRING, PhCreateString3(&String->sr, PH_STRING_LOWER_CASE, NULL));
 }
 
 FORCEINLINE
@@ -3633,12 +3837,7 @@ PhUpperString(
     _In_ PPH_STRING String
     )
 {
-    PPH_STRING newString;
-
-    newString = PhDuplicateString(String);
-    _wcsupr(newString->Buffer);
-
-    return newString;
+    return PhCreateString3(&String->sr, PH_STRING_UPPER_CASE, NULL);
 }
 
 FORCEINLINE
@@ -3647,12 +3846,7 @@ PhaUpperString(
     _In_ PPH_STRING String
     )
 {
-    PPH_STRING newString;
-
-    newString = PhaDuplicateString(String);
-    _wcsupr(newString->Buffer);
-
-    return newString;
+    return PH_AUTO_T(PH_STRING, PhCreateString3(&String->sr, PH_STRING_UPPER_CASE, NULL));
 }
 
 FORCEINLINE

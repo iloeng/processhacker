@@ -344,6 +344,17 @@ VOID PhReInitializeWindowTheme(
     InvalidateRect(WindowHandle, NULL, FALSE);
 }
 
+#define DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 19
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+
 HRESULT PhSetWindowThemeAttribute(
     _In_ HWND WindowHandle,
     _In_ ULONG AttributeId,
@@ -381,17 +392,6 @@ VOID PhInitializeThemeWindowFrame(
     _In_ HWND WindowHandle
     )
 {
-#define DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 19
-#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
-#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
-#endif
-#ifndef DWMWA_CAPTION_COLOR
-#define DWMWA_CAPTION_COLOR 35
-#endif
-#ifndef DWMWA_SYSTEMBACKDROP_TYPE
-#define DWMWA_SYSTEMBACKDROP_TYPE 38
-#endif
-
     if (WindowsVersion >= WINDOWS_10_RS5)
     {
         if (PhEnableThemeSupport)
@@ -428,6 +428,39 @@ VOID PhInitializeThemeWindowFrame(
         {
             PhSetWindowThemeAttribute(WindowHandle, DWMWA_SYSTEMBACKDROP_TYPE, &(ULONG){ 1 }, sizeof(ULONG));
         }
+    }
+}
+
+VOID PhWindowThemeSetDarkMode(
+    _In_ HWND WindowHandle,
+    _In_ BOOLEAN EnableDarkMode
+    )
+{
+    if (EnableDarkMode && PhEnableThemeSupport) // ShouldAppsUseDarkMode_I()
+    {
+        PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+        //PhSetControlTheme(WindowHandle, L"DarkMode_ItemsView");
+
+        //if (WindowsVersion >= WINDOWS_11)
+        //{
+        //    if (FAILED(PhSetWindowThemeAttribute(WindowHandle, DWMWA_USE_IMMERSIVE_DARK_MODE, &(BOOL){ TRUE }, sizeof(BOOL))))
+        //    {
+        //        PhSetWindowThemeAttribute(WindowHandle, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, &(BOOL){ TRUE }, sizeof(BOOL));
+        //    }
+        //}
+    }
+    else
+    {
+        PhSetControlTheme(WindowHandle, L"Explorer");
+        //PhSetControlTheme(WindowHandle, L"ItemsView");
+
+        //if (WindowsVersion >= WINDOWS_11)
+        //{
+        //    if (FAILED(PhSetWindowThemeAttribute(WindowHandle, DWMWA_USE_IMMERSIVE_DARK_MODE, &(BOOL){ FALSE }, sizeof(BOOL))))
+        //    {
+        //        PhSetWindowThemeAttribute(WindowHandle, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, &(BOOL){ FALSE }, sizeof(BOOL));
+        //    }
+        //}
     }
 }
 
@@ -529,6 +562,9 @@ VOID PhInitializeWindowThemeMainMenu(
 {
     MENUINFO menuInfo;
 
+    if (!PhEnableThemeSupport)
+        return;
+
     memset(&menuInfo, 0, sizeof(MENUINFO));
     menuInfo.cbSize = sizeof(MENUINFO);
     menuInfo.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
@@ -627,10 +663,10 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
             //switch (PhpThemeColorMode)
             //{
             //case 0: // New colors
-            //    PhSetControlTheme(WindowHandle, L"");
+            //    PhWindowThemeSetDarkMode(WindowHandle, FALSE);
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
     }
     else if (PhEqualStringZ(windowClassName, WC_LISTVIEW, FALSE))
@@ -646,8 +682,8 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
             //    PhSetControlTheme(tooltipWindow, L"");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
-            PhSetControlTheme(tooltipWindow, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
+            PhWindowThemeSetDarkMode(tooltipWindow, TRUE);
         }
 
         if (PhEnableThemeListviewBorder)
@@ -682,15 +718,8 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
         {
             HWND tooltipWindow = TreeView_GetToolTips(WindowHandle);
 
-            //switch (PhpThemeColorMode)
-            //{
-            //case 0: // New colors
-            //    PhSetControlTheme(WindowHandle, L"explorer");
-            //    PhSetControlTheme(tooltipWindow, L"");
-            //    break;
-            //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
-            PhSetControlTheme(tooltipWindow, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
+            PhWindowThemeSetDarkMode(tooltipWindow, TRUE);
         }
 
         TreeView_SetBkColor(WindowHandle, PhThemeWindowBackgroundColor);// RGB(30, 30, 30));
@@ -715,7 +744,7 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
         //    break;
         //case 1: // Old colors
         SendMessage(WindowHandle, EM_SETBKGNDCOLOR, 0, RGB(30, 30, 30));
-        PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+        PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         //InvalidateRect(WindowHandle, NULL, FALSE);
     }
     else if (PhEqualStringZ(windowClassName, L"PhTreeNew", FALSE))
@@ -731,8 +760,8 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
             //    PhSetControlTheme(WindowHandle, L"");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(tooltipWindow, L"DarkMode_Explorer");
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(tooltipWindow, TRUE);
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
 
         if (PhEnableThemeListviewBorder)
@@ -765,7 +794,7 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
             //    PhSetControlTheme(WindowHandle, L"explorer");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
 
         PhInitializeWindowThemeListboxControl(WindowHandle);
@@ -783,7 +812,7 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
 
             if (info.hwndList)
             {
-                PhSetControlTheme(info.hwndList, L"DarkMode_Explorer");
+                PhWindowThemeSetDarkMode(info.hwndList, TRUE);
             }
         }
 
@@ -802,7 +831,7 @@ BOOLEAN CALLBACK PhpThemeWindowEnumChildWindows(
             //    PhSetControlTheme(WindowHandle, L"explorer");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
 
         PhInitializeWindowThemeACLUI(WindowHandle);
@@ -838,7 +867,7 @@ BOOLEAN CALLBACK PhpReInitializeThemeWindowEnumChildWindows(
             //    PhSetControlTheme(WindowHandle, L"explorer");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
 
         //switch (PhpThemeColorMode)
@@ -863,7 +892,7 @@ BOOLEAN CALLBACK PhpReInitializeThemeWindowEnumChildWindows(
             //    PhSetControlTheme(WindowHandle, L"");
             //    break;
             //case 1: // Old colors
-            PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+            PhWindowThemeSetDarkMode(WindowHandle, TRUE);
         }
     }
     else if (PhEqualStringZ(windowClassName, L"PhTreeNew", FALSE))
@@ -876,7 +905,7 @@ BOOLEAN CALLBACK PhpReInitializeThemeWindowEnumChildWindows(
         //    break;
         //case 1: // Old colors
         TreeNew_ThemeSupport(WindowHandle, TRUE);
-        PhSetControlTheme(WindowHandle, L"DarkMode_Explorer");
+        PhWindowThemeSetDarkMode(WindowHandle, TRUE);
     }
     else if (PhEqualStringZ(windowClassName, WC_EDIT, FALSE))
     {
@@ -1057,9 +1086,9 @@ BOOLEAN PhThemeWindowDrawItem(
             }
             else
             {
-                PH_STRINGREF part;
-                PH_STRINGREF firstPart;
-                PH_STRINGREF secondPart;
+                PH_STRINGREF part = { 0 };
+                PH_STRINGREF firstPart = { 0 };
+                PH_STRINGREF secondPart = { 0 };
 
                 PhInitializeStringRefLongHint(&part, menuItemInfo->Text);
                 PhSplitStringRefAtLastChar(&part, L'\b', &firstPart, &secondPart);
@@ -1102,33 +1131,41 @@ BOOLEAN PhThemeWindowDrawItem(
 
                 if ((menuItemInfo->Flags & PH_EMENU_MAINMENU) == PH_EMENU_MAINMENU)
                 {
-                    DrawText(
-                        DrawInfo->hDC,
-                        firstPart.Buffer,
-                        (UINT)firstPart.Length / sizeof(WCHAR),
-                        &DrawInfo->rcItem,
-                        DT_LEFT | DT_SINGLELINE | DT_CENTER | DT_VCENTER | drawTextFlags
-                        );
+                    if (firstPart.Length)
+                    {
+                        DrawText(
+                            DrawInfo->hDC,
+                            firstPart.Buffer,
+                            (UINT)firstPart.Length / sizeof(WCHAR),
+                            &DrawInfo->rcItem,
+                            DT_LEFT | DT_SINGLELINE | DT_CENTER | DT_VCENTER | drawTextFlags
+                            );
+                    }
                 }
                 else
                 {
-                    DrawText(
-                        DrawInfo->hDC,
-                        firstPart.Buffer,
-                        (UINT)firstPart.Length / sizeof(WCHAR),
-                        &DrawInfo->rcItem,
-                        DT_LEFT | DT_VCENTER | drawTextFlags
-                        );
+                    if (firstPart.Length)
+                    {
+                        DrawText(
+                            DrawInfo->hDC,
+                            firstPart.Buffer,
+                            (UINT)firstPart.Length / sizeof(WCHAR),
+                            &DrawInfo->rcItem,
+                            DT_LEFT | DT_VCENTER | drawTextFlags
+                            );
+                    }
                 }
 
-
-                DrawText(
-                    DrawInfo->hDC,
-                    secondPart.Buffer,
-                    (UINT)secondPart.Length / sizeof(WCHAR),
-                    &DrawInfo->rcItem,
-                    DT_RIGHT | DT_VCENTER | drawTextFlags
-                    );
+                if (secondPart.Length)
+                {
+                    DrawText(
+                        DrawInfo->hDC,
+                        secondPart.Buffer,
+                        (UINT)secondPart.Length / sizeof(WCHAR),
+                        &DrawInfo->rcItem,
+                        DT_RIGHT | DT_VCENTER | drawTextFlags
+                        );
+                }
             }
 
             //if (oldFont)
@@ -1138,23 +1175,26 @@ BOOLEAN PhThemeWindowDrawItem(
 
             if (menuItemInfo->Items && menuItemInfo->Items->Count && (menuItemInfo->Flags & PH_EMENU_MAINMENU) != PH_EMENU_MAINMENU)
             {
-                HTHEME themeHandle = PhOpenThemeData(DrawInfo->hwndItem, VSCLASS_MENU, dpiValue);
+                HTHEME themeHandle;
 
-                //if (IsThemeBackgroundPartiallyTransparent(themeHandle, MENU_POPUPSUBMENU, isDisabled ? MSM_DISABLED : MSM_NORMAL))
-                //    DrawThemeParentBackground(DrawInfo->hwndItem, DrawInfo->hDC, NULL);
+                if (themeHandle = PhOpenThemeData(DrawInfo->hwndItem, VSCLASS_MENU, dpiValue))
+                {
+                    //if (IsThemeBackgroundPartiallyTransparent(themeHandle, MENU_POPUPSUBMENU, isDisabled ? MSM_DISABLED : MSM_NORMAL))
+                    //    DrawThemeParentBackground(DrawInfo->hwndItem, DrawInfo->hDC, NULL);
 
-                rect.left = rect.right - PhGetDpi(25, dpiValue);
+                    rect.left = rect.right - PhGetDpi(25, dpiValue);
 
-                PhDrawThemeBackground(
-                    themeHandle,
-                    DrawInfo->hDC,
-                    MENU_POPUPSUBMENU,
-                    isDisabled ? MSM_DISABLED : MSM_NORMAL,
-                    &rect,
-                    NULL
-                    );
+                    PhDrawThemeBackground(
+                        themeHandle,
+                        DrawInfo->hDC,
+                        MENU_POPUPSUBMENU,
+                        isDisabled ? MSM_DISABLED : MSM_NORMAL,
+                        &rect,
+                        NULL
+                        );
 
-                PhCloseThemeData(themeHandle);
+                    PhCloseThemeData(themeHandle);
+                }
             }
 
             ExcludeClipRect(DrawInfo->hDC, rect.left, rect.top, rect.right, rect.bottom); // exclude last
@@ -1389,6 +1429,80 @@ BOOLEAN PhThemeWindowMeasureItem(
 //    ImageList_Destroy(TreeView_SetImageList(g_hwndChild, himl, TVSIL_STATE));
 //}
 
+VOID PhThemeDrawButtonIcon(
+    _In_ LPNMCUSTOMDRAW DrawInfo,
+    _In_ HICON ButtonIcon,
+    _In_ PRECT ButtonRect,
+    _In_ LONG WindowDpi
+    )
+{
+    BOOL result;
+    ICONINFO iconInfo;
+    BITMAP bmp;
+    LONG width = PhGetSystemMetrics(SM_CXSMICON, WindowDpi);
+    LONG height = PhGetSystemMetrics(SM_CYSMICON, WindowDpi);
+
+    memset(&iconInfo, 0, sizeof(ICONINFO));
+    memset(&bmp, 0, sizeof(BITMAP));
+
+    result = GetIconInfo(ButtonIcon, &iconInfo);
+
+    if (iconInfo.hbmColor)
+    {
+        if (GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp))
+        {
+            width = bmp.bmWidth;
+            height = bmp.bmHeight;
+        }
+
+        DeleteBitmap(iconInfo.hbmColor);
+    }
+    else if (iconInfo.hbmMask)
+    {
+        if (GetObject(iconInfo.hbmMask, sizeof(BITMAP), &bmp))
+        {
+            width = bmp.bmWidth;
+            height = bmp.bmHeight / 2;
+        }
+
+        DeleteBitmap(iconInfo.hbmMask);
+    }
+
+    DrawIconEx(
+        DrawInfo->hdc,
+        ButtonRect->left + ((ButtonRect->right - ButtonRect->left) - width) / 2,
+        ButtonRect->top + ((ButtonRect->bottom - ButtonRect->top) - height) / 2,
+        ButtonIcon,
+        width,
+        height,
+        0,
+        NULL,
+        DI_NORMAL
+        );
+
+    if (!result) // HACK
+    {
+        BUTTON_IMAGELIST imageList = { 0 };
+
+        if (Button_GetImageList(DrawInfo->hdr.hwndFrom, &imageList) && imageList.himl)
+        {
+            ButtonRect->left += PhGetDpi(1, WindowDpi);
+
+            PhImageListDrawIcon(
+                imageList.himl,
+                0,
+                DrawInfo->hdc,
+                ButtonRect->left, // + ((ButtonRect->right - ButtonRect->left) - width) / 2,
+                ButtonRect->top + ((ButtonRect->bottom - ButtonRect->top) - height) / 2,
+                ILD_NORMAL,
+                FALSE
+                );
+
+            ButtonRect->left += PhGetDpi(5, WindowDpi);
+        }
+    }
+}
+
 LRESULT CALLBACK PhpThemeWindowDrawButton(
     _In_ LPNMCUSTOMDRAW DrawInfo
     )
@@ -1412,11 +1526,15 @@ LRESULT CALLBACK PhpThemeWindowDrawButton(
         {
             PPH_STRING buttonText;
             LONG_PTR buttonStyle;
+            HICON buttonIcon;
             LONG dpiValue;
 
             dpiValue = PhGetWindowDpi(DrawInfo->hdr.hwndFrom);
             buttonText = PhGetWindowText(DrawInfo->hdr.hwndFrom);
             buttonStyle = PhGetWindowStyle(DrawInfo->hdr.hwndFrom);
+
+            if (!(buttonIcon = Static_GetIcon(DrawInfo->hdr.hwndFrom, 0)))
+                buttonIcon = (HICON)SendMessage(DrawInfo->hdr.hwndFrom, BM_GETIMAGE, IMAGE_ICON, 0);
 
             if ((buttonStyle & BS_CHECKBOX) == BS_CHECKBOX)
             {
@@ -1435,116 +1553,157 @@ LRESULT CALLBACK PhpThemeWindowDrawButton(
                         state = isChecked ? CBS_CHECKEDNORMAL : CBS_UNCHECKEDNORMAL;
                 }
 
-                if (themeHandle = PhOpenThemeData(DrawInfo->hdr.hwndFrom, VSCLASS_BUTTON, dpiValue))
+                if (buttonIcon)
                 {
-                    SIZE checkBoxSize = { 0 };
-
-                    PhGetThemePartSize(
-                        themeHandle,
-                        DrawInfo->hdc,
-                        BP_CHECKBOX,
-                        state,
-                        &bufferRect,
-                        TS_TRUE,
-                        &checkBoxSize
-                        );
-
-                    bufferRect.left = 0;
-                    bufferRect.right = checkBoxSize.cx;
-
-                    //if (IsThemeBackgroundPartiallyTransparent(themeHandle, BP_CHECKBOX, state))
-                    //    DrawThemeParentBackground(DrawInfo->hdr.hwndFrom, DrawInfo->hdc, NULL);
-
-                    PhDrawThemeBackground(
-                        themeHandle,
-                        DrawInfo->hdc,
-                        BP_CHECKBOX,
-                        state,
-                        &bufferRect,
-                        NULL
-                        );
-
-                    //DTTOPTS opts = { 0 };
-                    //opts.dwSize = sizeof(DTTOPTS);
-                    //opts.crText = RGB(255, 255, 255);
-                    //opts.dwFlags |= DTT_TEXTCOLOR;
-                    //
-                    //DrawThemeTextEx(
-                    //    themeHandle,
-                    //    DrawInfo->hdc,
-                    //    BP_CHECKBOX,
-                    //    state,
-                    //    buttonText->Buffer,
-                    //    (UINT)buttonText->Length / sizeof(WCHAR),
-                    //    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX,
-                    //    &bufferRect,
-                    //    &opts
-                    //    );
-
-                    bufferRect.left = checkBoxSize.cx + 5; // TNP_ICON_RIGHT_PADDING
-                    bufferRect.right = DrawInfo->rc.right;
-
-                    DrawText(
-                        DrawInfo->hdc,
-                        buttonText->Buffer,
-                        (UINT)buttonText->Length / sizeof(WCHAR),
-                        &bufferRect,
-                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX
-                        );
-
-                    PhCloseThemeData(themeHandle);
-                }
-                else
-                {
-                    if (isChecked)
+                    if (isSelected || isChecked)
                     {
-                        HFONT newFont = PhDuplicateFontWithNewHeight(PhApplicationFont, 16, dpiValue);
-                        HFONT oldFont;
-
-                        oldFont = SelectFont(DrawInfo->hdc, newFont);
-                        DrawText(
-                            DrawInfo->hdc,
-                            L"\u2611",
-                            1,
-                            &DrawInfo->rc,
-                            DT_LEFT | DT_SINGLELINE | DT_VCENTER
-                            );
-                        SelectFont(DrawInfo->hdc, oldFont);
-                        DeleteFont(newFont);
+                        //switch (PhpThemeColorMode)
+                        //{
+                        //case 0: // New colors
+                        //    //SetTextColor(DrawInfo->hdc, RGB(0, 0, 0xff));
+                        //    SetDCBrushColor(DrawInfo->hdc, GetSysColor(COLOR_HIGHLIGHT));
+                        //    break;
+                        //case 1: // Old colors
+                        SetTextColor(DrawInfo->hdc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+                        SetDCBrushColor(DrawInfo->hdc, RGB(78, 78, 78));
+                        FillRect(DrawInfo->hdc, &DrawInfo->rc, GetStockBrush(DC_BRUSH));
+                    }
+                    else if (isHighlighted)
+                    {
+                        //switch (PhpThemeColorMode)
+                        //{
+                        //case 0: // New colors
+                        //    //SetTextColor(DrawInfo->hdc, RGB(0, 0, 0xff));
+                        //    SetDCBrushColor(DrawInfo->hdc, GetSysColor(COLOR_HIGHLIGHT));
+                        //    break;
+                        //case 1: // Old colors
+                        SetTextColor(DrawInfo->hdc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+                        SetDCBrushColor(DrawInfo->hdc, PhThemeWindowBackground2Color);
+                        FillRect(DrawInfo->hdc, &DrawInfo->rc, GetStockBrush(DC_BRUSH));
                     }
                     else
                     {
-                        HFONT newFont = PhDuplicateFontWithNewHeight(PhApplicationFont, 22, dpiValue);
-                        HFONT oldFont;
-
-                        oldFont = SelectFont(DrawInfo->hdc, newFont);
-                        DrawText(
-                            DrawInfo->hdc,
-                            L"\u2610",
-                            1,
-                            &DrawInfo->rc,
-                            DT_LEFT | DT_SINGLELINE | DT_VCENTER
-                            );
-                        SelectFont(DrawInfo->hdc, oldFont);
-                        DeleteFont(newFont);
+                        SetTextColor(DrawInfo->hdc, PhThemeWindowTextColor);
+                        //SetDCBrushColor(DrawInfo->hdc, PhThemeWindowBackgroundColor); // WindowForegroundColor
+                        FillRect(DrawInfo->hdc, &DrawInfo->rc, PhThemeWindowBackgroundBrush);
                     }
 
-                    //bufferRect.left = checkBoxSize.cx + 5; // TNP_ICON_RIGHT_PADDING
-                    bufferRect.right = DrawInfo->rc.right;
+                    SetDCBrushColor(DrawInfo->hdc, PhThemeWindowBackground2Color);
+                    FrameRect(DrawInfo->hdc, &DrawInfo->rc, GetStockBrush(DC_BRUSH));
 
-                    DrawText(
-                        DrawInfo->hdc,
-                        buttonText->Buffer,
-                        (UINT)buttonText->Length / sizeof(WCHAR),
-                        &bufferRect,
-                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX
-                        );
+                    PhThemeDrawButtonIcon(DrawInfo, buttonIcon, &bufferRect, dpiValue);
+                }
+                else
+                {
+                    if (themeHandle = PhOpenThemeData(DrawInfo->hdr.hwndFrom, VSCLASS_BUTTON, dpiValue))
+                    {
+                        SIZE checkBoxSize = { 0 };
+
+                        PhGetThemePartSize(
+                            themeHandle,
+                            DrawInfo->hdc,
+                            BP_CHECKBOX,
+                            state,
+                            &bufferRect,
+                            TS_TRUE,
+                            &checkBoxSize
+                            );
+
+                        bufferRect.left = 0;
+                        bufferRect.right = checkBoxSize.cx;
+
+                        //if (IsThemeBackgroundPartiallyTransparent(themeHandle, BP_CHECKBOX, state))
+                        //    DrawThemeParentBackground(DrawInfo->hdr.hwndFrom, DrawInfo->hdc, NULL);
+
+                        PhDrawThemeBackground(
+                            themeHandle,
+                            DrawInfo->hdc,
+                            BP_CHECKBOX,
+                            state,
+                            &bufferRect,
+                            NULL
+                            );
+
+                        //DTTOPTS opts = { 0 };
+                        //opts.dwSize = sizeof(DTTOPTS);
+                        //opts.crText = RGB(255, 255, 255);
+                        //opts.dwFlags |= DTT_TEXTCOLOR;
+                        //
+                        //DrawThemeTextEx(
+                        //    themeHandle,
+                        //    DrawInfo->hdc,
+                        //    BP_CHECKBOX,
+                        //    state,
+                        //    buttonText->Buffer,
+                        //    (UINT)buttonText->Length / sizeof(WCHAR),
+                        //    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX,
+                        //    &bufferRect,
+                        //    &opts
+                        //    );
+
+                        bufferRect.left = checkBoxSize.cx + 5; // TNP_ICON_RIGHT_PADDING
+                        bufferRect.right = DrawInfo->rc.right;
+
+                        DrawText(
+                            DrawInfo->hdc,
+                            buttonText->Buffer,
+                            (UINT)buttonText->Length / sizeof(WCHAR),
+                            &bufferRect,
+                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX
+                            );
+
+                        PhCloseThemeData(themeHandle);
+                    }
+                    else
+                    {
+                        if (isChecked)
+                        {
+                            HFONT newFont = PhDuplicateFontWithNewHeight(PhApplicationFont, 16, dpiValue);
+                            HFONT oldFont;
+
+                            oldFont = SelectFont(DrawInfo->hdc, newFont);
+                            DrawText(
+                                DrawInfo->hdc,
+                                L"\u2611",
+                                1,
+                                &DrawInfo->rc,
+                                DT_LEFT | DT_SINGLELINE | DT_VCENTER
+                                );
+                            SelectFont(DrawInfo->hdc, oldFont);
+                            DeleteFont(newFont);
+                        }
+                        else
+                        {
+                            HFONT newFont = PhDuplicateFontWithNewHeight(PhApplicationFont, 22, dpiValue);
+                            HFONT oldFont;
+
+                            oldFont = SelectFont(DrawInfo->hdc, newFont);
+                            DrawText(
+                                DrawInfo->hdc,
+                                L"\u2610",
+                                1,
+                                &DrawInfo->rc,
+                                DT_LEFT | DT_SINGLELINE | DT_VCENTER
+                                );
+                            SelectFont(DrawInfo->hdc, oldFont);
+                            DeleteFont(newFont);
+                        }
+
+                        //bufferRect.left = checkBoxSize.cx + 5; // TNP_ICON_RIGHT_PADDING
+                        bufferRect.right = DrawInfo->rc.right;
+
+                        DrawText(
+                            DrawInfo->hdc,
+                            buttonText->Buffer,
+                            (UINT)buttonText->Length / sizeof(WCHAR),
+                            &bufferRect,
+                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX
+                            );
+                    }
                 }
             }
             else
             {
-                HICON buttonIcon;
-
                 if (isSelected)
                 {
                     //switch (PhpThemeColorMode)
@@ -1581,77 +1740,7 @@ LRESULT CALLBACK PhpThemeWindowDrawButton(
                 SetDCBrushColor(DrawInfo->hdc, PhThemeWindowBackground2Color);
                 FrameRect(DrawInfo->hdc, &DrawInfo->rc, GetStockBrush(DC_BRUSH));
 
-                if (!(buttonIcon = Static_GetIcon(DrawInfo->hdr.hwndFrom, 0)))
-                    buttonIcon = (HICON)SendMessage(DrawInfo->hdr.hwndFrom, BM_GETIMAGE, IMAGE_ICON, 0);
-
-                if (buttonIcon) // (buttonStyle & BS_ICON | BS_BITMAP) == BS_ICON |BS_BITMAP)
-                {
-                    BOOL result;
-                    ICONINFO iconInfo;
-                    BITMAP bmp;
-                    LONG width = PhGetSystemMetrics(SM_CXSMICON, dpiValue);
-                    LONG height = PhGetSystemMetrics(SM_CYSMICON, dpiValue);
-
-                    memset(&iconInfo, 0, sizeof(ICONINFO));
-                    memset(&bmp, 0, sizeof(BITMAP));
-
-                    result = GetIconInfo(buttonIcon, &iconInfo);
-
-                    if (iconInfo.hbmColor)
-                    {
-                        if (GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp))
-                        {
-                            width = bmp.bmWidth;
-                            height = bmp.bmHeight;
-                        }
-
-                        DeleteBitmap(iconInfo.hbmColor);
-                    }
-                    else if (iconInfo.hbmMask)
-                    {
-                        if (GetObject(iconInfo.hbmMask, sizeof(BITMAP), &bmp))
-                        {
-                            width = bmp.bmWidth;
-                            height = bmp.bmHeight / 2;
-                        }
-
-                        DeleteBitmap(iconInfo.hbmMask);
-                    }
-
-                    DrawIconEx(
-                        DrawInfo->hdc,
-                        bufferRect.left + ((bufferRect.right - bufferRect.left) - width) / 2,
-                        bufferRect.top + ((bufferRect.bottom - bufferRect.top) - height) / 2,
-                        buttonIcon,
-                        width,
-                        height,
-                        0,
-                        NULL,
-                        DI_NORMAL
-                        );
-
-                    if (!result) // HACK
-                    {
-                        BUTTON_IMAGELIST imageList = { 0 };
-
-                        if (Button_GetImageList(DrawInfo->hdr.hwndFrom, &imageList) && imageList.himl)
-                        {
-                            bufferRect.left += PhGetDpi(1, dpiValue);
-
-                            PhImageListDrawIcon(
-                                imageList.himl,
-                                0,
-                                DrawInfo->hdc,
-                                bufferRect.left, // + ((bufferRect.right - bufferRect.left) - width) / 2,
-                                bufferRect.top + ((bufferRect.bottom - bufferRect.top) - height) / 2,
-                                ILD_NORMAL,
-                                FALSE
-                                );
-
-                            bufferRect.left += PhGetDpi(5, dpiValue);
-                        }
-                    }
-                }
+                PhThemeDrawButtonIcon(DrawInfo, buttonIcon, &bufferRect, dpiValue);
 
                 if ((buttonStyle & BS_ICON) != BS_ICON)
                 {

@@ -14,7 +14,9 @@
 #include <hndlinfo.h>
 #include <json.h>
 #include <kphuser.h>
+#include <mapldr.h>
 #include <lsasup.h>
+
 #include <devquery.h>
 #include <devpkey.h>
 
@@ -2214,13 +2216,13 @@ NTSTATUS PhpCallWithTimeout(
         NtClearEvent(ThreadContext->StartEventHandle);
         NtClearEvent(ThreadContext->CompletedEventHandle);
 
-        if (!NT_SUCCESS(status = RtlCreateUserThread(
+        if (!NT_SUCCESS(status = PhCreateUserThread(
             NtCurrentProcess(),
             NULL,
-            FALSE,
             0,
             0,
-            32 * 1024,
+            UInt32x32To64(32, 1024),
+            0,
             PhpCallWithTimeoutThreadStart,
             ThreadContext,
             &ThreadContext->ThreadHandle,

@@ -11,8 +11,8 @@
 
 #include <peview.h>
 
-#include "..\thirdparty\ssdeep\fuzzy.h"
-#include "..\thirdparty\tlsh\tlsh_wrapper.h"
+#include "../thirdparty/ssdeep/fuzzy.h"
+#include "../thirdparty/tlsh/tlsh_wrapper.h"
 
 typedef struct _PVP_PE_POGO_CONTEXT
 {
@@ -89,7 +89,6 @@ VOID PvEnumerateImagePogoSections(
 
             __try
             {
-                PVOID imageSectionData;
                 PPH_STRING entropyString;
                 DOUBLE imageSectionEntropy;
 

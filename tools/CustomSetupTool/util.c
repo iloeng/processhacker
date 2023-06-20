@@ -204,8 +204,8 @@ VOID SetupDeleteUninstallFile(
         PPH_STRING tempFileName = PhGetTemporaryDirectoryRandomAlphaFileName();
 
         PhMoveFileWin32(
-            PhGetString(uninstallFilePath), 
-            PhGetString(tempFileName), 
+            PhGetString(uninstallFilePath),
+            PhGetString(tempFileName),
             FALSE
             );
 

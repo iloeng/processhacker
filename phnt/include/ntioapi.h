@@ -1085,6 +1085,11 @@ typedef struct _FILE_OBJECTID_INFORMATION
     };
 } FILE_OBJECTID_INFORMATION, *PFILE_OBJECTID_INFORMATION;
 
+typedef struct _FILE_DIRECTORY_NEXT_INFORMATION
+{
+    ULONG NextEntryOffset;
+} FILE_DIRECTORY_NEXT_INFORMATION, *PFILE_DIRECTORY_NEXT_INFORMATION;
+
 // NtQueryEaFile/NtSetEaFile types
 
 typedef struct _FILE_FULL_EA_INFORMATION
@@ -2353,7 +2358,7 @@ typedef struct _MOUNTMGR_TARGET_NAME
 {
     USHORT DeviceNameLength;
     _Field_size_bytes_(DeviceNameLength) WCHAR DeviceName[1];
-} MOUNTMGR_TARGET_NAME, * PMOUNTMGR_TARGET_NAME;
+} MOUNTMGR_TARGET_NAME, *PMOUNTMGR_TARGET_NAME;
 
 // Input / Output structure for querying / setting the auto-mount setting
 typedef enum _MOUNTMGR_AUTO_MOUNT_STATE

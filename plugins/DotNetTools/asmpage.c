@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2011-2015
- *     dmex    2016-2022
+ *     dmex    2016-2023
  *
  */
 
@@ -490,10 +490,14 @@ VOID DotNetAsmDestroyTreeNodes(
             DotNetAsmDestroyNode(Context->NodeList->Items[i]);
 
         PhDereferenceObject(Context->NodeList);
+        Context->NodeList = NULL;
     }
 
     if (Context->NodeRootList)
+    {
         PhDereferenceObject(Context->NodeRootList);
+        Context->NodeRootList = NULL;
+    }
 }
 
 VOID DotNetAsmClearTreeNodes(
@@ -502,9 +506,6 @@ VOID DotNetAsmClearTreeNodes(
 {
     if (Context->NodeList)
     {
-        for (ULONG i = 0; i < Context->NodeList->Count; i++)
-            DotNetAsmDestroyNode(Context->NodeList->Items[i]);
-
         PhClearList(Context->NodeList);
     }
 
@@ -938,7 +939,7 @@ BOOLEAN NTAPI DotNetAsmTreeNewCallback(
 
             data.TreeNewHandle = hwnd;
             data.MouseEvent = Parameter1;
-            data.DefaultSortColumn = 0;
+            data.DefaultSortColumn = DNATNC_STRUCTURE;
             data.DefaultSortOrder = NoSortOrder;
             PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
@@ -1578,15 +1579,10 @@ NTSTATUS DotNetTraceQueryThreadStart(
 
     if (!context->PageContext->CancelQueryContext && context->PageContext->WindowHandle)
     {
-        if (!SendMessage(context->PageContext->WindowHandle, DN_ASM_UPDATE_MSG, result, (LPARAM)context))
-        {
-            PhDereferenceObject(context);
-        }
+        SendMessage(context->PageContext->WindowHandle, DN_ASM_UPDATE_MSG, result, (LPARAM)context);
     }
-    else
-    {
-        PhDereferenceObject(context);
-    }
+
+    PhDereferenceObject(context);
 
     return STATUS_SUCCESS;
 }
@@ -1597,6 +1593,7 @@ NTSTATUS DotNetSosTraceQueryThreadStart(
 {
     PCLR_PROCESS_SUPPORT support;
     PPH_LIST appdomainlist = NULL;
+    BOOLEAN success = FALSE;
 
 #ifdef _WIN64
     if (Context->IsWow64)
@@ -1654,7 +1651,7 @@ NTSTATUS DotNetSosTraceQueryThreadStart(
                 PhSetReference(&childNode->u.Assembly.DisplayName, assembly->DisplayName);
                 PhSetReference(&childNode->u.Assembly.FullyQualifiedAssemblyName, assembly->ModuleName);
                 childNode->u.Assembly.BaseAddress = assembly->BaseAddress;
-                childNode->StructureText = assembly->DisplayName->sr;
+                childNode->StructureText = PhGetStringRef(assembly->DisplayName);
                 PhSetReference(&childNode->PathText, assembly->ModuleName);
                 PhSetReference(&childNode->NativePathText, assembly->NativeFileName);
                 childNode->MvidText = PhFormatGuid(&assembly->Mvid);
@@ -1691,8 +1688,6 @@ NTSTATUS DotNetSosTraceQueryThreadStart(
 
     // Check whether we got any data.
     {
-        BOOLEAN success = FALSE;
-
         for (ULONG i = 0; i < Context->NodeList->Count; i++)
         {
             PDNA_NODE node = Context->NodeList->Items[i];
@@ -1706,26 +1701,17 @@ NTSTATUS DotNetSosTraceQueryThreadStart(
 
         if (success && !Context->PageContext->CancelQueryContext && Context->PageContext->WindowHandle)
         {
-            if (!SendMessage(Context->PageContext->WindowHandle, DN_ASM_UPDATE_MSG, 0, (LPARAM)Context))
-            {
-                PhDereferenceObject(Context);
-            }
-            return STATUS_SUCCESS;
+            SendMessage(Context->PageContext->WindowHandle, DN_ASM_UPDATE_MSG, 0, (LPARAM)Context);
         }
     }
 
 CleanupExit:
-    if (!Context->PageContext->CancelQueryContext && Context->PageContext->WindowHandle)
+    if (!success && !Context->PageContext->CancelQueryContext && Context->PageContext->WindowHandle)
     {
-        if (!SendMessage(Context->PageContext->WindowHandle, DN_ASM_UPDATE_ERROR, 0, (LPARAM)Context))
-        {
-            PhDereferenceObject(Context);
-        }
+        SendMessage(Context->PageContext->WindowHandle, DN_ASM_UPDATE_ERROR, 0, (LPARAM)Context);
     }
-    else
-    {
-        PhDereferenceObject(Context);
-    }
+
+    PhDereferenceObject(Context);
 
     return STATUS_SUCCESS;
 }
@@ -1735,16 +1721,16 @@ VOID DotNetQueryContextDeleteProcedure(
     _In_ ULONG Flags
     )
 {
-    if (Context->NodeRootList)
-    {
-        PhClearList(Context->NodeRootList);
-        PhDereferenceObject(Context->NodeRootList);
-    }
-
     if (Context->NodeList)
     {
-        PhClearList(Context->NodeList);
         PhDereferenceObject(Context->NodeList);
+        Context->NodeList = NULL;
+    }
+
+    if (Context->NodeRootList)
+    {
+        PhDereferenceObject(Context->NodeRootList);
+        Context->NodeRootList = NULL;
     }
 
     PhDereferenceObject(Context->PageContext);
@@ -2019,6 +2005,7 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
                 break;
             case IDC_REFRESH:
                 {
+                    PhReferenceObject(context);
                     DotNetAsmRefreshTraceQuery(context, FALSE);
                 }
                 break;
@@ -2131,16 +2118,15 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
                 PhClearReference(&errorMessage);
             }
 
-            PhDereferenceObject(queryContext);
             SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
             return TRUE;
         }
         break;
     case DN_ASM_UPDATE_ERROR:
         {
+            PhReferenceObject(context);
             DotNetAsmRefreshTraceQuery(context, TRUE);
 
-            PhDereferenceObject((PASMPAGE_QUERY_CONTEXT)lParam);
             SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
             return TRUE;
         }

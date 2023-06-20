@@ -18,12 +18,12 @@ PhShowKsiStatus(
     VOID
     );
 
-VOID 
+VOID
 PhInitializeKsi(
     VOID
     );
 
-VOID 
+NTSTATUS
 PhDestroyKsi(
     VOID
     );

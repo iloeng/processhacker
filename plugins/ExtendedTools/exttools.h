@@ -61,6 +61,7 @@ extern BOOLEAN EtGraphShowText;
 extern BOOLEAN EtEnableScaleGraph;
 extern BOOLEAN EtEnableScaleText;
 extern BOOLEAN EtPropagateCpuUsage;
+extern BOOLEAN EtEnableAvxSupport;
 
 #define PLUGIN_NAME L"ProcessHacker.ExtendedTools"
 #define SETTING_NAME_DISK_TREE_LIST_COLUMNS (PLUGIN_NAME L".DiskTreeListColumns")
@@ -99,6 +100,7 @@ extern BOOLEAN EtPropagateCpuUsage;
 #define SETTING_NAME_PIPE_ENUM_WINDOW_POSITION (PLUGIN_NAME L".PipeEnumWindowPosition")
 #define SETTING_NAME_PIPE_ENUM_WINDOW_SIZE (PLUGIN_NAME L".PipeEnumWindowSize")
 #define SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS (PLUGIN_NAME L".PipeEnumListViewColumns")
+#define SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KPH (PLUGIN_NAME L".PipeEnumListViewColumnsWithKph")
 #define SETTING_NAME_FIRMWARE_WINDOW_POSITION (PLUGIN_NAME L".FirmwareWindowPosition")
 #define SETTING_NAME_FIRMWARE_WINDOW_SIZE (PLUGIN_NAME L".FirmwareWindowSize")
 #define SETTING_NAME_FIRMWARE_LISTVIEW_COLUMNS (PLUGIN_NAME L".FirmwareListViewColumns")
@@ -756,6 +758,8 @@ VOID EtGpuMiniInformationInitializing(
 
 // iconext
 
+extern BOOLEAN EtTrayIconTransparencyEnabled;
+
 VOID EtLoadTrayIconGuids(
     VOID
     );
@@ -1175,22 +1179,14 @@ VOID EtProcessFramesPropertiesInitializing(
 
 // wct
 
-PVOID EtWaitChainContextCreate(
-    VOID
-    );
-
-VOID EtShowWaitChainDialog(
+VOID EtShowWaitChainProcessDialog(
     _In_ HWND ParentWindowHandle,
-    _In_ PVOID Context
+    _In_ PPH_PROCESS_ITEM ProcessItem
     );
 
-VOID NTAPI WctProcessMenuInitializingCallback(
-    _In_ PVOID Parameter,
-    _In_opt_ PVOID Context
-    );
-VOID NTAPI WctThreadMenuInitializingCallback(
-    _In_ PVOID Parameter,
-    _In_opt_ PVOID Context
+VOID EtShowWaitChainThreadDialog(
+    _In_ HWND ParentWindowHandle,
+    _In_ PPH_THREAD_ITEM ThreadItem
     );
 
 // reparse

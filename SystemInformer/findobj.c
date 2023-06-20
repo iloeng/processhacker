@@ -11,7 +11,6 @@
  */
 
 #include <phapp.h>
-#include <phsettings.h>
 #include <cpysave.h>
 #include <emenu.h>
 #include <hndlinfo.h>
@@ -27,7 +26,7 @@
 #include <proctree.h>
 #include <settings.h>
 
-#include "..\tools\thirdparty\pcre\pcre2.h"
+#include "../tools/thirdparty/pcre/pcre2.h"
 
 #define WM_PH_SEARCH_SHOWDIALOG (WM_APP + 801)
 #define WM_PH_SEARCH_FINISHED (WM_APP + 802)
@@ -463,7 +462,7 @@ BOOLEAN NTAPI PhpHandleObjectTreeNewCallback(
             data.TreeNewHandle = hwnd;
             data.MouseEvent = Parameter1;
             data.DefaultSortColumn = 0;
-            data.DefaultSortOrder = AscendingSortOrder;
+            data.DefaultSortOrder = NoSortOrder;
             PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
             data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
@@ -1324,7 +1323,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
         {
             if (context->SearchThreadHandle)
             {
-                SetCursor(LoadCursor(NULL, IDC_APPSTARTING));
+                PhSetCursor(PhLoadCursor(NULL, IDC_APPSTARTING));
                 SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
                 return TRUE;
             }
@@ -1415,7 +1414,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
 
                         PhSetDialogItemText(hwndDlg, IDOK, L"Cancel");
 
-                        SetCursor(LoadCursor(NULL, IDC_APPSTARTING));
+                        PhSetCursor(PhLoadCursor(NULL, IDC_APPSTARTING));
                     }
                     else
                     {
@@ -1477,8 +1476,22 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
                 {
                     PPH_HANDLE_OBJECT_TREE_ROOT_NODE *handleObjectNodes = NULL;
                     ULONG numberOfHandleObjectNodes = 0;
+                    BOOLEAN allCanBeClosed = TRUE;
 
                     if (!PhpGetSelectedHandleObjectNodes(context, &handleObjectNodes, &numberOfHandleObjectNodes))
+                        break;
+
+                    // Check the item called by TreeNewKeyDown is valid (dmex)
+                    for (ULONG i = 0; i < numberOfHandleObjectNodes; i++)
+                    {
+                        if (handleObjectNodes[i]->ResultType != HandleSearchResult)
+                        {
+                            allCanBeClosed = FALSE;
+                            break;
+                        }
+                    }
+
+                    if (!allCanBeClosed)
                         break;
 
                     if (numberOfHandleObjectNodes != 0 && PhShowConfirmMessage(
@@ -1722,7 +1735,7 @@ INT_PTR CALLBACK PhpFindObjectsDlgProc(
             PhSetDialogItemText(hwndDlg, IDOK, L"Find");
             EnableWindow(GetDlgItem(hwndDlg, IDOK), TRUE);
 
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            PhSetCursor(PhLoadCursor(NULL, IDC_ARROW));
 
             if ((NTSTATUS)wParam == STATUS_INSUFFICIENT_RESOURCES)
             {

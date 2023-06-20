@@ -14,7 +14,6 @@
 #include <apiimport.h>
 #include <kphuser.h>
 #include <lsasup.h>
-#include <mapimg.h>
 #include <mapldr.h>
 
 #define PH_DEVICE_PREFIX_LENGTH 64
@@ -504,36 +503,36 @@ NTSTATUS PhTerminateThread(
     return status;
 }
 
-typedef struct _PH_TARGET_LIBS
+typedef struct _PH_PROCESS_RUNTIME_LIBRARY
 {
-    PH_STRINGREF Ntdll;
-    PH_STRINGREF Kernel32;
-} PH_TARGET_LIBS, *PPH_TARGET_LIBS;
+    PH_STRINGREF NtdllFileName;
+    PH_STRINGREF Kernel32FileName;
+} PH_PROCESS_RUNTIME_LIBRARY, *PPH_PROCESS_RUNTIME_LIBRARY;
 
-NTSTATUS PhpGetProcessTargetLibs(
+NTSTATUS PhGetProcessRuntimeLibrary(
     _In_ HANDLE ProcessHandle,
-    _Out_ PPH_TARGET_LIBS* Targets,
+    _Out_ PPH_PROCESS_RUNTIME_LIBRARY* RuntimeLibrary,
     _Out_opt_ PBOOLEAN IsWow64
     )
 {
-    static PH_TARGET_LIBS NativeLibs =
+    static PH_PROCESS_RUNTIME_LIBRARY NativeRuntime =
     {
         PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\ntdll.dll"),
         PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\kernel32.dll"),
     };
 #ifdef _WIN64
-    static PH_TARGET_LIBS Wow64Libs =
+    static PH_PROCESS_RUNTIME_LIBRARY Wow64Runtime =
     {
         PH_STRINGREF_INIT(L"\\SystemRoot\\SysWOW64\\ntdll.dll"),
         PH_STRINGREF_INIT(L"\\SystemRoot\\SysWOW64\\kernel32.dll"),
     };
 #ifdef _M_ARM64
-    static PH_TARGET_LIBS Arm32Libs =
+    static PH_PROCESS_RUNTIME_LIBRARY Arm32Runtime =
     {
         PH_STRINGREF_INIT(L"\\SystemRoot\\SysArm32\\ntdll.dll"),
         PH_STRINGREF_INIT(L"\\SystemRoot\\SysArm32\\kernel32.dll"),
     };
-    static PH_TARGET_LIBS Chpe32Libs =
+    static PH_PROCESS_RUNTIME_LIBRARY Chpe32Runtime =
     {
         PH_STRINGREF_INIT(L"\\SystemRoot\\SyChpe32\\ntdll.dll"),
         PH_STRINGREF_INIT(L"\\SystemRoot\\SyChpe32\\kernel32.dll"),
@@ -541,33 +540,38 @@ NTSTATUS PhpGetProcessTargetLibs(
 #endif
 #endif
 
-    *Targets = &NativeLibs;
+    *RuntimeLibrary = &NativeRuntime;
+
     if (IsWow64)
         *IsWow64 = FALSE;
 
-#ifdef _WIN64 
+#ifdef _WIN64
     NTSTATUS status;
 #ifdef _M_ARM64
-    USHORT arch;
-    status = PhGetProcessArchitecture(ProcessHandle, &arch);
+    USHORT machine;
+
+    status = PhGetProcessArchitecture(ProcessHandle, &machine);
+
     if (!NT_SUCCESS(status))
         return status;
 
-    if (arch != IMAGE_FILE_MACHINE_TARGET_HOST)
+    if (machine != IMAGE_FILE_MACHINE_TARGET_HOST)
     {
-        switch (arch)
+        switch (machine)
         {
         case IMAGE_FILE_MACHINE_I386:
         case IMAGE_FILE_MACHINE_CHPE_X86:
             {
-                *Targets = &Chpe32Libs;
+                *RuntimeLibrary = &Chpe32Runtime;
+
                 if (IsWow64)
                     *IsWow64 = TRUE;
             }
             break;
         case IMAGE_FILE_MACHINE_ARMNT:
             {
-                *Targets = &Arm32Libs;
+                *RuntimeLibrary = &Arm32Runtime;
+
                 if (IsWow64)
                     *IsWow64 = TRUE;
             }
@@ -580,14 +584,17 @@ NTSTATUS PhpGetProcessTargetLibs(
         }
     }
 #else
-    BOOLEAN isWow64;
+    BOOLEAN isWow64 = FALSE;
+
     status = PhGetProcessIsWow64(ProcessHandle, &isWow64);
+
     if (!NT_SUCCESS(status))
         return status;
 
     if (isWow64)
     {
-        *Targets = &Wow64Libs;
+        *RuntimeLibrary = &Wow64Runtime;
+
         if (IsWow64)
             *IsWow64 = TRUE;
     }
@@ -608,15 +615,20 @@ NTSTATUS PhTerminateProcessAlternative(
     PVOID rtlExitUserProcess = NULL;
     HANDLE powerRequestHandle = NULL;
     HANDLE threadHandle = NULL;
-    PPH_TARGET_LIBS libs;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+    status = PhGetProcessRuntimeLibrary(
+        ProcessHandle,
+        &runtimeLibrary,
+        NULL
+        );
+
     if (!NT_SUCCESS(status))
         return status;
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Ntdll,
+        &runtimeLibrary->NtdllFileName,
         "RtlExitUserProcess",
         0,
         &rtlExitUserProcess,
@@ -634,10 +646,10 @@ NTSTATUS PhTerminateProcessAlternative(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -734,18 +746,40 @@ NTSTATUS PhGetProcessImageFileName(
 {
     NTSTATUS status;
     PUNICODE_STRING fileName;
+    ULONG bufferLength;
+    ULONG returnLength = 0;
 
-    status = PhpQueryProcessVariableSize(
+    bufferLength = sizeof(UNICODE_STRING) + DOS_MAX_PATH_LENGTH;
+    fileName = PhAllocate(bufferLength);
+
+    status = NtQueryInformationProcess(
         ProcessHandle,
         ProcessImageFileName,
-        &fileName
+        fileName,
+        bufferLength,
+        &returnLength
         );
+
+    if (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        PhFree(fileName);
+        bufferLength = returnLength;
+        fileName = PhAllocate(bufferLength);
+
+        status = NtQueryInformationProcess(
+            ProcessHandle,
+            ProcessImageFileName,
+            fileName,
+            bufferLength,
+            &returnLength
+            );
+    }
 
     if (!NT_SUCCESS(status))
         return status;
 
     // Note: Some minimal/pico processes have UNICODE_NULL as their filename. (dmex)
-    if (fileName->Length == 0)
+    if (RtlIsNullOrEmptyUnicodeString(fileName))
     {
         PhFree(fileName);
         return STATUS_UNSUCCESSFUL;
@@ -808,7 +842,7 @@ NTSTATUS PhGetProcessImageFileNameWin32(
         PPH_STRING fileNameWin32;
 
         // Note: Some minimal/pico processes have UNICODE_NULL as their filename. (dmex)
-        if (fileName->Length == 0)
+        if (RtlIsNullOrEmptyUnicodeString(fileName))
         {
             PhFree(fileName);
             return STATUS_UNSUCCESSFUL;
@@ -817,9 +851,9 @@ NTSTATUS PhGetProcessImageFileNameWin32(
         fileNameWin32 = PhCreateStringFromUnicodeString(fileName);
 
         // Note: ProcessImageFileNameWin32 returns the NT device path
-        // instead of the Win32 path in some cases were drivers haven't 
+        // instead of the Win32 path in some cases were drivers haven't
         // registered with the volume manager or have ignored the mount
-        // manager (e.g. ImDisk). We workaround these issues by calling 
+        // manager (e.g. ImDisk). We workaround these issues by calling
         // PhGetFileName and resolving the NT device prefix. (dmex)
 
         if (fileNameWin32->Buffer[0] == OBJ_NAME_PATH_SEPARATOR)
@@ -972,7 +1006,7 @@ NTSTATUS PhGetProcessImageFileNameByProcessId(
     }
 
     // Note: Some minimal/pico processes have UNICODE_NULL as their filename. (dmex)
-    if (processIdInfo.ImageName.Length == 0)
+    if (RtlIsNullOrEmptyUnicodeString(&processIdInfo.ImageName))
     {
         PhFree(buffer);
         return STATUS_UNSUCCESSFUL;
@@ -997,8 +1031,7 @@ NTSTATUS PhGetProcessIsBeingDebugged(
     _Out_ PBOOLEAN IsBeingDebugged
     )
 {
-    NTSTATUS status = STATUS_UNSUCCESSFUL;
-    BOOLEAN isBeingDebugged = FALSE;
+    NTSTATUS status;
     PVOID debugHandle;
 
     status = NtQueryInformationProcess(
@@ -1109,18 +1142,18 @@ NTSTATUS PhGetProcessPebString(
 
     if (!(Offset & PhpoWow64))
     {
-        PROCESS_BASIC_INFORMATION basicInfo;
+        PVOID pebBaseAddress;
         PVOID processParameters;
         UNICODE_STRING unicodeString;
 
         // Get the PEB address.
-        if (!NT_SUCCESS(status = PhGetProcessBasicInformation(ProcessHandle, &basicInfo)))
+        if (!NT_SUCCESS(status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress)))
             return status;
 
         // Read the address of the process parameters.
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(basicInfo.PebBaseAddress, FIELD_OFFSET(PEB, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress, FIELD_OFFSET(PEB, ProcessParameters)),
             &processParameters,
             sizeof(PVOID),
             NULL
@@ -1137,7 +1170,7 @@ NTSTATUS PhGetProcessPebString(
             )))
             return status;
 
-        if (unicodeString.Length == 0)
+        if (RtlIsNullOrEmptyUnicodeString(&unicodeString))
         {
             *String = PhReferenceEmptyString();
             return status;
@@ -1160,16 +1193,16 @@ NTSTATUS PhGetProcessPebString(
     }
     else
     {
-        PVOID peb32;
+        PVOID pebBaseAddress32;
         ULONG processParameters32;
         UNICODE_STRING32 unicodeString32;
 
-        if (!NT_SUCCESS(status = PhGetProcessPeb32(ProcessHandle, &peb32)))
+        if (!NT_SUCCESS(status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress32)))
             return status;
 
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(peb32, FIELD_OFFSET(PEB32, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress32, FIELD_OFFSET(PEB32, ProcessParameters)),
             &processParameters32,
             sizeof(ULONG),
             NULL
@@ -1327,12 +1360,34 @@ NTSTATUS PhGetProcessWindowTitle(
 #endif
     ULONG windowFlags;
     PPROCESS_WINDOW_INFORMATION windowInfo;
+    ULONG bufferLength;
+    ULONG returnLength = 0;
 
-    status = PhpQueryProcessVariableSize(
+    bufferLength = UFIELD_OFFSET(PROCESS_WINDOW_INFORMATION, WindowTitle[DOS_MAX_PATH_LENGTH]) + sizeof(UNICODE_NULL);
+    windowInfo = PhAllocate(bufferLength);
+
+    status = NtQueryInformationProcess(
         ProcessHandle,
         ProcessWindowInformation,
-        &windowInfo
+        windowInfo,
+        bufferLength,
+        &returnLength
         );
+
+    if (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        PhFree(windowInfo);
+        bufferLength = returnLength;
+        windowInfo = PhAllocate(bufferLength);
+
+        status = NtQueryInformationProcess(
+            ProcessHandle,
+            ProcessWindowInformation,
+            windowInfo,
+            bufferLength,
+            &returnLength
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -1349,17 +1404,17 @@ NTSTATUS PhGetProcessWindowTitle(
     if (!isWow64)
 #endif
     {
-        PROCESS_BASIC_INFORMATION basicInfo;
+        PVOID pebBaseAddress;
         PVOID processParameters;
 
         // Get the PEB address.
-        if (!NT_SUCCESS(status = PhGetProcessBasicInformation(ProcessHandle, &basicInfo)))
+        if (!NT_SUCCESS(status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress)))
             return status;
 
         // Read the address of the process parameters.
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(basicInfo.PebBaseAddress, FIELD_OFFSET(PEB, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress, FIELD_OFFSET(PEB, ProcessParameters)),
             &processParameters,
             sizeof(PVOID),
             NULL
@@ -1379,15 +1434,15 @@ NTSTATUS PhGetProcessWindowTitle(
 #ifdef _WIN64
     else
     {
-        PVOID peb32;
+        PVOID pebBaseAddress32;
         ULONG processParameters32;
 
-        if (!NT_SUCCESS(status = PhGetProcessPeb32(ProcessHandle, &peb32)))
+        if (!NT_SUCCESS(status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress32)))
             return status;
 
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(peb32, FIELD_OFFSET(PEB32, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress32, FIELD_OFFSET(PEB32, ProcessParameters)),
             &processParameters32,
             sizeof(ULONG),
             NULL
@@ -1475,17 +1530,17 @@ NTSTATUS PhGetProcessEnvironment(
 
     if (!(Flags & PH_GET_PROCESS_ENVIRONMENT_WOW64))
     {
-        PROCESS_BASIC_INFORMATION basicInfo;
+        PVOID pebBaseAddress;
         PVOID processParameters;
 
-        status = PhGetProcessBasicInformation(ProcessHandle, &basicInfo);
+        status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
 
         if (!NT_SUCCESS(status))
             return status;
 
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(basicInfo.PebBaseAddress, UFIELD_OFFSET(PEB, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, ProcessParameters)),
             &processParameters,
             sizeof(PVOID),
             NULL
@@ -1503,18 +1558,18 @@ NTSTATUS PhGetProcessEnvironment(
     }
     else
     {
-        PVOID peb32;
+        PVOID pebBaseAddress32;
         ULONG processParameters32;
         ULONG environmentRemote32;
 
-        status = PhGetProcessPeb32(ProcessHandle, &peb32);
+        status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress32);
 
         if (!NT_SUCCESS(status))
             return status;
 
         if (!NT_SUCCESS(status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(peb32, UFIELD_OFFSET(PEB32, ProcessParameters)),
+            PTR_ADD_OFFSET(pebBaseAddress32, UFIELD_OFFSET(PEB32, ProcessParameters)),
             &processParameters32,
             sizeof(ULONG),
             NULL
@@ -1789,6 +1844,69 @@ NTSTATUS PhGetProcessMappedFileName(
     return status;
 }
 
+NTSTATUS PhGetProcessMappedImageInformation(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _Out_ PMEMORY_IMAGE_INFORMATION ImageInformation
+    )
+{
+    NTSTATUS status;
+    MEMORY_IMAGE_INFORMATION imageInformation;
+
+    status = NtQueryVirtualMemory(
+        ProcessHandle,
+        BaseAddress,
+        MemoryImageInformation,
+        &imageInformation,
+        sizeof(MEMORY_IMAGE_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *ImageInformation = imageInformation;
+    }
+
+    return status;
+}
+
+NTSTATUS PhGetProcessMappedImageBaseFromAddress(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID Address,
+    _Out_ PVOID* ImageBaseAddress,
+    _Out_opt_ PSIZE_T SizeOfImage
+    )
+{
+    NTSTATUS status;
+    MEMORY_IMAGE_INFORMATION imageInfo;
+
+    status = PhGetProcessMappedImageInformation(
+        ProcessHandle,
+        Address,
+        &imageInfo
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    if (!imageInfo.ImageBase ||
+        imageInfo.ImageNotExecutable ||
+        imageInfo.ImagePartialMap ||
+        Address < imageInfo.ImageBase)
+    {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    *ImageBaseAddress = imageInfo.ImageBase;
+
+    if (SizeOfImage)
+    {
+        *SizeOfImage = imageInfo.SizeOfImage;
+    }
+
+    return STATUS_SUCCESS;
+}
+
 /**
  * Gets working set information for a process.
  *
@@ -1931,8 +2049,8 @@ NTSTATUS PhGetProcessUnloadedDlls(
     PVOID eventTrace;
     HANDLE processHandle = NULL;
     ULONG eventTraceSize;
-    ULONG capturedElementSize;
-    ULONG capturedElementCount;
+    ULONG capturedElementSize = 0;
+    ULONG capturedElementCount = 0;
     PVOID capturedEventTracePointer;
     PVOID capturedEventTrace = NULL;
 
@@ -2100,20 +2218,25 @@ NTSTATUS PhLoadDllProcess(
     PVOID loadLibraryW = NULL;
     HANDLE threadHandle = NULL;
     HANDLE powerRequestHandle = NULL;
-    PPH_TARGET_LIBS libs;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 
     if (KphProcessLevel(ProcessHandle) > KphLevelMed)
     {
         return STATUS_ACCESS_DENIED;
     }
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+    status = PhGetProcessRuntimeLibrary(
+        ProcessHandle,
+        &runtimeLibrary,
+        NULL
+        );
+
     if (!NT_SUCCESS(status))
         return status;
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Kernel32,
+        &runtimeLibrary->Kernel32FileName,
         "LoadLibraryW",
         0,
         &loadLibraryW,
@@ -2155,10 +2278,10 @@ NTSTATUS PhLoadDllProcess(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -2214,9 +2337,13 @@ NTSTATUS PhUnloadDllProcess(
     HANDLE powerRequestHandle = NULL;
     THREAD_BASIC_INFORMATION basicInfo;
     PVOID threadStart;
-    PPH_TARGET_LIBS libs;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+    status = PhGetProcessRuntimeLibrary(
+        ProcessHandle,
+        &runtimeLibrary,
+        NULL
+        );
 
     if (!NT_SUCCESS(status))
         return status;
@@ -2256,7 +2383,7 @@ NTSTATUS PhUnloadDllProcess(
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Ntdll,
+        &runtimeLibrary->NtdllFileName,
         "LdrUnloadDll",
         0,
         &threadStart,
@@ -2274,10 +2401,10 @@ NTSTATUS PhUnloadDllProcess(
             return status;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -2336,7 +2463,7 @@ NTSTATUS PhSetEnvironmentVariableRemote(
     PVOID setEnvironmentVariableW = NULL;
     HANDLE threadHandle = NULL;
     HANDLE powerRequestHandle = NULL;
-    PPH_TARGET_LIBS libs;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 #ifdef _WIN64
     BOOLEAN isWow64;
 #endif
@@ -2346,9 +2473,9 @@ NTSTATUS PhSetEnvironmentVariableRemote(
     if (Value)
         valueAllocationSize = Value->Length + sizeof(UNICODE_NULL);
 
-    status = PhpGetProcessTargetLibs(
+    status = PhGetProcessRuntimeLibrary(
         ProcessHandle,
-        &libs,
+        &runtimeLibrary,
 #ifdef _WIN64
         &isWow64
 #else
@@ -2361,7 +2488,7 @@ NTSTATUS PhSetEnvironmentVariableRemote(
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Ntdll,
+        &runtimeLibrary->NtdllFileName,
         "RtlExitUserThread",
         0,
         &rtlExitUserThread,
@@ -2373,7 +2500,7 @@ NTSTATUS PhSetEnvironmentVariableRemote(
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Kernel32,
+        &runtimeLibrary->Kernel32FileName,
         "SetEnvironmentVariableW",
         0,
         &setEnvironmentVariableW,
@@ -2440,10 +2567,10 @@ NTSTATUS PhSetEnvironmentVariableRemote(
             goto CleanupExit;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        TRUE,
+        THREAD_CREATE_FLAGS_CREATE_SUSPENDED,
         0,
         0,
         0,
@@ -3732,6 +3859,125 @@ NTSTATUS PhGetTokenIntegrityLevel(
     return status;
 }
 
+NTSTATUS PhGetProcessMandatoryPolicy(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PACCESS_MASK Mask
+    )
+{
+    NTSTATUS status;
+    PSYSTEM_MANDATORY_LABEL_ACE currentAce;
+    PSECURITY_DESCRIPTOR currentSecurityDescriptor;
+    BOOLEAN currentSaclPresent;
+    BOOLEAN currentSaclDefaulted;
+    PACL currentSacl;
+
+    status = PhGetObjectSecurity(
+        ProcessHandle,
+        LABEL_SECURITY_INFORMATION,
+        &currentSecurityDescriptor
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = RtlGetSaclSecurityDescriptor(
+        currentSecurityDescriptor,
+        &currentSaclPresent,
+        &currentSacl,
+        &currentSaclDefaulted
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = STATUS_UNSUCCESSFUL;
+
+    if (!(currentSaclPresent && currentSacl))
+        goto CleanupExit;
+
+    for (USHORT i = 0; i < currentSacl->AceCount; i++)
+    {
+        status = RtlGetAce(currentSacl, i, &currentAce);
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (currentAce->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        {
+            *Mask = currentAce->Mask;
+            status = STATUS_SUCCESS;
+            break;
+        }
+    }
+
+CleanupExit:
+    PhFree(currentSecurityDescriptor);
+
+    return status;
+}
+
+NTSTATUS PhSetProcessMandatoryPolicy(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK Mask
+    )
+{
+    NTSTATUS status;
+    PSYSTEM_MANDATORY_LABEL_ACE currentAce;
+    PSECURITY_DESCRIPTOR currentSecurityDescriptor;
+    BOOLEAN currentSaclPresent;
+    BOOLEAN currentSaclDefaulted;
+    PACL currentSacl;
+
+    status = PhGetObjectSecurity(
+        ProcessHandle,
+        LABEL_SECURITY_INFORMATION,
+        &currentSecurityDescriptor
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = RtlGetSaclSecurityDescriptor(
+        currentSecurityDescriptor,
+        &currentSaclPresent,
+        &currentSacl,
+        &currentSaclDefaulted
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = STATUS_UNSUCCESSFUL;
+
+    if (!(currentSaclPresent && currentSacl))
+        goto CleanupExit;
+
+    for (USHORT i = 0; i < currentSacl->AceCount; i++)
+    {
+        status = RtlGetAce(currentSacl, i, &currentAce);
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (currentAce->Header.AceType == SYSTEM_MANDATORY_LABEL_ACE_TYPE)
+        {
+            currentAce->Mask = Mask;
+
+            status = PhSetObjectSecurity(
+                ProcessHandle,
+                LABEL_SECURITY_INFORMATION,
+                currentSecurityDescriptor
+                );
+            break;
+        }
+    }
+
+CleanupExit:
+    PhFree(currentSecurityDescriptor);
+
+    return status;
+}
+
 NTSTATUS PhGetTokenProcessTrustLevelRID(
     _In_ HANDLE TokenHandle,
     _Out_opt_ PULONG ProtectionType,
@@ -4099,7 +4345,7 @@ NTSTATUS PhGetFileIndexNumber(
         );
 }
 
-NTSTATUS PhDeleteFile( // PhDeleteFileHandle PhSetFileDelete
+NTSTATUS PhSetFileDelete(
     _In_ HANDLE FileHandle
     )
 {
@@ -5012,7 +5258,7 @@ NTSTATUS PhpUnloadDriver(
     {
         if (disposition == REG_CREATED_NEW_KEY)
         {
-            static PH_STRINGREF imagePath = PH_STRINGREF_INIT(L"\\SystemRoot\\system32\\drivers\\ntfs.sys");
+            static PH_STRINGREF imagePath = PH_STRINGREF_INIT(L"\\SystemRoot\\System32\\drivers\\ntfs.sys");
             PH_STRINGREF valueName;
             ULONG dword;
 
@@ -5126,7 +5372,7 @@ NTSTATUS PhpEnumProcessModules(
     )
 {
     NTSTATUS status;
-    PROCESS_BASIC_INFORMATION basicInfo;
+    PPEB peb;
     PPEB_LDR_DATA ldr;
     PEB_LDR_DATA pebLdrData;
     PLIST_ENTRY startLink;
@@ -5136,7 +5382,7 @@ NTSTATUS PhpEnumProcessModules(
     ULONG i;
 
     // Get the PEB address.
-    status = PhGetProcessBasicInformation(ProcessHandle, &basicInfo);
+    status = PhGetProcessPeb(ProcessHandle, &peb);
 
     if (!NT_SUCCESS(status))
         return status;
@@ -5144,7 +5390,7 @@ NTSTATUS PhpEnumProcessModules(
     // Read the address of the loader data.
     status = NtReadVirtualMemory(
         ProcessHandle,
-        PTR_ADD_OFFSET(basicInfo.PebBaseAddress, FIELD_OFFSET(PEB, Ldr)),
+        PTR_ADD_OFFSET(peb, FIELD_OFFSET(PEB, Ldr)),
         &ldr,
         sizeof(PVOID),
         NULL
@@ -5152,6 +5398,10 @@ NTSTATUS PhpEnumProcessModules(
 
     if (!NT_SUCCESS(status))
         return status;
+
+    // Check the process has initialized (dmex)
+    if (!ldr)
+        return STATUS_UNSUCCESSFUL;
 
     // Read the loader data.
     status = NtReadVirtualMemory(
@@ -5511,6 +5761,10 @@ NTSTATUS PhpEnumProcessModules32(
     if (!NT_SUCCESS(status))
         return status;
 
+    // Check the process has initialized (dmex)
+    if (!ldr)
+        return STATUS_UNSUCCESSFUL;
+
     // Read the loader data.
     status = NtReadVirtualMemory(
         ProcessHandle,
@@ -5585,7 +5839,7 @@ BOOLEAN NTAPI PhpEnumProcessModules32Callback(
     _In_opt_ PVOID Context2
     )
 {
-    static PH_STRINGREF system32String = PH_STRINGREF_INIT(L"\\system32\\");
+    static PH_STRINGREF system32String = PH_STRINGREF_INIT(L"\\System32\\");
     PPH_ENUM_PROCESS_MODULES_PARAMETERS parameters = Context1;
     BOOLEAN cont;
     LDR_DATA_TABLE_ENTRY nativeEntry;
@@ -5678,28 +5932,57 @@ BOOLEAN NTAPI PhpEnumProcessModules32Callback(
 
             if (!(parameters->Flags & PH_ENUM_PROCESS_MODULES_DONT_RESOLVE_WOW64_FS))
             {
-                // WOW64 file system redirection - convert "system32" to "SysWOW64".
+                // WOW64 file system redirection - convert "system32" to "SysWOW64" or "SysArm32".
                 if (!(nativeEntry.FullDllName.Length & 1)) // validate the string length
                 {
-                    fullDllName.Buffer = fullDllNameBuffer;
-                    fullDllName.Length = nativeEntry.FullDllName.Length;
-
-                    PhGetSystemRoot(&systemRootString);
-
-                    if (PhStartsWithStringRef(&fullDllName, &systemRootString, TRUE))
+#ifdef _M_ARM64
+                    USHORT arch;
+                    if (NT_SUCCESS(PhGetProcessArchitecture(ProcessHandle, &arch)))
                     {
-                        PhSkipStringRef(&fullDllName, systemRootString.Length);
+#endif
+                        fullDllName.Buffer = fullDllNameBuffer;
+                        fullDllName.Length = nativeEntry.FullDllName.Length;
 
-                        if (PhStartsWithStringRef(&fullDllName, &system32String, TRUE))
+                        PhGetSystemRoot(&systemRootString);
+
+                        if (PhStartsWithStringRef(&fullDllName, &systemRootString, TRUE))
                         {
-                            fullDllName.Buffer[1] = L'S';
-                            fullDllName.Buffer[4] = L'W';
-                            fullDllName.Buffer[5] = L'O';
-                            fullDllName.Buffer[6] = L'W';
-                            fullDllName.Buffer[7] = L'6';
-                            fullDllName.Buffer[8] = L'4';
+                            PhSkipStringRef(&fullDllName, systemRootString.Length);
+
+                            if (PhStartsWithStringRef(&fullDllName, &system32String, TRUE))
+                            {
+#ifdef _M_ARM64
+                                if (arch == IMAGE_FILE_MACHINE_ARMNT)
+                                {
+                                    fullDllName.Buffer[1] = L'S';
+                                    fullDllName.Buffer[2] = L'y';
+                                    fullDllName.Buffer[3] = L's';
+                                    fullDllName.Buffer[4] = L'A';
+                                    fullDllName.Buffer[5] = L'r';
+                                    fullDllName.Buffer[6] = L'm';
+                                    fullDllName.Buffer[7] = L'3';
+                                    fullDllName.Buffer[8] = L'2';
+                                }
+                                else
+#endif
+                                {
+                                    fullDllName.Buffer[1] = L'S';
+                                    fullDllName.Buffer[4] = L'W';
+                                    fullDllName.Buffer[5] = L'O';
+                                    fullDllName.Buffer[6] = L'W';
+                                    fullDllName.Buffer[7] = L'6';
+                                    fullDllName.Buffer[8] = L'4';
+                                }
+                            }
                         }
+#ifdef _M_ARM64
                     }
+                    else
+                    {
+                        fullDllNameBuffer[0] = UNICODE_NULL;
+                        nativeEntry.FullDllName.Length = 0;
+                    }
+#endif
                 }
             }
         }
@@ -6412,6 +6695,7 @@ NTSTATUS PhEnumProcesses(
  *
  * \param Processes A variable which receives a pointer to a buffer containing process information.
  * You must free the buffer using PhFree() when you no longer need it.
+ * \param SystemInformationClass A variable which indicates the kind of system information to be retrieved.
  *
  * \remarks You can use the \ref PH_FIRST_PROCESS and \ref PH_NEXT_PROCESS macros to process the
  * information contained in the buffer.
@@ -6485,18 +6769,43 @@ NTSTATUS PhEnumNextProcess(
     )
 {
     NTSTATUS status;
-    HANDLE processHandle = ProcessHandle;
+    HANDLE processHandle;
+    HANDLE newProcessHandle;
 
-    while (NT_SUCCESS(status = NtGetNextProcess(
-        processHandle,
+    status = NtGetNextProcess(
+        ProcessHandle,
         DesiredAccess,
         0,
         0,
         &processHandle
-        )))
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    while (TRUE)
     {
         if (!Callback(processHandle, Context))
             break;
+
+        status = NtGetNextProcess(
+            processHandle,
+            DesiredAccess,
+            0,
+            0,
+            &newProcessHandle
+            );
+
+        if (NT_SUCCESS(status))
+        {
+            NtClose(processHandle);
+            processHandle = newProcessHandle;
+        }
+        else
+        {
+            NtClose(processHandle);
+            break;
+        }
     }
 
     if (status == STATUS_NO_MORE_ENTRIES)
@@ -6514,19 +6823,45 @@ NTSTATUS PhEnumNextThread(
     )
 {
     NTSTATUS status;
-    HANDLE threadHandle = ThreadHandle;
+    HANDLE threadHandle;
+    HANDLE newThreadHandle;
 
-    while (NT_SUCCESS(status = NtGetNextThread(
+    status = NtGetNextThread(
         ProcessHandle,
-        threadHandle,
+        ThreadHandle,
         DesiredAccess,
         0,
         0,
         &threadHandle
-        )))
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    while (TRUE)
     {
         if (!Callback(threadHandle, Context))
             break;
+
+        status = NtGetNextThread(
+            ProcessHandle,
+            threadHandle,
+            DesiredAccess,
+            0,
+            0,
+            &newThreadHandle
+            );
+
+        if (NT_SUCCESS(status))
+        {
+            NtClose(threadHandle);
+            threadHandle = newThreadHandle;
+        }
+        else
+        {
+            NtClose(threadHandle);
+            break;
+        }
     }
 
     if (status == STATUS_NO_MORE_ENTRIES)
@@ -7549,10 +7884,7 @@ NTSTATUS PhEnumDirectoryFileEx(
 
         while (TRUE)
         {
-            PFILE_NAMES_INFORMATION information;
-
-            // HACK: Use the wrong structure for the NextEntryOffset. (dmex)
-            information = PTR_ADD_OFFSET(buffer, i);
+            PFILE_DIRECTORY_NEXT_INFORMATION information = PTR_ADD_OFFSET(buffer, i);
 
             if (!Callback(FileHandle, information, Context))
             {
@@ -7577,6 +7909,158 @@ NTSTATUS PhEnumDirectoryFileEx(
     return status;
 }
 
+/**
+ * \brief Enumerates the volume Reparse Points using the \\$Extend\\$Reparse:$R:$INDEX_ALLOCATION directory.
+ *
+ * \param FileHandle A handle to the volume.
+ * \param Callback A pointer to a callback function.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status
+ */
+NTSTATUS PhEnumReparsePointInformation(
+    _In_ HANDLE FileHandle,
+    _In_ PPH_ENUM_REPARSE_POINT Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    BOOLEAN firstTime = TRUE;
+    ULONG bufferSize;
+    PVOID buffer;
+
+    bufferSize = sizeof(FILE_REPARSE_POINT_INFORMATION[512]);
+    buffer = PhAllocate(bufferSize);
+
+    while (TRUE)
+    {
+        status = NtQueryDirectoryFile(
+            FileHandle,
+            NULL,
+            NULL,
+            NULL,
+            &isb,
+            buffer,
+            bufferSize,
+            FileReparsePointInformation,
+            FALSE,
+            NULL,
+            firstTime
+            );
+
+        if (status == STATUS_PENDING)
+        {
+            status = NtWaitForSingleObject(FileHandle, FALSE, NULL);
+
+            if (NT_SUCCESS(status))
+                status = isb.Status;
+        }
+
+        if (status == STATUS_NO_MORE_FILES)
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        status = Callback(FileHandle, buffer, isb.Information, Context);
+
+        if (status == STATUS_NO_MORE_FILES)
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        firstTime = FALSE;
+    }
+
+    PhFree(buffer);
+
+    return status;
+}
+
+/**
+ * \brief Enumerates the volume ObjectIDs using the \\$Extend\\$ObjId:$O:$INDEX_ALLOCATION directory.
+ *
+ * \param FileHandle A handle to the volume.
+ * \param Callback A pointer to a callback function.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status
+ */
+NTSTATUS PhEnumObjectIdInformation(
+    _In_ HANDLE FileHandle,
+    _In_ PPH_ENUM_OBJECT_ID Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    BOOLEAN firstTime = TRUE;
+    ULONG bufferSize;
+    PVOID buffer;
+
+    bufferSize = sizeof(FILE_OBJECTID_INFORMATION[128]);
+    buffer = PhAllocate(bufferSize);
+
+    while (TRUE)
+    {
+        status = NtQueryDirectoryFile(
+            FileHandle,
+            NULL,
+            NULL,
+            NULL,
+            &isb,
+            buffer,
+            bufferSize,
+            FileObjectIdInformation,
+            FALSE,
+            NULL,
+            firstTime
+            );
+
+        if (status == STATUS_PENDING)
+        {
+            status = NtWaitForSingleObject(FileHandle, FALSE, NULL);
+
+            if (NT_SUCCESS(status))
+                status = isb.Status;
+        }
+
+        if (status == STATUS_NO_MORE_FILES)
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        status = Callback(FileHandle, buffer, isb.Information, Context);
+
+        if (status == STATUS_NO_MORE_FILES)
+        {
+            status = STATUS_SUCCESS;
+            break;
+        }
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        firstTime = FALSE;
+    }
+
+    PhFree(buffer);
+
+    return status;
+}
+
 NTSTATUS PhEnumFileExtendedAttributes(
     _In_ HANDLE FileHandle,
     _In_ PPH_ENUM_FILE_EA Callback,
@@ -7585,11 +8069,9 @@ NTSTATUS PhEnumFileExtendedAttributes(
 {
     NTSTATUS status;
     BOOLEAN firstTime = TRUE;
-    BOOLEAN success = FALSE;
     IO_STATUS_BLOCK isb;
     ULONG bufferSize;
     PVOID buffer;
-    PFILE_FULL_EA_INFORMATION i;
 
     bufferSize = 0x400;
     buffer = PhAllocate(bufferSize);
@@ -7639,18 +8121,15 @@ NTSTATUS PhEnumFileExtendedAttributes(
         if (!NT_SUCCESS(status))
             break;
 
-        success = TRUE;
+        status = Callback(FileHandle, buffer, Context);
 
-        for (i = PH_FIRST_FILE_EA(buffer); i; i = PH_NEXT_FILE_EA(i))
+        if (status == STATUS_NO_MORE_FILES)
         {
-            if (!Callback(i, Context))
-            {
-                success = FALSE;
-                break;
-            }
+            status = STATUS_SUCCESS;
+            break;
         }
 
-        if (!success)
+        if (!NT_SUCCESS(status))
             break;
 
         firstTime = FALSE;
@@ -7717,36 +8196,6 @@ NTSTATUS PhEnumFileStreams(
         );
 }
 
-NTSTATUS PhEnumFileStreamsEx(
-    _In_ HANDLE FileHandle,
-    _In_ PPH_ENUM_FILE_STREAMS Callback,
-    _In_opt_ PVOID Context
-    )
-{
-    NTSTATUS status;
-    PVOID buffer;
-    PFILE_STREAM_INFORMATION i;
-
-    status = PhpQueryFileVariableSize(
-        FileHandle,
-        FileStreamInformation,
-        &buffer
-        );
-
-    if (NT_SUCCESS(status))
-    {
-        for (i = PH_FIRST_STREAM(buffer); i; i = PH_NEXT_STREAM(i))
-        {
-            if (!Callback(i, Context))
-                break;
-        }
-
-        PhFree(buffer);
-    }
-
-    return status;
-}
-
 NTSTATUS PhEnumFileHardLinks(
     _In_ HANDLE FileHandle,
     _Out_ PVOID *HardLinks
@@ -7759,38 +8208,9 @@ NTSTATUS PhEnumFileHardLinks(
         );
 }
 
-NTSTATUS PhEnumFileHardLinksEx(
-    _In_ HANDLE FileHandle,
-    _In_ PPH_ENUM_FILE_HARDLINKS Callback,
-    _In_opt_ PVOID Context
-    )
-{
-    NTSTATUS status;
-    PFILE_LINKS_INFORMATION buffer;
-    PFILE_LINK_ENTRY_INFORMATION i;
-
-    status = PhpQueryFileVariableSize(
-        FileHandle,
-        FileHardLinkInformation,
-        &buffer
-        );
-
-    if (NT_SUCCESS(status))
-    {
-        for (i = PH_FIRST_LINK(&buffer->Entry); i; i = PH_NEXT_LINK(i))
-        {
-            if (!Callback(i, Context))
-                break;
-        }
-
-        PhFree(buffer);
-    }
-
-    return status;
-}
-
 NTSTATUS PhCreateSymbolicLinkObject(
     _Out_ PHANDLE LinkHandle,
+    _In_ ACCESS_MASK DesiredAccess,
     _In_ PPH_STRINGREF FileName,
     _In_ PPH_STRINGREF LinkName
     )
@@ -7816,7 +8236,7 @@ NTSTATUS PhCreateSymbolicLinkObject(
 
     status = NtCreateSymbolicLinkObject(
         &linkHandle,
-        MAXIMUM_ALLOWED,
+        DesiredAccess,
         &objectAttributes,
         &objectTarget
         );
@@ -7830,8 +8250,9 @@ NTSTATUS PhCreateSymbolicLinkObject(
 }
 
 NTSTATUS PhQuerySymbolicLinkObject(
-    _In_ PPH_STRINGREF Name,
-    _Out_ PPH_STRING* LinkTarget
+    _Out_ PPH_STRING* LinkTarget,
+    _In_opt_ HANDLE RootDirectory,
+    _In_ PPH_STRINGREF ObjectName
     )
 {
     NTSTATUS status;
@@ -7841,14 +8262,14 @@ NTSTATUS PhQuerySymbolicLinkObject(
     UNICODE_STRING targetName;
     WCHAR targetNameBuffer[DOS_MAX_PATH_LENGTH];
 
-    if (!PhStringRefToUnicodeString(Name, &objectName))
+    if (!PhStringRefToUnicodeString(ObjectName, &objectName))
         return STATUS_NAME_TOO_LONG;
 
     InitializeObjectAttributes(
         &objectAttributes,
         &objectName,
         OBJ_CASE_INSENSITIVE,
-        NULL,
+        RootDirectory,
         NULL
         );
 
@@ -8064,6 +8485,262 @@ VOID PhUpdateDosDevicePrefixes(
     PhReleaseQueuedLockExclusive(&PhDevicePrefixesLock);
 }
 
+// rev from FindFirstVolumeW (dmex)
+/**
+ * \brief Retrieves the mount points of volumes.
+ *
+ * \param DeviceHandle A handle to the MountPointManager.
+ * \param MountPoints An array of mounts.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhGetVolumeMountPoints(
+    _In_ HANDLE DeviceHandle,
+    _Out_ PMOUNTMGR_MOUNT_POINTS* MountPoints
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    MOUNTMGR_MOUNT_POINT inputBuffer = { 0 };
+    PMOUNTMGR_MOUNT_POINTS outputBuffer;
+    ULONG inputBufferLength = sizeof(inputBuffer);
+    ULONG outputBufferLength;
+    ULONG attempts = 16;
+
+    outputBufferLength = 0x800;
+    outputBuffer = PhAllocate(outputBufferLength);
+
+    do
+    {
+        status = NtDeviceIoControlFile(
+            DeviceHandle,
+            NULL,
+            NULL,
+            NULL,
+            &isb,
+            IOCTL_MOUNTMGR_QUERY_POINTS,
+            &inputBuffer,
+            inputBufferLength,
+            outputBuffer,
+            outputBufferLength
+            );
+
+        if (NT_SUCCESS(status))
+            break;
+
+        if (status == STATUS_BUFFER_OVERFLOW)
+        {
+            outputBufferLength = outputBuffer->Size;
+            PhFree(outputBuffer);
+            outputBuffer = PhAllocate(outputBufferLength);
+        }
+        else
+        {
+            PhFree(outputBuffer);
+            return status;
+        }
+    } while (--attempts);
+
+    if (NT_SUCCESS(status))
+    {
+        *MountPoints = outputBuffer;
+    }
+    else
+    {
+        PhFree(outputBuffer);
+    }
+
+    return status;
+}
+
+// rev from GetVolumePathNamesForVolumeNameW (dmex)
+/**
+ * \brief Retrieves a list of drive letters and mounted folder paths for the specified volume.
+ *
+ * \param DeviceHandle A handle to the MountPointManager.
+ * \param VolumeName A volume GUID path for the volume.
+ * \param VolumePathNames A pointer to a buffer that receives the list of drive letters and mounted folder paths.
+ * \a The list is an array of null-terminated strings terminated by an additional NULL character.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhGetVolumePathNamesForVolumeName(
+    _In_ HANDLE DeviceHandle,
+    _In_ PPH_STRINGREF VolumeName,
+    _Out_ PMOUNTMGR_VOLUME_PATHS* VolumePathNames
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    PMOUNTMGR_TARGET_NAME inputBuffer;
+    PMOUNTMGR_VOLUME_PATHS outputBuffer;
+    ULONG inputBufferLength;
+    ULONG outputBufferLength;
+    ULONG attempts = 16;
+
+    inputBufferLength = UFIELD_OFFSET(MOUNTMGR_TARGET_NAME, DeviceName[VolumeName->Length]) + sizeof(UNICODE_NULL);
+    inputBuffer = PhAllocate(inputBufferLength); // Volume{guid}, CM_Get_Device_Interface_List, SymbolicLinks, [??]
+    inputBuffer->DeviceNameLength = (USHORT)VolumeName->Length;
+    RtlCopyMemory(inputBuffer->DeviceName, VolumeName->Buffer, VolumeName->Length);
+
+    outputBufferLength = UFIELD_OFFSET(MOUNTMGR_VOLUME_PATHS, MultiSz[DOS_MAX_PATH_LENGTH]) + sizeof(UNICODE_NULL);
+    outputBuffer = PhAllocate(outputBufferLength);
+
+    do
+    {
+        status = NtDeviceIoControlFile(
+            DeviceHandle,
+            NULL,
+            NULL,
+            NULL,
+            &isb,
+            IOCTL_MOUNTMGR_QUERY_DOS_VOLUME_PATHS,
+            inputBuffer,
+            inputBufferLength,
+            outputBuffer,
+            outputBufferLength
+            );
+
+        if (NT_SUCCESS(status))
+            break;
+
+        if (status == STATUS_BUFFER_OVERFLOW)
+        {
+            outputBufferLength = (outputBuffer->MultiSzLength * sizeof(WCHAR)) + sizeof(UNICODE_NULL);
+            PhFree(outputBuffer);
+            outputBuffer = PhAllocate(outputBufferLength);
+        }
+        else
+        {
+            PhFree(inputBuffer);
+            PhFree(outputBuffer);
+            return status;
+        }
+    } while (--attempts);
+
+    if (NT_SUCCESS(status))
+    {
+        *VolumePathNames = outputBuffer;
+    }
+    else
+    {
+        PhFree(outputBuffer);
+    }
+
+    PhFree(inputBuffer);
+
+    return status;
+}
+
+NTSTATUS PhUpdateDosDeviceMountPrefixes(
+    VOID
+    )
+{
+    NTSTATUS status;
+    HANDLE deviceHandle;
+    UNICODE_STRING objectName;
+    OBJECT_ATTRIBUTES objectAttributes;
+    IO_STATUS_BLOCK ioStatusBlock;
+    PMOUNTMGR_MOUNT_POINTS deviceMountPoints;
+
+    RtlInitUnicodeString(&objectName, MOUNTMGR_DEVICE_NAME);
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &objectName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL
+        );
+
+    status = NtCreateFile(
+        &deviceHandle,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        &objectAttributes,
+        &ioStatusBlock,
+        NULL,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+        NULL,
+        0
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhGetVolumeMountPoints(
+        deviceHandle,
+        &deviceMountPoints
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    for (ULONG i = 0; i < RTL_NUMBER_OF(PhDevicePrefixes); i++)
+    {
+        PhDevicePrefixes[i].Length = 0;
+    }
+
+    for (ULONG i = 0; i < deviceMountPoints->NumberOfMountPoints; i++)
+    {
+        PMOUNTMGR_MOUNT_POINT entry = &deviceMountPoints->MountPoints[i];
+        UNICODE_STRING linkName =
+        {
+            entry->SymbolicLinkNameLength,
+            entry->SymbolicLinkNameLength + sizeof(UNICODE_NULL),
+            PTR_ADD_OFFSET(deviceMountPoints, entry->SymbolicLinkNameOffset)
+        };
+        UNICODE_STRING deviceName =
+        {
+            entry->DeviceNameLength,
+            entry->DeviceNameLength + sizeof(UNICODE_NULL),
+            PTR_ADD_OFFSET(deviceMountPoints, entry->DeviceNameOffset)
+        };
+
+        if (MOUNTMGR_IS_DRIVE_LETTER(&linkName)) // \\DosDevices\\C:
+        {
+            USHORT index = (USHORT)(linkName.Buffer[12] - L'A');
+
+            if (index >= RTL_NUMBER_OF(PhDevicePrefixes))
+                continue;
+            if (deviceName.Length >= PhDevicePrefixes[index].MaximumLength - sizeof(UNICODE_NULL))
+                continue;
+
+            PhDevicePrefixes[index].Length = deviceName.Length;
+            memcpy_s(
+                PhDevicePrefixes[index].Buffer,
+                PhDevicePrefixes[index].MaximumLength,
+                deviceName.Buffer,
+                deviceName.Length
+                );
+        }
+
+        //if (MOUNTMGR_IS_VOLUME_NAME(&linkName)) // \\??\\Volume{1111-2222}
+        //{
+        //    PH_STRINGREF volumeLinkName;
+        //    PMOUNTMGR_VOLUME_PATHS volumePaths;
+        //
+        //    PhUnicodeStringToStringRef(&linkName, &volumeLinkName);
+        //
+        //    if (NT_SUCCESS(PhGetVolumePathNamesForVolumeName(deviceHandle, &volumeLinkName, &volumePaths)))
+        //    {
+        //        for (PWSTR path = volumePaths->MultiSz; *path; path += PhCountStringZ(path) + 1)
+        //        {
+        //            dprintf("%S\n", path); // C:\\Mounted\\Folders
+        //        }
+        //    }
+        //}
+    }
+
+    PhFree(deviceMountPoints);
+
+CleanupExit:
+    NtClose(deviceHandle);
+
+    return status;
+}
+
 /**
  * Resolves a NT path into a Win32 path.
  *
@@ -8084,6 +8761,8 @@ PPH_STRING PhResolveDevicePrefix(
         PhpInitializeDevicePrefixes();
         PhUpdateDosDevicePrefixes();
         PhUpdateMupDevicePrefixes();
+
+        //PhUpdateDosDeviceMountPrefixes();
 
         PhEndInitOnce(&PhDevicePrefixesInitOnce);
     }
@@ -8295,37 +8974,292 @@ PPH_STRING PhDosPathNameToNtPathName(
         PhEndInitOnce(&PhDevicePrefixesInitOnce);
     }
 
-    if (!PATH_IS_WIN32_DRIVE_PREFIX(Name))
-        return NULL;
+    if (PATH_IS_WIN32_DRIVE_PREFIX(Name))
+    {
+        index = (ULONG)(Name->Buffer[0] - L'A');
 
-    index = (ULONG)(Name->Buffer[0] - L'A');
+        if (index >= RTL_NUMBER_OF(PhDevicePrefixes))
+            return NULL;
 
-    if (index >= RTL_NUMBER_OF(PhDevicePrefixes))
-        return NULL;
+        PhAcquireQueuedLockShared(&PhDevicePrefixesLock);
+        PhUnicodeStringToStringRef(&PhDevicePrefixes[index], &prefix);
+
+        if (prefix.Length != 0)
+        {
+            // C:\\Name -> \\Device\\HardDiskVolumeX\\Name
+            newName = PhCreateStringEx(NULL, prefix.Length + Name->Length - sizeof(WCHAR[2]));
+            memcpy(
+                newName->Buffer,
+                prefix.Buffer,
+                prefix.Length
+                );
+            memcpy(
+                PTR_ADD_OFFSET(newName->Buffer, prefix.Length),
+                PTR_ADD_OFFSET(Name->Buffer, sizeof(WCHAR[2])),
+                Name->Length - sizeof(WCHAR[2])
+                );
+        }
+
+        PhReleaseQueuedLockShared(&PhDevicePrefixesLock);
+    }
+    else if (PhStartsWithStringRef2(Name, L"\\SystemRoot", TRUE))
+    {
+        PhAcquireQueuedLockShared(&PhDevicePrefixesLock);
+        PhUnicodeStringToStringRef(&PhDevicePrefixes[(ULONG)'C'-'A'], &prefix);
+
+        if (prefix.Length != 0)
+        {
+            static PH_STRINGREF systemRoot = PH_STRINGREF_INIT(L"\\Windows");
+
+            // \\SystemRoot\\Name -> \\Device\\HardDiskVolumeX\\Windows\\Name
+            newName = PhCreateStringEx(NULL, prefix.Length + Name->Length + systemRoot.Length - sizeof(L"SystemRoot"));
+            memcpy(
+                newName->Buffer,
+                prefix.Buffer,
+                prefix.Length
+                );
+            memcpy(
+                PTR_ADD_OFFSET(newName->Buffer, prefix.Length),
+                systemRoot.Buffer,
+                systemRoot.Length
+                );
+            memcpy(
+                PTR_ADD_OFFSET(newName->Buffer, prefix.Length + systemRoot.Length),
+                PTR_ADD_OFFSET(Name->Buffer, sizeof(L"SystemRoot")),
+                Name->Length - sizeof(L"SystemRoot")
+                );
+        }
+
+        PhReleaseQueuedLockShared(&PhDevicePrefixesLock);
+    }
+
+    return newName;
+}
+
+NTSTATUS PhDosLongPathNameToNtPathNameWithStatus(
+    _In_ PCWSTR DosFileName,
+    _Out_ PUNICODE_STRING NtFileName,
+    _Outptr_opt_result_z_ PWSTR* FilePart,
+    _Out_opt_ PRTL_RELATIVE_NAME_U RelativeName
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static NTSTATUS (NTAPI* RtlDosLongPathNameToNtPathName_I_WithStatus)(
+        _In_ PCWSTR DosFileName,
+        _Out_ PUNICODE_STRING NtFileName,
+        _Out_opt_ PWSTR * FilePart,
+        _Out_opt_ PRTL_RELATIVE_NAME_U RelativeName
+        ) = NULL;
+    NTSTATUS status;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        if (WindowsVersion >= WINDOWS_10_RS1) // RtlAreLongPathsEnabled() // always true
+        {
+            PVOID baseAddress;
+
+            if (baseAddress = PhGetLoaderEntryDllBaseZ(L"ntdll.dll"))
+            {
+                RtlDosLongPathNameToNtPathName_I_WithStatus = PhGetDllBaseProcedureAddress(baseAddress, "RtlDosLongPathNameToNtPathName_U_WithStatus", 0);
+            }
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (RtlDosLongPathNameToNtPathName_I_WithStatus)
+    {
+        status = RtlDosLongPathNameToNtPathName_I_WithStatus(
+            DosFileName,
+            NtFileName,
+            FilePart,
+            RelativeName
+            );
+    }
+    else
+    {
+        status = RtlDosPathNameToNtPathName_U_WithStatus(
+            DosFileName,
+            NtFileName,
+            FilePart,
+            RelativeName
+            );
+    }
+
+    return status;
+}
+
+PPH_STRING PhGetNtPathRootPrefix(
+    _In_ PPH_STRINGREF Name
+    )
+{
+    PPH_STRING pathDevicePrefix = NULL;
+    PH_STRINGREF prefix;
 
     PhAcquireQueuedLockShared(&PhDevicePrefixesLock);
 
-    PhUnicodeStringToStringRef(&PhDevicePrefixes[index], &prefix);
-
-    if (prefix.Length != 0)
+    for (ULONG i = 0; i < RTL_NUMBER_OF(PhDevicePrefixes); i++)
     {
-        // \Device\HardDiskVolumeX\Name
-        newName = PhCreateStringEx(NULL, prefix.Length + Name->Length - sizeof(WCHAR[2]));
-        memcpy(
-            newName->Buffer,
-            prefix.Buffer,
-            prefix.Length
-            );
-        memcpy(
-            PTR_ADD_OFFSET(newName->Buffer, prefix.Length),
-            PTR_ADD_OFFSET(Name->Buffer, sizeof(WCHAR[2])),
-            Name->Length - sizeof(WCHAR[2])
-            );
+        PhUnicodeStringToStringRef(&PhDevicePrefixes[i], &prefix);
+
+        if (prefix.Length && PhStartsWithStringRef(Name, &prefix, FALSE))
+        {
+            pathDevicePrefix = PhCreateString2(&prefix);
+            break;
+        }
     }
 
     PhReleaseQueuedLockShared(&PhDevicePrefixesLock);
 
-    return newName;
+    return pathDevicePrefix;
+}
+
+PPH_STRING PhGetExistingPathPrefix(
+    _In_ PPH_STRINGREF Name
+    )
+{
+    PPH_STRING existingPathPrefix = NULL;
+    PH_STRINGREF remainingPart;
+    PH_STRINGREF directoryPart;
+    PH_STRINGREF baseNamePart;
+
+    if (PATH_IS_WIN32_DRIVE_PREFIX(Name))
+    {
+        assert(FALSE);
+        return NULL;
+    }
+
+    if (PhDoesDirectoryExist(Name))
+    {
+        return PhCreateString2(Name);
+    }
+
+    remainingPart = *Name;
+
+    while (remainingPart.Length != 0)
+    {
+        PhSplitStringRefAtLastChar(&remainingPart, OBJ_NAME_PATH_SEPARATOR, &directoryPart, &baseNamePart);
+
+        if (directoryPart.Length != 0)
+        {
+            if (PhDoesDirectoryExist(&directoryPart))
+            {
+                existingPathPrefix = PhCreateString2(&directoryPart);
+                break;
+            }
+        }
+
+        remainingPart = directoryPart;
+    }
+
+    //if (PhEqualStringRef(&existingPathPrefix, PhGetNtPathRootPrefix(Name), FALSE))
+    //    return NULL;
+
+    return existingPathPrefix;
+}
+
+PPH_STRING PhGetExistingPathPrefixWin32(
+    _In_ PPH_STRINGREF Name
+    )
+{
+    PPH_STRING existingPathPrefix = NULL;
+    PH_STRINGREF remainingPart;
+    PH_STRINGREF directoryPart;
+    PH_STRINGREF baseNamePart;
+
+    if (!PATH_IS_WIN32_DRIVE_PREFIX(Name))
+    {
+        assert(FALSE);
+        return NULL;
+    }
+
+    if (PhDoesDirectoryExistWin32(PhGetStringRefZ(Name)))
+    {
+        return PhCreateString2(Name);
+    }
+
+    remainingPart = *Name;
+
+    while (remainingPart.Length != 0)
+    {
+        PhSplitStringRefAtLastChar(&remainingPart, OBJ_NAME_PATH_SEPARATOR, &directoryPart, &baseNamePart);
+
+        if (directoryPart.Length != 0)
+        {
+            existingPathPrefix = PhCreateString2(&directoryPart);
+
+            if (PhDoesDirectoryExistWin32(PhGetString(existingPathPrefix)))
+                break;
+
+            PhClearReference(&existingPathPrefix);
+        }
+
+        remainingPart = directoryPart;
+    }
+
+    return existingPathPrefix;
+}
+
+// rev from GetLongPathNameW (dmex)
+PPH_STRING PhGetLongPathName(
+    _In_ PPH_STRINGREF FileName
+    )
+{
+    PPH_STRING longPathName = NULL;
+    NTSTATUS status;
+    HANDLE fileHandle;
+    IO_STATUS_BLOCK ioStatusBlock;
+    PFILE_BOTH_DIR_INFORMATION directoryInfoBuffer;
+    ULONG directoryInfoLength;
+    PH_STRINGREF baseNamePart;
+    UNICODE_STRING baseNameUs;
+
+    status = PhOpenFile(
+        &fileHandle,
+        FileName,
+        FILE_READ_DATA | FILE_LIST_DIRECTORY | SYNCHRONIZE,
+        NULL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT,
+        NULL
+        );
+
+    if (!NT_SUCCESS(status))
+        return NULL;
+
+    if (!PhGetBasePath(FileName, NULL, &baseNamePart))
+        goto CleanupExit;
+    if (!PhStringRefToUnicodeString(&baseNamePart, &baseNameUs))
+        goto CleanupExit;
+
+    directoryInfoLength = PAGE_SIZE;
+    directoryInfoBuffer = PhAllocate(directoryInfoLength);
+
+    status = NtQueryDirectoryFile(
+        fileHandle,
+        NULL,
+        NULL,
+        NULL,
+        &ioStatusBlock,
+        directoryInfoBuffer,
+        directoryInfoLength,
+        FileBothDirectoryInformation,
+        TRUE,
+        &baseNameUs,
+        FALSE
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        longPathName = PhCreateStringEx(directoryInfoBuffer->FileName, directoryInfoBuffer->FileNameLength);
+    }
+
+    PhFree(directoryInfoBuffer);
+
+CleanupExit:
+    NtClose(fileHandle);
+
+    return longPathName;
 }
 
 typedef struct _ENUM_GENERIC_PROCESS_MODULES_CONTEXT
@@ -8843,14 +9777,16 @@ VOID PhpInitializePredefineKeys(
 
     if (NT_SUCCESS(status = PhGetTokenUser(PhGetOwnTokenAttributes().TokenHandle, &tokenUser)))
     {
-        stringSid.Buffer = stringSidBuffer;
-        stringSid.MaximumLength = sizeof(stringSidBuffer);
+        RtlInitEmptyUnicodeString(&stringSid, stringSidBuffer, sizeof(stringSidBuffer));
 
-        status = RtlConvertSidToUnicodeString(
-            &stringSid,
-            tokenUser.User.Sid,
-            FALSE
-            );
+        if (PhEqualSid(tokenUser.User.Sid, &PhSeLocalSystemSid))
+        {
+            status = RtlInitUnicodeStringEx(&stringSid, L".DEFAULT");
+        }
+        else
+        {
+            status = RtlConvertSidToUnicodeString(&stringSid, tokenUser.User.Sid, FALSE);
+        }
     }
 
     // Construct the current user key name.
@@ -8859,7 +9795,8 @@ VOID PhpInitializePredefineKeys(
     {
         currentUserKeyName = &PhPredefineKeyNames[PH_KEY_CURRENT_USER_NUMBER];
         currentUserKeyName->Length = currentUserPrefix.Length + stringSid.Length;
-        currentUserKeyName->Buffer = PhAllocate(currentUserKeyName->Length + sizeof(UNICODE_NULL));
+        currentUserKeyName->MaximumLength = currentUserKeyName->Length + sizeof(UNICODE_NULL);
+        currentUserKeyName->Buffer = PhAllocate(currentUserKeyName->MaximumLength);
         memcpy(currentUserKeyName->Buffer, currentUserPrefix.Buffer, currentUserPrefix.Length);
         memcpy(&currentUserKeyName->Buffer[currentUserPrefix.Length / sizeof(WCHAR)], stringSid.Buffer, stringSid.Length);
     }
@@ -9123,7 +10060,7 @@ NTSTATUS PhLoadAppKey(
     }
 #endif
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -9391,7 +10328,7 @@ NTSTATUS PhEnumerateKey(
     bufferSize = 0x100;
     buffer = PhAllocate(bufferSize);
 
-    do
+    while (TRUE)
     {
         status = NtEnumerateKey(
             KeyHandle,
@@ -9430,7 +10367,7 @@ NTSTATUS PhEnumerateKey(
             break;
 
         index++;
-    } while (TRUE);
+    }
 
     PhFree(buffer);
 
@@ -9452,7 +10389,7 @@ NTSTATUS PhEnumerateValueKey(
     bufferSize = 0x100;
     buffer = PhAllocate(bufferSize);
 
-    do
+    while (TRUE)
     {
         status = NtEnumerateValueKey(
             KeyHandle,
@@ -9491,7 +10428,7 @@ NTSTATUS PhEnumerateValueKey(
             break;
 
         index++;
-    } while (TRUE);
+    }
 
     PhFree(buffer);
 
@@ -9593,7 +10530,7 @@ NTSTATUS PhCreateFileWin32Ex(
     OBJECT_ATTRIBUTES objectAttributes;
     IO_STATUS_BLOCK ioStatusBlock;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -9624,6 +10561,27 @@ NTSTATUS PhCreateFileWin32Ex(
         NULL,
         0
         );
+
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            AllocationSize,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
 
     RtlFreeUnicodeString(&fileName);
 
@@ -9658,7 +10616,7 @@ NTSTATUS PhCreateFileWin32ExAlt(
     IO_STATUS_BLOCK ioStatusBlock;
     EXTENDED_CREATE_INFORMATION extendedInfo;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -9693,6 +10651,27 @@ NTSTATUS PhCreateFileWin32ExAlt(
         sizeof(EXTENDED_CREATE_INFORMATION)
         );
 
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            AllocationSize,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions | FILE_CONTAINS_EXTENDED_CREATE_INFORMATION,
+            &extendedInfo,
+            sizeof(EXTENDED_CREATE_INFORMATION),
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
+
     RtlFreeUnicodeString(&fileName);
 
     if (NT_SUCCESS(status))
@@ -9706,6 +10685,27 @@ NTSTATUS PhCreateFileWin32ExAlt(
     return status;
 }
 
+/**
+ * Creates or opens a file.
+ *
+ * \param FileHandle A variable that receives the file handle.
+ * \param FileName The Win32 file name.
+ * \param DesiredAccess The desired access to the file.
+ * \param FileAttributes File attributes applied if the file is created or overwritten.
+ * \param ShareAccess The file access granted to other threads.
+ * \li \c FILE_SHARE_READ Allows other threads to read from the file.
+ * \li \c FILE_SHARE_WRITE Allows other threads to write to the file.
+ * \li \c FILE_SHARE_DELETE Allows other threads to delete the file.
+ * \param CreateDisposition The action to perform if the file does or does not exist.
+ * \li \c FILE_SUPERSEDE If the file exists, replace it. Otherwise, create the file.
+ * \li \c FILE_CREATE If the file exists, fail. Otherwise, create the file.
+ * \li \c FILE_OPEN If the file exists, open it. Otherwise, fail.
+ * \li \c FILE_OPEN_IF If the file exists, open it. Otherwise, create the file.
+ * \li \c FILE_OVERWRITE If the file exists, open and overwrite it. Otherwise, fail.
+ * \li \c FILE_OVERWRITE_IF If the file exists, open and overwrite it. Otherwise, create the file.
+ * \param CreateOptions The options to apply when the file is opened or created.
+ * \return Successful or errant status.
+ */
 NTSTATUS PhCreateFile(
     _Out_ PHANDLE FileHandle,
     _In_ PPH_STRINGREF FileName,
@@ -9747,10 +10747,143 @@ NTSTATUS PhCreateFile(
         0
         );
 
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            NULL,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
+
     if (NT_SUCCESS(status))
     {
         *FileHandle = fileHandle;
     }
+
+    return status;
+}
+
+/**
+ * Creates or opens a file.
+ *
+ * \param FileHandle A variable that receives the file handle.
+ * \param FileName The Win32 file name.
+ * \param DesiredAccess The desired access to the file.
+ * \param RootDirectory The root object directory for the file.
+ * \param AllocationSize The initial allocation size if the file is being created, overwritten, or superseded.
+ * \param FileAttributes File attributes applied if the file is created or overwritten.
+ * \param ShareAccess The file access granted to other threads.
+ * \li \c FILE_SHARE_READ Allows other threads to read from the file.
+ * \li \c FILE_SHARE_WRITE Allows other threads to write to the file.
+ * \li \c FILE_SHARE_DELETE Allows other threads to delete the file.
+ * \param CreateDisposition The action to perform if the file does or does not exist.
+ * \li \c FILE_SUPERSEDE If the file exists, replace it. Otherwise, create the file.
+ * \li \c FILE_CREATE If the file exists, fail. Otherwise, create the file.
+ * \li \c FILE_OPEN If the file exists, open it. Otherwise, fail.
+ * \li \c FILE_OPEN_IF If the file exists, open it. Otherwise, create the file.
+ * \li \c FILE_OVERWRITE If the file exists, open and overwrite it. Otherwise, fail.
+ * \li \c FILE_OVERWRITE_IF If the file exists, open and overwrite it. Otherwise, create the file.
+ * \param CreateOptions The options to apply when the file is opened or created.
+ * \param CreateStatus A variable that receives creation information.
+ * \li \c FILE_SUPERSEDED The file was replaced because \c FILE_SUPERSEDE was specified in
+ * \a CreateDisposition.
+ * \li \c FILE_OPENED The file was opened because \c FILE_OPEN or \c FILE_OPEN_IF was specified in
+ * \a CreateDisposition.
+ * \li \c FILE_CREATED The file was created because \c FILE_CREATE or \c FILE_OPEN_IF was specified
+ * in \a CreateDisposition.
+ * \li \c FILE_OVERWRITTEN The file was overwritten because \c FILE_OVERWRITE or
+ * \c FILE_OVERWRITE_IF was specified in \a CreateDisposition.
+ * \li \c FILE_EXISTS The file was not opened because it already existed and \c FILE_CREATE was
+ * specified in \a CreateDisposition.
+ * \li \c FILE_DOES_NOT_EXIST The file was not opened because it did not exist and \c FILE_OPEN or
+ * \c FILE_OVERWRITE was specified in \a CreateDisposition.
+ * \return Successful or errant status.
+ */
+NTSTATUS PhCreateFileEx(
+    _Out_ PHANDLE FileHandle,
+    _In_ PPH_STRINGREF FileName,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_opt_ HANDLE RootDirectory,
+    _In_opt_ PLARGE_INTEGER AllocationSize,
+    _In_ ULONG FileAttributes,
+    _In_ ULONG ShareAccess,
+    _In_ ULONG CreateDisposition,
+    _In_ ULONG CreateOptions,
+    _Out_opt_ PULONG CreateStatus
+    )
+{
+    NTSTATUS status;
+    HANDLE fileHandle;
+    UNICODE_STRING fileName;
+    OBJECT_ATTRIBUTES objectAttributes;
+    IO_STATUS_BLOCK ioStatusBlock;
+
+    if (!PhStringRefToUnicodeString(FileName, &fileName))
+        return STATUS_NAME_TOO_LONG;
+
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &fileName,
+        OBJ_CASE_INSENSITIVE,
+        RootDirectory,
+        NULL
+        );
+
+    status = NtCreateFile(
+        &fileHandle,
+        DesiredAccess,
+        &objectAttributes,
+        &ioStatusBlock,
+        AllocationSize,
+        FileAttributes,
+        ShareAccess,
+        CreateDisposition,
+        CreateOptions,
+        NULL,
+        0
+        );
+
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess &&
+        CreateDisposition == KPH_FILE_READ_DISPOSITION)
+    {
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            AllocationSize,
+            FileAttributes,
+            ShareAccess,
+            CreateDisposition,
+            CreateOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
+
+    if (NT_SUCCESS(status))
+    {
+        *FileHandle = fileHandle;
+    }
+
+    if (CreateStatus)
+        *CreateStatus = (ULONG)ioStatusBlock.Information;
 
     return status;
 }
@@ -9788,7 +10921,7 @@ NTSTATUS PhOpenFileWin32Ex(
     OBJECT_ATTRIBUTES objectAttributes;
     IO_STATUS_BLOCK ioStatusBlock;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -9945,7 +11078,7 @@ NTSTATUS PhOpenFileById(
     return status;
 }
 
-// rev from ReOpenFile
+// rev from ReOpenFile (dmex)
 /**
  * Reopens the specified file handle with different access rights, sharing mode, and flags.
  * Note: This function creates new FILE_OBJECTs compared to other functions simply referencing the existing object.
@@ -9955,6 +11088,8 @@ NTSTATUS PhOpenFileById(
  * \param DesiredAccess The desired access to the file.
  * \param ShareAccess The file access granted to other threads.
  * \param OpenOptions The options to apply when the file is opened.
+ *
+ * \return Successful or errant status.
  */
 NTSTATUS PhReOpenFile(
     _Out_ PHANDLE FileHandle,
@@ -9970,7 +11105,7 @@ NTSTATUS PhReOpenFile(
     OBJECT_ATTRIBUTES objectAttributes;
     IO_STATUS_BLOCK ioStatusBlock;
 
-    RtlInitEmptyUnicodeString(&fileName, NULL, 0); // required
+    RtlInitEmptyUnicodeString(&fileName, NULL, 0);
     InitializeObjectAttributes(
         &objectAttributes,
         &fileName,
@@ -9992,6 +11127,28 @@ NTSTATUS PhReOpenFile(
         NULL,
         0
         );
+
+    if (status == STATUS_SHARING_VIOLATION &&
+        KphLevel() >= KphLevelMed &&
+        (DesiredAccess & KPH_FILE_READ_ACCESS) == DesiredAccess)
+    {
+        assert(KPH_FILE_READ_DISPOSITION == FILE_OPEN);
+
+        status = KphCreateFile(
+            &fileHandle,
+            DesiredAccess,
+            &objectAttributes,
+            &ioStatusBlock,
+            NULL,
+            0,
+            ShareAccess,
+            FILE_OPEN,
+            OpenOptions,
+            NULL,
+            0,
+            IO_IGNORE_SHARE_ACCESS_CHECK
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -10016,7 +11173,7 @@ NTSTATUS PhQueryFullAttributesFileWin32(
     UNICODE_STRING fileName;
     OBJECT_ATTRIBUTES objectAttributes;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -10046,6 +11203,7 @@ NTSTATUS PhQueryFullAttributesFile(
     _Out_ PFILE_NETWORK_OPEN_INFORMATION FileInformation
     )
 {
+    NTSTATUS status;
     UNICODE_STRING fileName;
     OBJECT_ATTRIBUTES objectAttributes;
 
@@ -10060,7 +11218,9 @@ NTSTATUS PhQueryFullAttributesFile(
         NULL
         );
 
-    return NtQueryFullAttributesFile(&objectAttributes, FileInformation);
+    status = NtQueryFullAttributesFile(&objectAttributes, FileInformation);
+
+    return status;
 }
 
 NTSTATUS PhQueryAttributesFileWin32(
@@ -10072,7 +11232,7 @@ NTSTATUS PhQueryAttributesFileWin32(
     UNICODE_STRING fileName;
     OBJECT_ATTRIBUTES objectAttributes;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         FileName,
         &fileName,
         NULL,
@@ -10102,6 +11262,7 @@ NTSTATUS PhQueryAttributesFile(
     _Out_ PFILE_BASIC_INFORMATION FileInformation
     )
 {
+    NTSTATUS status;
     UNICODE_STRING fileName;
     OBJECT_ATTRIBUTES objectAttributes;
 
@@ -10116,7 +11277,9 @@ NTSTATUS PhQueryAttributesFile(
         NULL
         );
 
-    return NtQueryAttributesFile(&objectAttributes, FileInformation);
+    status = NtQueryAttributesFile(&objectAttributes, FileInformation);
+
+    return status;
 }
 
 // rev from RtlDoesFileExists_U (dmex)
@@ -10198,11 +11361,44 @@ BOOLEAN PhDoesDirectoryExist(
     return FALSE;
 }
 
+// rev from RtlDetermineDosPathNameType_U (dmex)
 RTL_PATH_TYPE PhDetermineDosPathNameType(
-    _In_ PWSTR FileName
+    _In_ PPH_STRINGREF FileName
     )
 {
+#if (PHNT_USE_NATIVE_PATHTYPE)
     return RtlDetermineDosPathNameType_U(FileName);
+#else
+    if (FileName->Buffer[0] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[0] == OBJ_NAME_ALTPATH_SEPARATOR)
+    {
+        if (FileName->Buffer[1] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[1] == OBJ_NAME_ALTPATH_SEPARATOR)
+        {
+            if (FileName->Buffer[2] == L'?' || FileName->Buffer[2] == L'.')
+            {
+                if (FileName->Buffer[3] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[3] == OBJ_NAME_ALTPATH_SEPARATOR)
+                    return RtlPathTypeLocalDevice;
+
+                if (FileName->Buffer[3] != UNICODE_NULL)
+                    return RtlPathTypeUncAbsolute;
+
+                return RtlPathTypeRootLocalDevice;
+            }
+
+            return RtlPathTypeUncAbsolute;
+        }
+
+        return RtlPathTypeRooted;
+    }
+    else if (FileName->Buffer[0] != UNICODE_NULL && FileName->Buffer[1] == L':')
+    {
+        if (FileName->Buffer[2] == OBJ_NAME_PATH_SEPARATOR || FileName->Buffer[2] == OBJ_NAME_ALTPATH_SEPARATOR)
+            return RtlPathTypeDriveAbsolute;
+
+        return RtlPathTypeDriveRelative;
+    }
+
+    return RtlPathTypeRelative;
+#endif
 }
 
 /**
@@ -10218,7 +11414,7 @@ NTSTATUS PhDeleteFileWin32(
     //UNICODE_STRING fileName;
     //OBJECT_ATTRIBUTES objectAttributes;
     //
-    //status = RtlDosPathNameToNtPathName_U_WithStatus(
+    //status = PhDosLongPathNameToNtPathNameWithStatus(
     //    FileName,
     //    &fileName,
     //    NULL,
@@ -10261,12 +11457,108 @@ NTSTATUS PhDeleteFileWin32(
             return status;
         }
 
-        //PhDeleteFile(fileHandle);
+        //PhSetFileDelete(fileHandle);
 
         NtClose(fileHandle);
     }
 
     return status;
+}
+
+NTSTATUS PhDeleteFile(
+    _In_ PPH_STRINGREF FileName
+    )
+{
+    NTSTATUS status;
+    HANDLE fileHandle;
+
+    status = PhCreateFile(
+        &fileHandle,
+        FileName,
+        DELETE,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_OPEN_FOR_BACKUP_INTENT | FILE_DELETE_ON_CLOSE
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+            status = STATUS_SUCCESS;
+        return status;
+    }
+
+    NtClose(fileHandle);
+
+    return status;
+}
+
+/**
+* Creates a directory path recursively.
+*
+* \param DirectoryPath The directory path.
+*/
+NTSTATUS PhCreateDirectory(
+    _In_ PPH_STRINGREF DirectoryPath
+    )
+{
+    PPH_STRING directoryPath;
+    PPH_STRING directoryName;
+    PH_STRINGREF directoryPart;
+    PH_STRINGREF remainingPart;
+
+    if (PhDoesDirectoryExist(DirectoryPath))
+        return STATUS_SUCCESS;
+
+    directoryPath = PhGetExistingPathPrefix(DirectoryPath);
+
+    if (PhIsNullOrEmptyString(directoryPath))
+        return STATUS_UNSUCCESSFUL;
+
+    remainingPart.Length = DirectoryPath->Length - directoryPath->Length - sizeof(OBJ_NAME_PATH_SEPARATOR);
+    remainingPart.Buffer = PTR_ADD_OFFSET(DirectoryPath->Buffer, directoryPath->Length + sizeof(OBJ_NAME_PATH_SEPARATOR));
+
+    while (remainingPart.Length != 0)
+    {
+        PhSplitStringRefAtChar(&remainingPart, OBJ_NAME_PATH_SEPARATOR, &directoryPart, &remainingPart);
+
+        if (directoryPart.Length != 0)
+        {
+            directoryName = PhConcatStringRef3(
+                &directoryPath->sr,
+                &PhNtPathSeperatorString,
+                &directoryPart
+                );
+
+            if (!PhDoesDirectoryExist(&directoryName->sr))
+            {
+                HANDLE directoryHandle;
+
+                if (NT_SUCCESS(PhCreateFile(
+                    &directoryHandle,
+                    &directoryName->sr,
+                    FILE_LIST_DIRECTORY | SYNCHRONIZE,
+                    FILE_ATTRIBUTE_NORMAL,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    FILE_CREATE,
+                    FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT //| FILE_OPEN_REPARSE_POINT
+                    )))
+                {
+                    NtClose(directoryHandle);
+                }
+            }
+
+            PhMoveReference(&directoryPath, directoryName);
+        }
+    }
+
+    PhClearReference(&directoryPath);
+
+    if (!PhDoesDirectoryExist(DirectoryPath))
+        return STATUS_NOT_FOUND;
+
+    return STATUS_SUCCESS;
 }
 
 /**
@@ -10278,7 +11570,7 @@ NTSTATUS PhCreateDirectoryWin32(
     _In_ PPH_STRINGREF DirectoryPath
     )
 {
-    PPH_STRING directoryPath = NULL;
+    PPH_STRING directoryPath;
     PPH_STRING directoryName;
     PH_STRINGREF directoryPart;
     PH_STRINGREF remainingPart;
@@ -10286,7 +11578,13 @@ NTSTATUS PhCreateDirectoryWin32(
     if (PhDoesDirectoryExistWin32(PhGetStringRefZ(DirectoryPath)))
         return STATUS_SUCCESS;
 
-    remainingPart = *DirectoryPath;
+    directoryPath = PhGetExistingPathPrefixWin32(DirectoryPath);
+
+    if (PhIsNullOrEmptyString(directoryPath))
+        return STATUS_UNSUCCESSFUL;
+
+    remainingPart.Length = DirectoryPath->Length - directoryPath->Length - sizeof(OBJ_NAME_PATH_SEPARATOR);
+    remainingPart.Buffer = PTR_ADD_OFFSET(DirectoryPath->Buffer, directoryPath->Length + sizeof(OBJ_NAME_PATH_SEPARATOR));
 
     while (remainingPart.Length != 0)
     {
@@ -10342,15 +11640,20 @@ NTSTATUS PhCreateDirectoryFullPathWin32(
     )
 {
     NTSTATUS status = STATUS_UNSUCCESSFUL;
+    PH_STRINGREF directoryPart;
+    PPH_STRING directoryPath;
     PPH_STRING directory;
-    PH_STRINGREF pathPart;
-    PH_STRINGREF baseNamePart;
 
-    if (PhSplitStringRefAtLastChar(FileName, OBJ_NAME_PATH_SEPARATOR, &pathPart, &baseNamePart))
+    if (PhGetBasePath(FileName, &directoryPart, NULL))
     {
-        if (directory = PhCreateString2(&pathPart))
+        if (directory = PhCreateString2(&directoryPart))
         {
-            status = PhCreateDirectoryWin32(&directory->sr);
+            if (directoryPath = PhGetFullPath(PhGetString(directory), NULL))
+            {
+                status = PhCreateDirectoryWin32(&directoryPath->sr);
+                PhDereferenceObject(directoryPath);
+            }
+
             PhDereferenceObject(directory);
         }
     }
@@ -10358,86 +11661,138 @@ NTSTATUS PhCreateDirectoryFullPathWin32(
     return status;
 }
 
-static BOOLEAN PhpDeleteDirectoryCallback(
+NTSTATUS PhCreateDirectoryFullPath(
+    _In_ PPH_STRINGREF FileName
+    )
+{
+    PH_STRINGREF directoryPart;
+
+    if (PhGetBasePath(FileName, &directoryPart, NULL))
+    {
+        return PhCreateDirectory(&directoryPart);
+    }
+
+    return STATUS_UNSUCCESSFUL;
+}
+
+// NOTE: This callback handles both Native and Win32 filenames
+// since they're both relative to the parent RootDirectory. (dmex)
+static BOOLEAN PhDeleteDirectoryCallback(
     _In_ HANDLE RootDirectory,
     _In_ PFILE_DIRECTORY_INFORMATION Information,
     _In_ PVOID Context
     )
 {
-    PPH_STRINGREF parentDirectory = Context;
-    PPH_STRING fullName;
-    PH_STRINGREF baseName;
+    PH_STRINGREF fileName;
+    HANDLE fileHandle;
 
-    baseName.Buffer = Information->FileName;
-    baseName.Length = Information->FileNameLength;
+    fileName.Buffer = Information->FileName;
+    fileName.Length = Information->FileNameLength;
 
-    if (PhEqualStringRef2(&baseName, L".", TRUE) || PhEqualStringRef2(&baseName, L"..", TRUE))
-        return TRUE;
-
-    fullName = PhConcatStringRef3(parentDirectory, &PhNtPathSeperatorString, &baseName);
-
-    if (Information->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    if (FlagOn(Information->FileAttributes, FILE_ATTRIBUTE_DIRECTORY))
     {
-        HANDLE directoryHandle;
+        if (PATH_IS_WIN32_RELATIVE_PREFIX(&fileName))
+            return TRUE;
 
-        if (NT_SUCCESS(PhOpenFileWin32(
-            &directoryHandle,
-            PhGetString(fullName),
+        if (NT_SUCCESS(PhCreateFileEx(
+            &fileHandle,
+            &fileName,
             FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE,
+            RootDirectory,
+            NULL,
+            FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT //| FILE_OPEN_REPARSE_POINT
+            FILE_OPEN,
+            FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT, // | FILE_OPEN_REPARSE_POINT
+            NULL
             )))
         {
-            PhEnumDirectoryFile(directoryHandle, NULL, PhpDeleteDirectoryCallback, &fullName->sr);
+            PhEnumDirectoryFile(fileHandle, NULL, PhDeleteDirectoryCallback, NULL);
 
-            PhDeleteFile(directoryHandle);
+            PhSetFileDelete(fileHandle);
 
-            NtClose(directoryHandle);
+            NtClose(fileHandle);
         }
     }
     else
     {
-        if (Information->FileAttributes & FILE_ATTRIBUTE_READONLY)
+        if (NT_SUCCESS(PhCreateFileEx(
+            &fileHandle,
+            &fileName,
+            FILE_WRITE_ATTRIBUTES | DELETE | SYNCHRONIZE,
+            RootDirectory,
+            NULL,
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, // | FILE_OPEN_REPARSE_POINT
+            NULL
+            )))
         {
-            HANDLE fileHandle;
-
-            if (NT_SUCCESS(PhOpenFileWin32(
-                &fileHandle,
-                PhGetString(fullName),
-                FILE_WRITE_ATTRIBUTES | DELETE | SYNCHRONIZE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT //| FILE_OPEN_REPARSE_POINT
-                )))
+            if (FlagOn(Information->FileAttributes, FILE_ATTRIBUTE_READONLY) && WindowsVersion < WINDOWS_10_RS5)
             {
-                if (WindowsVersion < WINDOWS_10_RS5)
-                {
-                    IO_STATUS_BLOCK ioStatusBlock;
-                    FILE_BASIC_INFORMATION fileBasicInfo = { 0 };
+                FILE_BASIC_INFORMATION fileBasicInfo;
 
-                    fileBasicInfo.FileAttributes = ClearFlag(Information->FileAttributes, FILE_ATTRIBUTE_READONLY);
+                memset(&fileBasicInfo, 0, sizeof(FILE_BASIC_INFORMATION));
+                fileBasicInfo.FileAttributes = ClearFlag(Information->FileAttributes, FILE_ATTRIBUTE_READONLY);
 
-                    NtSetInformationFile(
-                        fileHandle,
-                        &ioStatusBlock,
-                        &fileBasicInfo,
-                        sizeof(FILE_BASIC_INFORMATION),
-                        FileBasicInformation
-                        );
-                }
-
-                PhDeleteFile(fileHandle);
-
-                NtClose(fileHandle);
+                PhSetFileBasicInformation(fileHandle, &fileBasicInfo);
             }
-        }
-        else
-        {
-            PhDeleteFileWin32(PhGetString(fullName));
+
+            PhSetFileDelete(fileHandle);
+
+            NtClose(fileHandle);
         }
     }
 
-    PhDereferenceObject(fullName);
     return TRUE;
+}
+
+/**
+* Deletes a directory path recursively.
+*
+* \param DirectoryPath The directory path.
+*/
+NTSTATUS PhDeleteDirectory(
+    _In_ PPH_STRINGREF DirectoryPath
+    )
+{
+    NTSTATUS status;
+    HANDLE directoryHandle;
+
+    status = PhCreateFile(
+        &directoryHandle,
+        DirectoryPath,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        // Remove any files or folders inside the directory. (dmex)
+        status = PhEnumDirectoryFile(
+            directoryHandle,
+            NULL,
+            PhDeleteDirectoryCallback,
+            NULL
+            );
+
+        if (NT_SUCCESS(status))
+        {
+            // Remove the directory. (dmex)
+            status = PhSetFileDelete(directoryHandle);
+        }
+
+        NtClose(directoryHandle);
+    }
+
+    if (!PhDoesDirectoryExist(DirectoryPath))
+        return STATUS_SUCCESS;
+
+    return status;
 }
 
 /**
@@ -10452,11 +11807,13 @@ NTSTATUS PhDeleteDirectoryWin32(
     NTSTATUS status;
     HANDLE directoryHandle;
 
-    status = PhOpenFileWin32(
+    status = PhCreateFileWin32(
         &directoryHandle,
         PhGetStringRefZ(DirectoryPath),
         FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE,
+        FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
         FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT
         );
 
@@ -10466,20 +11823,20 @@ NTSTATUS PhDeleteDirectoryWin32(
         status = PhEnumDirectoryFile(
             directoryHandle,
             NULL,
-            PhpDeleteDirectoryCallback,
+            PhDeleteDirectoryCallback,
             DirectoryPath
             );
 
         if (NT_SUCCESS(status))
         {
             // Remove the directory. (dmex)
-            status = PhDeleteFile(directoryHandle);
+            status = PhSetFileDelete(directoryHandle);
         }
 
         NtClose(directoryHandle);
     }
 
-    if (!PhDoesFileExistWin32(PhGetStringRefZ(DirectoryPath)))
+    if (!PhDoesDirectoryExistWin32(PhGetStringRefZ(DirectoryPath)))
         return STATUS_SUCCESS;
 
     return status;
@@ -10497,7 +11854,7 @@ NTSTATUS PhCopyFileWin32(
     FILE_BASIC_INFORMATION basicInfo;
     LARGE_INTEGER newFileSize;
     IO_STATUS_BLOCK isb;
-    BYTE buffer[PAGE_SIZE];
+    PBYTE buffer;
 
     status = PhCreateFileWin32(
         &fileHandle,
@@ -10537,6 +11894,14 @@ NTSTATUS PhCopyFileWin32(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
+    buffer = PhAllocatePage(PAGE_SIZE * 2, NULL);
+
+    if (!buffer)
+    {
+        status = STATUS_NO_MEMORY;
+        goto CleanupExit;
+    }
+
     while (TRUE)
     {
         status = NtReadFile(
@@ -10546,7 +11911,7 @@ NTSTATUS PhCopyFileWin32(
             NULL,
             &isb,
             buffer,
-            sizeof(buffer),
+            PAGE_SIZE * 2,
             NULL,
             NULL
             );
@@ -10574,6 +11939,8 @@ NTSTATUS PhCopyFileWin32(
             break;
     }
 
+    PhFreePage(buffer);
+
     if (status == STATUS_END_OF_FILE)
     {
         status = STATUS_SUCCESS;
@@ -10588,7 +11955,7 @@ NTSTATUS PhCopyFileWin32(
     }
     else
     {
-        PhDeleteFile(newFileHandle);
+        PhSetFileDelete(newFileHandle);
     }
 
     NtClose(newFileHandle);
@@ -10736,7 +12103,7 @@ NTSTATUS PhCopyFileChunkDirectIoWin32(
 
     if (!NT_SUCCESS(status))
     {
-        PhDeleteFile(destinationHandle);
+        PhSetFileDelete(destinationHandle);
     }
 
     NtClose(destinationHandle);
@@ -10870,7 +12237,7 @@ NTSTATUS PhCopyFileChunkWin32(
     }
     else
     {
-        PhDeleteFile(destinationHandle);
+        PhSetFileDelete(destinationHandle);
     }
 
     NtClose(destinationHandle);
@@ -10897,7 +12264,7 @@ NTSTATUS PhMoveFileWin32(
     UNICODE_STRING newFileName;
     PFILE_RENAME_INFORMATION renameInfo;
 
-    status = RtlDosPathNameToNtPathName_U_WithStatus(
+    status = PhDosLongPathNameToNtPathNameWithStatus(
         NewFileName,
         &newFileName,
         NULL,
@@ -10943,7 +12310,7 @@ NTSTATUS PhMoveFileWin32(
     {
         HANDLE newFileHandle;
         LARGE_INTEGER newFileSize;
-        BYTE buffer[PAGE_SIZE];
+        PBYTE buffer;
 
         status = PhGetFileSize(fileHandle, &newFileSize);
 
@@ -10964,6 +12331,14 @@ NTSTATUS PhMoveFileWin32(
 
         if (NT_SUCCESS(status))
         {
+            buffer = PhAllocatePage(PAGE_SIZE * 2, NULL);
+
+            if (!buffer)
+            {
+                status = STATUS_NO_MEMORY;
+                goto CleanupExit;
+            }
+
             while (TRUE)
             {
                 status = NtReadFile(
@@ -10973,7 +12348,7 @@ NTSTATUS PhMoveFileWin32(
                     NULL,
                     &isb,
                     buffer,
-                    sizeof(buffer),
+                    PAGE_SIZE * 2,
                     NULL,
                     NULL
                     );
@@ -11001,6 +12376,8 @@ NTSTATUS PhMoveFileWin32(
                     break;
             }
 
+            PhFreePage(buffer);
+
             if (status == STATUS_END_OF_FILE)
             {
                 status = STATUS_SUCCESS;
@@ -11008,7 +12385,7 @@ NTSTATUS PhMoveFileWin32(
 
             if (status != STATUS_SUCCESS)
             {
-                PhDeleteFile(newFileHandle);
+                PhSetFileDelete(newFileHandle);
             }
 
             NtClose(newFileHandle);
@@ -11048,7 +12425,6 @@ NTSTATUS PhCreatePipeEx(
     HANDLE pipeDirectoryHandle;
     HANDLE pipeReadHandle;
     HANDLE pipeWriteHandle;
-    LARGE_INTEGER pipeTimeout;
     UNICODE_STRING pipeName;
     OBJECT_ATTRIBUTES objectAttributes;
     IO_STATUS_BLOCK isb;
@@ -11114,7 +12490,7 @@ NTSTATUS PhCreatePipeEx(
         1,
         PAGE_SIZE,
         PAGE_SIZE,
-        PhTimeoutFromMilliseconds(&pipeTimeout, 120000)
+        PhTimeoutFromMillisecondsEx(120000)
         );
 
     if (!NT_SUCCESS(status))
@@ -11172,7 +12548,6 @@ NTSTATUS PhCreateNamedPipe(
     PACL pipeAcl = NULL;
     HANDLE pipeHandle;
     PPH_STRING pipeName;
-    LARGE_INTEGER pipeTimeout;
     UNICODE_STRING pipeNameUs;
     OBJECT_ATTRIBUTES objectAttributes;
     IO_STATUS_BLOCK isb;
@@ -11220,7 +12595,7 @@ NTSTATUS PhCreateNamedPipe(
         FILE_PIPE_UNLIMITED_INSTANCES,
         PAGE_SIZE,
         PAGE_SIZE,
-        PhTimeoutFromMilliseconds(&pipeTimeout, 1000)
+        PhTimeoutFromMillisecondsEx(1000)
         );
 
     if (NT_SUCCESS(status))
@@ -11469,9 +12844,12 @@ NTSTATUS PhCallNamedPipe(
 
     if (pipeHandle)
     {
-        //IO_STATUS_BLOCK isb;
-        //NtFlushBuffersFile(pipeHandle, &isb);
+        IO_STATUS_BLOCK ioStatusBlock;
+
+        NtFlushBuffersFile(pipeHandle, &ioStatusBlock);
+
         PhDisconnectNamedPipe(pipeHandle);
+
         NtClose(pipeHandle);
     }
 
@@ -11520,17 +12898,17 @@ NTSTATUS PhWaitForNamedPipe(
 {
     NTSTATUS status;
     IO_STATUS_BLOCK isb;
-    PH_STRINGREF localNpfsNameSr;
-    UNICODE_STRING localNpfsName;
+    PH_STRINGREF pipeName;
+    UNICODE_STRING objectName;
     HANDLE fileSystemHandle;
     OBJECT_ATTRIBUTES objectAttributes;
     PFILE_PIPE_WAIT_FOR_BUFFER waitForBuffer;
     ULONG waitForBufferLength;
 
-    RtlInitUnicodeString(&localNpfsName, DEVICE_NAMED_PIPE);
+    RtlInitUnicodeString(&objectName, DEVICE_NAMED_PIPE);
     InitializeObjectAttributes(
         &objectAttributes,
-        &localNpfsName,
+        &objectName,
         OBJ_CASE_INSENSITIVE,
         NULL,
         NULL
@@ -11548,8 +12926,8 @@ NTSTATUS PhWaitForNamedPipe(
     if (!NT_SUCCESS(status))
         return status;
 
-    PhInitializeStringRefLongHint(&localNpfsNameSr, PipeName);
-    waitForBufferLength = FIELD_OFFSET(FILE_PIPE_WAIT_FOR_BUFFER, Name) + (ULONG)localNpfsNameSr.Length;
+    PhInitializeStringRefLongHint(&pipeName, PipeName);
+    waitForBufferLength = FIELD_OFFSET(FILE_PIPE_WAIT_FOR_BUFFER, Name) + (ULONG)pipeName.Length;
     waitForBuffer = PhAllocate(waitForBufferLength);
 
     if (Timeout)
@@ -11564,8 +12942,8 @@ NTSTATUS PhWaitForNamedPipe(
         waitForBuffer->TimeoutSpecified = TRUE;
     }
 
-    waitForBuffer->NameLength = (ULONG)localNpfsNameSr.Length;
-    memcpy(waitForBuffer->Name, localNpfsNameSr.Buffer, localNpfsNameSr.Length);
+    waitForBuffer->NameLength = (ULONG)pipeName.Length;
+    memcpy(waitForBuffer->Name, pipeName.Buffer, pipeName.Length);
 
     status = NtFsControlFile(
         fileSystemHandle,
@@ -11832,7 +13210,7 @@ NTSTATUS PhGetThreadName(
     PTHREAD_NAME_INFORMATION buffer;
     ULONG bufferSize;
     ULONG returnLength;
-    
+
     if (WindowsVersion < WINDOWS_10)
         return STATUS_NOT_SUPPORTED;
 
@@ -11865,7 +13243,7 @@ NTSTATUS PhGetThreadName(
     if (NT_SUCCESS(status))
     {
         // Note: Some threads have UNICODE_NULL as their name. (dmex)
-        if (buffer->ThreadName.Length == 0)
+        if (RtlIsNullOrEmptyUnicodeString(&buffer->ThreadName))
         {
             PhFree(buffer);
             return STATUS_UNSUCCESSFUL;
@@ -11884,20 +13262,30 @@ NTSTATUS PhSetThreadName(
     _In_ PCWSTR ThreadName
     )
 {
+    NTSTATUS status;
     THREAD_NAME_INFORMATION threadNameInfo;
 
     if (WindowsVersion < WINDOWS_10)
         return STATUS_NOT_SUPPORTED;
 
     memset(&threadNameInfo, 0, sizeof(THREAD_NAME_INFORMATION));
-    RtlInitUnicodeString(&threadNameInfo.ThreadName, ThreadName);
 
-    return NtSetInformationThread(
+    status = RtlInitUnicodeStringEx(
+        &threadNameInfo.ThreadName,
+        ThreadName
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = NtSetInformationThread(
         ThreadHandle,
         ThreadNameInformation,
         &threadNameInfo,
         sizeof(THREAD_NAME_INFORMATION)
         );
+
+    return status;
 }
 
 /**
@@ -12171,9 +13559,9 @@ NTSTATUS PhCreateImpersonationToken(
         return status;
 
     status = PhOpenThreadToken(
-        ThreadHandle, 
+        ThreadHandle,
         TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
-        FALSE, 
+        FALSE,
         &tokenHandle
         );
 
@@ -12571,8 +13959,8 @@ NTSTATUS PhGetProcessArchitecture(
     _Out_ PUSHORT ProcessArchitecture
     )
 {
-    USHORT architecture;
     NTSTATUS status;
+    USHORT architecture = IMAGE_FILE_MACHINE_UNKNOWN;
     SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION output[6];
     ULONG returnLength;
 
@@ -12614,7 +14002,7 @@ NTSTATUS PhGetProcessImageBaseAddress(
     )
 {
     NTSTATUS status;
-    PVOID pebBaseAddress;
+    PVOID pebAddress;
     PVOID baseAddress;
 #ifdef _WIN64
     BOOLEAN isWow64;
@@ -12625,14 +14013,14 @@ NTSTATUS PhGetProcessImageBaseAddress(
     {
         ULONG imageBaseAddress32;
 
-        status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress);
+        status = PhGetProcessPeb32(ProcessHandle, &pebAddress);
 
         if (!NT_SUCCESS(status))
             return status;
 
         status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, ImageBaseAddress)),
+            PTR_ADD_OFFSET(pebAddress, UFIELD_OFFSET(PEB32, ImageBaseAddress)),
             &imageBaseAddress32,
             sizeof(ULONG),
             NULL
@@ -12648,14 +14036,14 @@ NTSTATUS PhGetProcessImageBaseAddress(
     {
         PVOID imageBaseAddress;
 
-        status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
+        status = PhGetProcessPeb(ProcessHandle, &pebAddress);
 
         if (!NT_SUCCESS(status))
             return status;
 
         status = NtReadVirtualMemory(
             ProcessHandle,
-            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, ImageBaseAddress)),
+            PTR_ADD_OFFSET(pebAddress, UFIELD_OFFSET(PEB, ImageBaseAddress)),
             &imageBaseAddress,
             sizeof(PVOID),
             NULL
@@ -12682,32 +14070,81 @@ NTSTATUS PhGetProcessCodePage(
 {
     NTSTATUS status;
     USHORT codePage = 0;
-    PVOID nlsAnsiCodePage;
-    PPH_TARGET_LIBS libs;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
-    if (!NT_SUCCESS(status))
-        return status;
+    if (WindowsVersion >= WINDOWS_11)
+    {
+        PVOID pebBaseAddress;
+#ifdef _WIN64
+        BOOLEAN isWow64 = FALSE;
 
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &libs->Ntdll,
-        "NlsAnsiCodePage",
-        0,
-        &nlsAnsiCodePage,
-        NULL
-        );
+        PhGetProcessIsWow64(ProcessHandle, &isWow64);
 
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
+        if (isWow64)
+        {
+            status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress);
 
-    status = NtReadVirtualMemory(
-        ProcessHandle,
-        nlsAnsiCodePage,
-        &codePage,
-        sizeof(USHORT),
-        NULL
-        );
+            if (!NT_SUCCESS(status))
+                goto CleanupExit;
+
+            status = NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, ActiveCodePage)),
+                &codePage,
+                sizeof(USHORT),
+                NULL
+                );
+        }
+        else
+#endif
+        {
+            status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
+
+            if (!NT_SUCCESS(status))
+                goto CleanupExit;
+
+            status = NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, ActiveCodePage)),
+                &codePage,
+                sizeof(USHORT),
+                NULL
+                );
+        }
+    }
+    else
+    {
+        PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
+        PVOID nlsAnsiCodePage;
+
+        status = PhGetProcessRuntimeLibrary(
+            ProcessHandle,
+            &runtimeLibrary,
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = PhGetProcedureAddressRemote(
+            ProcessHandle,
+            &runtimeLibrary->NtdllFileName,
+            "NlsAnsiCodePage",
+            0,
+            &nlsAnsiCodePage,
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            nlsAnsiCodePage,
+            &codePage,
+            sizeof(USHORT),
+            NULL
+            );
+    }
 
     if (NT_SUCCESS(status))
     {
@@ -12716,53 +14153,6 @@ NTSTATUS PhGetProcessCodePage(
 
 CleanupExit:
     return status;
-
-    //    if (WindowsVersion >= WINDOWS_11)
-    //    {
-    //#ifdef _WIN64
-    //        if (isWow64)
-    //        {
-    //            PVOID peb32;
-    //
-    //            status = PhGetProcessPeb32(ProcessHandle, &peb32);
-    //
-    //            if (!NT_SUCCESS(status))
-    //                return status;
-    //
-    //            status = NtReadVirtualMemory(
-    //                ProcessHandle,
-    //                PTR_ADD_OFFSET(peb32, UFIELD_OFFSET(PEB, ActiveCodePage)),
-    //                &codePage,
-    //                sizeof(USHORT),
-    //                NULL
-    //                );
-    //        }
-    //        else
-    //#endif
-    //        {
-    //            PVOID peb;
-    //
-    //            status = PhGetProcessPeb(ProcessHandle, &peb);
-    //
-    //            if (!NT_SUCCESS(status))
-    //                return status;
-    //
-    //            status = NtReadVirtualMemory(
-    //                ProcessHandle,
-    //                PTR_ADD_OFFSET(peb, UFIELD_OFFSET(PEB, ActiveCodePage)),
-    //                &codePage,
-    //                sizeof(USHORT),
-    //                NULL
-    //                );
-    //        }
-    //
-    //        if (NT_SUCCESS(status))
-    //        {
-    //            *ProcessCodePage = codePage;
-    //        }
-    //
-    //        return status;
-    //    }
 }
 
 NTSTATUS PhGetProcessConsoleCodePage(
@@ -12776,16 +14166,20 @@ NTSTATUS PhGetProcessConsoleCodePage(
     HANDLE threadHandle = NULL;
     HANDLE powerRequestHandle = NULL;
     PVOID getConsoleCP = NULL;
-    PPH_TARGET_LIBS libs;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &libs, NULL);
+    status = PhGetProcessRuntimeLibrary(
+        ProcessHandle,
+        &runtimeLibrary,
+        NULL
+        );
 
     if (!NT_SUCCESS(status))
         return status;
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &libs->Kernel32,
+        &runtimeLibrary->Kernel32FileName,
         ConsoleOutputCP ? "GetConsoleOutputCP" : "GetConsoleCP",
         0,
         &getConsoleCP,
@@ -12803,10 +14197,10 @@ NTSTATUS PhGetProcessConsoleCodePage(
             return status;
     }
 
-    status = RtlCreateUserThread(
+    status = PhCreateUserThread(
         ProcessHandle,
         NULL,
-        FALSE,
+        0,
         0,
         0,
         0,
@@ -12895,19 +14289,23 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
     _Out_ PPS_SYSTEM_DLL_INIT_BLOCK* SystemDllInitBlock
     )
 {
-    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    NTSTATUS status;
     PPS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock;
     PVOID ldrInitBlockAddress;
-    PPH_TARGET_LIBS runtime;
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
 
-    status = PhpGetProcessTargetLibs(ProcessHandle, &runtime, NULL);
+    status = PhGetProcessRuntimeLibrary(
+        ProcessHandle,
+        &runtimeLibrary,
+        NULL
+        );
 
     if (!NT_SUCCESS(status))
         return status;
 
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
-        &runtime->Ntdll,
+        &runtimeLibrary->NtdllFileName,
         "LdrSystemDllInitBlock",
         0,
         &ldrInitBlockAddress,
@@ -12945,6 +14343,98 @@ NTSTATUS PhGetProcessSystemDllInitBlock(
         PhFree(ldrInitBlock);
     }
 
+    return status;
+}
+
+NTSTATUS PhGetProcessTlsBitMapCounters(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PULONG TlsBitMapCount,
+    _Out_ PULONG TlsExpansionBitMapCount
+    )
+{
+    NTSTATUS status;
+#ifdef _WIN64
+    BOOLEAN isWow64 = FALSE;
+#endif
+    PVOID pebBaseAddress;
+    RTL_BITMAP tlsBitMap;
+    RTL_BITMAP tlsExpansionBitMap;
+    ULONG bitmapBits[2] = { 0 };
+    ULONG bitmapExpansionBits[32] = { 0 };
+
+    static_assert(sizeof(bitmapBits) == RTL_FIELD_SIZE(PEB, TlsBitmapBits), "Buffer must equal TlsBitmapBits");
+    static_assert(sizeof(bitmapExpansionBits) == RTL_FIELD_SIZE(PEB, TlsExpansionBitmapBits), "Buffer must equal TlsExpansionBitmapBits");
+
+#ifdef _WIN64
+    PhGetProcessIsWow64(ProcessHandle, &isWow64);
+
+    if (isWow64)
+    {
+        status = PhGetProcessPeb32(ProcessHandle, &pebBaseAddress);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, TlsBitmapBits)),
+            bitmapBits,
+            sizeof(bitmapBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB32, TlsExpansionBitmapBits)),
+            bitmapExpansionBits,
+            sizeof(bitmapExpansionBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+    else
+#endif
+    {
+        status = PhGetProcessPeb(ProcessHandle, &pebBaseAddress);
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, TlsBitmapBits)),
+            bitmapBits,
+            sizeof(bitmapBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            PTR_ADD_OFFSET(pebBaseAddress, UFIELD_OFFSET(PEB, TlsExpansionBitmapBits)),
+            bitmapExpansionBits,
+            sizeof(bitmapExpansionBits),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            goto CleanupExit;
+    }
+
+    RtlInitializeBitMap(&tlsBitMap, bitmapBits, TLS_MINIMUM_AVAILABLE);
+    RtlInitializeBitMap(&tlsExpansionBitMap, bitmapExpansionBits, TLS_EXPANSION_SLOTS);
+
+    *TlsBitMapCount = RtlNumberOfSetBits(&tlsBitMap);
+    *TlsExpansionBitMapCount = RtlNumberOfSetBits(&tlsExpansionBitMap);
+
+CleanupExit:
     return status;
 }
 
@@ -13280,7 +14770,7 @@ NTSTATUS PhGetThreadStackSize(
 
     if (NT_SUCCESS(status))
     {
-        MEMORY_BASIC_INFORMATION basicInfo;
+        MEMORY_BASIC_INFORMATION memoryBasicInformation;
         PVOID stackBaseAddress = NULL;
         PVOID stackLimitAddress = NULL;
 
@@ -13300,22 +14790,22 @@ NTSTATUS PhGetThreadStackSize(
         stackBaseAddress = ntTib.StackBase;
         stackLimitAddress = ntTib.StackLimit;
 #endif
-        memset(&basicInfo, 0, sizeof(MEMORY_BASIC_INFORMATION));
+        memset(&memoryBasicInformation, 0, sizeof(MEMORY_BASIC_INFORMATION));
 
         status = NtQueryVirtualMemory(
             ProcessHandle,
             stackLimitAddress,
             MemoryBasicInformation,
-            &basicInfo,
+            &memoryBasicInformation,
             sizeof(MEMORY_BASIC_INFORMATION),
             NULL
             );
 
         if (NT_SUCCESS(status))
         {
-            // TEB->DeallocationStack == basicInfo.AllocationBase
+            // TEB->DeallocationStack == memoryBasicInfo.AllocationBase
             *StackUsage = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, stackLimitAddress);
-            *StackLimit = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, basicInfo.AllocationBase);
+            *StackLimit = (ULONG_PTR)PTR_SUB_OFFSET(stackBaseAddress, memoryBasicInformation.AllocationBase);
         }
     }
 
@@ -13613,7 +15103,16 @@ NTSTATUS PhSetSystemEnvironmentBootToFirmware(
     return status;
 }
 
-// rev from RtlpCreateExecutionRequiredRequest
+// rev from RtlpCreateExecutionRequiredRequest (dmex)
+/**
+ * Creates a PLM execution request. This is mandatory on Windows 8 and above to prevent
+ * processes freezing while querying process information and deadlocking the calling process.
+ *
+ * \param ProcessHandle A handle to the process in which the thread is to be created.
+ * \param PowerRequestHandle A pointer to a variable that receives a handle to the new thread.
+ *
+ * \return Successful or errant status.
+ */
 NTSTATUS PhCreateExecutionRequiredRequest(
     _In_ HANDLE ProcessHandle,
     _Out_ PHANDLE PowerRequestHandle
@@ -14047,7 +15546,10 @@ BOOLEAN PhInitializeKnownDllsTable(
 
         PhInitializeKnownDlls(L"\\KnownDlls");
         PhInitializeKnownDlls(L"\\KnownDlls32");
-
+#ifdef _ARM64_
+        PhInitializeKnownDlls(L"\\KnownDllsArm32");
+        PhInitializeKnownDlls(L"\\KnownDllsChpe32");
+#endif
         PhEndInitOnce(&PhKnownDllsInitOnce);
     }
 
@@ -14146,6 +15648,66 @@ NTSTATUS PhGetSystemLogicalProcessorInformation(
     return status;
 }
 
+NTSTATUS PhGetSystemLogicalProcessorRelationInformation(
+    _Out_ PPH_LOGICAL_PROCESSOR_INFORMATION LogicalProcessorInformation
+    )
+{
+    NTSTATUS status;
+    ULONG logicalInformationLength = 0;
+    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX logicalInformation;
+
+    status = PhGetSystemLogicalProcessorInformation(
+        RelationAll,
+        &logicalInformation,
+        &logicalInformationLength
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        ULONG processorCoreCount = 0;
+        ULONG processorNumaCount = 0;
+        ULONG processorLogicalCount = 0;
+        ULONG processorPackageCount = 0;
+
+        for (
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX processorInfo = logicalInformation;
+            (ULONG_PTR)processorInfo < (ULONG_PTR)PTR_ADD_OFFSET(logicalInformation, logicalInformationLength);
+            processorInfo = PTR_ADD_OFFSET(processorInfo, processorInfo->Size)
+            )
+        {
+            switch (processorInfo->Relationship)
+            {
+            case RelationProcessorCore:
+                {
+                    processorCoreCount++;
+
+                    for (USHORT j = 0; j < processorInfo->Processor.GroupCount; j++)
+                    {
+                        processorLogicalCount += PhCountBitsUlongPtr(processorInfo->Processor.GroupMask[j].Mask); // RtlNumberOfSetBitsUlongPtr
+                    }
+                }
+                break;
+            case RelationNumaNode:
+                processorNumaCount++;
+                break;
+            case RelationProcessorPackage:
+                processorPackageCount++;
+                break;
+            }
+        }
+
+        memset(LogicalProcessorInformation, 0, sizeof(PH_LOGICAL_PROCESSOR_INFORMATION));
+        LogicalProcessorInformation->ProcessorCoreCount = processorCoreCount;
+        LogicalProcessorInformation->ProcessorNumaCount = processorNumaCount;
+        LogicalProcessorInformation->ProcessorLogicalCount = processorLogicalCount;
+        LogicalProcessorInformation->ProcessorPackageCount = processorPackageCount;
+
+        PhFree(logicalInformation);
+    }
+
+    return status;
+}
+
 // based on RtlIsProcessorFeaturePresent (dmex)
 BOOLEAN PhIsProcessorFeaturePresent(
     _In_ ULONG ProcessorFeature
@@ -14157,6 +15719,20 @@ BOOLEAN PhIsProcessorFeaturePresent(
     }
 
     return !!IsProcessorFeaturePresent(ProcessorFeature); // RtlIsProcessorFeaturePresent
+}
+
+VOID PhGetCurrentProcessorNumber(
+    _Out_ PPROCESSOR_NUMBER ProcessorNumber
+    )
+{
+    //if (PhIsProcessorFeaturePresent(PF_RDPID_INSTRUCTION_AVAILABLE))
+    //    _rdpid_u32();
+    //if (PhIsProcessorFeaturePresent(PF_RDTSCP_INSTRUCTION_AVAILABLE))
+    //    __rdtscp();
+
+    memset(ProcessorNumber, 0, sizeof(PROCESSOR_NUMBER));
+
+    RtlGetCurrentProcessorNumberEx(ProcessorNumber);
 }
 
 // based on GetActiveProcessorCount (dmex)
@@ -14207,8 +15783,8 @@ NTSTATUS PhGetProcessorNumberFromIndex(
             if (processorIndex++ == ProcessorIndex)
             {
                 memset(ProcessorNumber, 0, sizeof(PH_PROCESSOR_NUMBER));
-                (*ProcessorNumber).Group = processorGroup;
-                (*ProcessorNumber).Number = processorNumber;
+                ProcessorNumber->Group = processorGroup;
+                ProcessorNumber->Number = processorNumber;
                 return STATUS_SUCCESS;
             }
         }
@@ -14262,8 +15838,7 @@ NTSTATUS PhGetProcessorSystemAffinityMask(
     {
         PROCESSOR_NUMBER processorNumber;
 
-        memset(&processorNumber, 0, sizeof(PROCESSOR_NUMBER));
-        //RtlGetCurrentProcessorNumberEx(&processorNumber);
+        PhGetCurrentProcessorNumber(&processorNumber);
 
         return PhGetProcessorGroupActiveAffinityMask(processorNumber.Group, ActiveProcessorsAffinityMask);
     }
@@ -14686,4 +16261,445 @@ CreateResult:
 
     PhInitializeStringRefLongHint(SystemPath, WithSeperators); // RtlInitUnicodeString
     return STATUS_SUCCESS;
+}
+
+/**
+ * Retrieves information about a range of pages within the virtual address space of a specified process.
+ *
+ * \param ProcessHandle A handle to a process.
+ * \param ProcessId The ID of the process.
+ * \param Callback A callback function which is executed for each memory region.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhEnumVirtualMemory(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    PVOID baseAddress;
+    MEMORY_BASIC_INFORMATION basicInfo;
+
+    if (!ProcessHandle)
+    {
+        if (WindowsVersion < WINDOWS_10)
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_INFORMATION,
+                ProcessId
+                );
+        }
+        else
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                ProcessId
+                );
+        }
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    baseAddress = (PVOID)0;
+
+    while (TRUE)
+    {
+        status = NtQueryVirtualMemory(
+            processHandle,
+            baseAddress,
+            MemoryBasicInformation,
+            &basicInfo,
+            sizeof(MEMORY_BASIC_INFORMATION),
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        if (basicInfo.State & MEM_FREE)
+        {
+            basicInfo.AllocationBase = basicInfo.BaseAddress;
+            basicInfo.AllocationProtect = basicInfo.Protect;
+        }
+
+        status = Callback(processHandle, &basicInfo, Context);
+
+        if (!NT_SUCCESS(status))
+            break;
+
+        baseAddress = PTR_ADD_OFFSET(baseAddress, basicInfo.RegionSize);
+
+        if ((ULONG_PTR)baseAddress >= PhSystemBasicInformation.MaximumUserModeAddress)
+            break;
+    }
+
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
+}
+
+/**
+ * Retrieves information about a range of pages within the virtual address space of a specified process in batches for improved performance.
+ *
+ * \param ProcessHandle A handle to a process.
+ * \param BaseAddress The base address at which to begin retrieving information.
+ * \param BulkQuery A boolean indicating the mode of bulk query (accuracy vs reliability).
+ * \param Callback A callback function which is executed for each memory region.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhEnumVirtualMemoryBulk(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID BaseAddress,
+    _In_ BOOLEAN BulkQuery,
+    _In_ PPH_ENUM_MEMORY_BULK_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+#if (PHNT_VERSION >= PHNT_WIN11_22H2)
+    NTSTATUS status;
+
+    // BulkQuery... TRUE:
+    // * Faster.
+    // * More accurate snapshots.
+    // * Copies the entire VA space into local memory.
+    // * Wastes large amounts of heap memory due to buffer doubling.
+    // * Unsuitable for low-memory situations and fails with insufficient system resources.
+    // * ...
+    //
+    // BulkQuery... FALSE:
+    // * Slightly slower.
+    // * Slightly less accurate snapshots.
+    // * Does not copy the VA space.
+    // * Does not waste heap memory.
+    // * Suitable for low-memory situations and doesn't fail with insufficient system resources.
+    // * ...
+
+    if (BulkQuery)
+    {
+        SIZE_T bufferLength;
+        PNTPSS_MEMORY_BULK_INFORMATION buffer;
+        PMEMORY_BASIC_INFORMATION information;
+
+        bufferLength = sizeof(NTPSS_MEMORY_BULK_INFORMATION) + sizeof(MEMORY_BASIC_INFORMATION[20]);
+        buffer = PhAllocate(bufferLength);
+        buffer->QueryFlags = MEMORY_BULK_INFORMATION_FLAG_BASIC;
+
+        // Allocate a large buffer and copy all entries.
+
+        while ((status = NtPssCaptureVaSpaceBulk(
+            ProcessHandle,
+            BaseAddress,
+            buffer,
+            bufferLength,
+            NULL
+            )) == STATUS_MORE_ENTRIES)
+        {
+            PhFree(buffer);
+            bufferLength *= 2;
+
+            if (bufferLength > PH_LARGE_BUFFER_SIZE)
+                return STATUS_INSUFFICIENT_RESOURCES;
+
+            buffer = PhAllocate(bufferLength);
+            buffer->QueryFlags = MEMORY_BULK_INFORMATION_FLAG_BASIC;
+        }
+
+        if (NT_SUCCESS(status))
+        {
+            // Skip the enumeration header.
+
+            information = PTR_ADD_OFFSET(buffer, RTL_SIZEOF_THROUGH_FIELD(NTPSS_MEMORY_BULK_INFORMATION, NextValidAddress));
+
+            // Execute the callback.
+
+            Callback(ProcessHandle, information, buffer->NumberOfEntries, Context);
+        }
+
+        PhFree(buffer);
+    }
+    else
+    {
+        UCHAR stackBuffer[sizeof(NTPSS_MEMORY_BULK_INFORMATION) + sizeof(MEMORY_BASIC_INFORMATION[20])];
+        SIZE_T bufferLength;
+        PNTPSS_MEMORY_BULK_INFORMATION buffer;
+        PMEMORY_BASIC_INFORMATION information;
+
+        bufferLength = sizeof(stackBuffer);
+        buffer = (PNTPSS_MEMORY_BULK_INFORMATION)stackBuffer;
+        buffer->QueryFlags = MEMORY_BULK_INFORMATION_FLAG_BASIC;
+        buffer->NextValidAddress = BaseAddress;
+
+        while (TRUE)
+        {
+            // Get a batch of entries.
+
+            status = NtPssCaptureVaSpaceBulk(
+                ProcessHandle,
+                buffer->NextValidAddress,
+                buffer,
+                bufferLength,
+                NULL
+                );
+
+            if (!NT_SUCCESS(status))
+                break;
+
+            // Skip the enumeration header.
+
+            information = PTR_ADD_OFFSET(buffer, RTL_SIZEOF_THROUGH_FIELD(NTPSS_MEMORY_BULK_INFORMATION, NextValidAddress));
+
+            // Execute the callback.
+
+            if (!NT_SUCCESS(Callback(ProcessHandle, information, buffer->NumberOfEntries, Context)))
+                break;
+
+            // Get the next batch.
+
+            if (status != STATUS_MORE_ENTRIES)
+                break;
+        }
+    }
+
+    return status;
+#else
+    return STATUS_NOT_SUPPORTED;
+#endif
+}
+
+/**
+ * Retrieves information about the pages currently added to the working set of the specified process.
+ *
+ * \param ProcessHandle A handle to a process.
+ * \param ProcessId The ID of the process.
+ * \param Callback A callback function which is executed for each memory page.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhEnumVirtualMemoryPages(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PPH_ENUM_MEMORY_PAGE_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    PMEMORY_WORKING_SET_INFORMATION pageInfo;
+
+    if (!ProcessHandle)
+    {
+        if (WindowsVersion < WINDOWS_10)
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_INFORMATION,
+                ProcessId
+                );
+        }
+        else
+        {
+            status = PhOpenProcess(
+                &processHandle,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                ProcessId
+                );
+        }
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = PhGetProcessWorkingSetInformation(
+        processHandle,
+        &pageInfo
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        status = Callback(
+            processHandle,
+            pageInfo->NumberOfEntries,
+            pageInfo->WorkingSetInfo,
+            Context
+            );
+
+        //for (ULONG_PTR i = 0; i < pageInfo->NumberOfEntries; i++)
+        //{
+        //    PMEMORY_WORKING_SET_BLOCK workingSetBlock = &pageInfo->WorkingSetInfo[i];
+        //    PVOID virtualAddress = (PVOID)(workingSetBlock->VirtualPage << PAGE_SHIFT);
+        //}
+
+        PhFree(pageInfo);
+    }
+
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
+}
+
+/**
+ * Retrieves extended information about the pages currently added to the working set at specific virtual addresses in the address space of the specified process.
+ *
+ * \param ProcessHandle A handle to a process.
+ * \param ProcessId The ID of the process.
+ * \param BaseAddress The base address at which to begin retrieving information.
+ * \param Size The total number of pages to query from the base address.
+ * \param Callback A callback function which is executed for each memory page.
+ * \param Context A user-defined value to pass to the callback function.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhEnumVirtualMemoryAttributes(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_opt_ HANDLE ProcessId,
+    _In_ PVOID BaseAddress,
+    _In_ SIZE_T Size,
+    _In_ PPH_ENUM_MEMORY_ATTRIBUTE_CALLBACK Callback,
+    _In_ PVOID Context
+    )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE processHandle = ProcessHandle;
+    SIZE_T numberOfPages;
+    ULONG_PTR virtualAddress;
+    PMEMORY_WORKING_SET_EX_INFORMATION info;
+    SIZE_T i;
+
+    if (!ProcessHandle)
+    {
+        status = PhOpenProcess(
+            &processHandle,
+            PROCESS_QUERY_INFORMATION,
+            ProcessId
+            );
+    }
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    numberOfPages = ((SIZE_T)((ULONG_PTR)BaseAddress & PAGE_MASK) + Size + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+    virtualAddress = (ULONG_PTR)BaseAddress & ~PAGE_MASK;
+
+    if (!numberOfPages)
+    {
+        status = STATUS_UNSUCCESSFUL;
+        goto CleanupExit;
+    }
+
+    info = PhAllocatePage(numberOfPages * sizeof(MEMORY_WORKING_SET_EX_INFORMATION), NULL);
+
+    if (!info)
+    {
+        status = STATUS_UNSUCCESSFUL;
+        goto CleanupExit;
+    }
+
+    for (i = 0; i < numberOfPages; i++)
+    {
+        info[i].VirtualAddress = (PVOID)virtualAddress;
+        virtualAddress += PAGE_SIZE;
+    }
+
+    status = NtQueryVirtualMemory(
+        processHandle,
+        NULL,
+        MemoryWorkingSetExInformation,
+        info,
+        numberOfPages * sizeof(MEMORY_WORKING_SET_EX_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        status = Callback(
+            processHandle,
+            BaseAddress,
+            Size,
+            numberOfPages,
+            info,
+            Context
+            );
+    }
+
+    PhFreePage(info);
+
+CleanupExit:
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return status;
+}
+
+NTSTATUS PhGetKernelDebuggerInformation(
+    _Out_opt_ PBOOLEAN KernelDebuggerEnabled,
+    _Out_opt_ PBOOLEAN KernelDebuggerPresent
+    )
+{
+    NTSTATUS status;
+    SYSTEM_KERNEL_DEBUGGER_INFORMATION debugInfo;
+
+    status = NtQuerySystemInformation(
+        SystemKernelDebuggerInformation,
+        &debugInfo,
+        sizeof(SYSTEM_KERNEL_DEBUGGER_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (KernelDebuggerEnabled)
+            *KernelDebuggerEnabled = debugInfo.KernelDebuggerEnabled;
+        if (KernelDebuggerPresent)
+            *KernelDebuggerPresent = !debugInfo.KernelDebuggerNotPresent;
+    }
+
+    return status;
+}
+
+// rev from BasepIsDebugPortPresent (dmex)
+BOOLEAN PhIsDebugPortPresent(
+    VOID
+    )
+{
+    BOOLEAN isBeingDebugged;
+
+    if (NT_SUCCESS(PhGetProcessIsBeingDebugged(NtCurrentProcess(), &isBeingDebugged)))
+    {
+        if (isBeingDebugged)
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+// rev from IsDebuggerPresent (dmex)
+/**
+ * Determines whether the calling process is being debugged by a user-mode debugger.
+ *
+ * \return TRUE if the current process is running in the context of a debugger, otherwise the return value is FALSE.
+ */
+BOOLEAN PhIsDebuggerPresent(
+    VOID
+    )
+{
+#ifdef PHNT_NATIVE_DEBUGGER
+    return !!IsDebuggerPresent();
+#else
+    return NtCurrentPeb()->BeingDebugged;
+#endif
 }

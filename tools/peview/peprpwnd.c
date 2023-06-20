@@ -657,10 +657,22 @@ VOID PvAddTreeViewSections(
     PvCreateTabSection(
         L"VersionInfo",
         PhInstanceHandle,
-        MAKEINTRESOURCE(IDD_PEPREVIEW),
+        MAKEINTRESOURCE(IDD_PEVERSIONINFO),
         PvpPeVersionInfoDlgProc,
         NULL
         );
+
+    // Mappings page
+    if (KphLevelEx(FALSE) >= KphLevelMed)
+    {
+        PvCreateTabSection(
+            L"Mappings",
+            PhInstanceHandle,
+            MAKEINTRESOURCE(IDD_PERELOCATIONS),
+            PvpMappingsDlgProc,
+            NULL
+            );
+    }
 
     if (PhGetIntegerSetting(L"MainWindowPageRestoreEnabled"))
     {
@@ -772,7 +784,7 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
                     PhDereferenceObject(fileName);
                 }
 
-                PhLoadModulesForProcessSymbolProvider(PvSymbolProvider, NtCurrentProcessId());
+                PhLoadModulesForVirtualSymbolProvider(PvSymbolProvider, NtCurrentProcessId());
             }
 
             PvAddTreeViewSections();
@@ -908,27 +920,7 @@ INT_PTR CALLBACK PvTabWindowDialogProc(
                 {
                     if (header->hwndFrom == PvTabTreeControl)
                     {
-                        static PH_INITONCE initOnce = PH_INITONCE_INIT;
-                        static HCURSOR cursorHandle = NULL;
-
-                        if (PhBeginInitOnce(&initOnce))
-                        {
-                            cursorHandle = (HCURSOR)LoadImage(
-                                NULL,
-                                IDC_ARROW,
-                                IMAGE_CURSOR,
-                                0,
-                                0,
-                                LR_SHARED
-                                );
-
-                            PhEndInitOnce(&initOnce);
-                        }
-
-                        if (cursorHandle)
-                        {
-                            SetCursor(cursorHandle);
-                        }
+                        PhSetCursor(PhLoadArrowCursor());
 
                         SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, TRUE);
                         return TRUE;

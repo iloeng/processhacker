@@ -53,6 +53,7 @@ typedef enum _PH_MAINWINDOW_CALLBACK_TYPE
     PH_MAINWINDOW_CALLBACK_TYPE_GET_UPDATE_AUTOMATICALLY,
     PH_MAINWINDOW_CALLBACK_TYPE_SET_UPDATE_AUTOMATICALLY,
     PH_MAINWINDOW_CALLBACK_TYPE_ICON_CLICK,
+    PH_MAINWINDOW_CALLBACK_TYPE_WINDOW_BASE,
     PH_MAINWINDOW_CALLBACK_TYPE_WINDOW_PROCEDURE,
     PH_MAINWINDOW_CALLBACK_TYPE_WINDOW_HANDLE,
     PH_MAINWINDOW_CALLBACK_TYPE_VERSION,
@@ -108,11 +109,13 @@ PhPluginInvokeWindowCallback(
 #define ProcessHacker_Refresh() \
     PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_REFRESH, 0, 0)
 #define ProcessHacker_GetUpdateAutomatically() \
-    ((BOOLEAN)PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_GET_UPDATE_AUTOMATICALLY, 0, 0))
+    ((BOOLEAN)PtrToUlong(PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_GET_UPDATE_AUTOMATICALLY, 0, 0)))
 #define ProcessHacker_SetUpdateAutomatically(Value) \
     PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_SET_UPDATE_AUTOMATICALLY, (PVOID)(ULONG_PTR)(Value), 0)
 #define ProcessHacker_IconClick() \
     PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_ICON_CLICK, 0, 0)
+#define ProcessHacker_GetInstanceHandle() \
+    ((PVOID)PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_WINDOW_BASE, 0, 0))
 #define ProcessHacker_GetWindowProcedure() \
     ((WNDPROC)PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_WINDOW_PROCEDURE, 0, 0))
 #define ProcessHacker_GetWindowHandle() \
@@ -120,7 +123,7 @@ PhPluginInvokeWindowCallback(
 #define ProcessHacker_GetWindowsVersion() \
     (PtrToUlong(PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_VERSION, 0, 0)))
 #define ProcessHacker_IsPortableMode() \
-    ((BOOLEAN)PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_PORTABLE, 0, 0))
+    ((BOOLEAN)PtrToUlong(PhPluginInvokeWindowCallback(PH_MAINWINDOW_CALLBACK_TYPE_PORTABLE, 0, 0)))
 
 #define PhWindowsVersion ProcessHacker_GetWindowsVersion() // Temporary backwards compat (dmex)
 #define PhMainWindowHandle ProcessHacker_GetWindowHandle() // Temporary backwards compat (dmex)
@@ -179,8 +182,10 @@ typedef enum _PH_MAIN_TAB_PAGE_MESSAGE
     MaxMainTabPageMessage
 } PH_MAIN_TAB_PAGE_MESSAGE;
 
+typedef struct _PH_MAIN_TAB_PAGE *PPH_MAIN_TAB_PAGE;
+
 typedef BOOLEAN (NTAPI *PPH_MAIN_TAB_PAGE_CALLBACK)(
-    _In_ struct _PH_MAIN_TAB_PAGE *Page,
+    _In_ PPH_MAIN_TAB_PAGE Page,
     _In_ PH_MAIN_TAB_PAGE_MESSAGE Message,
     _In_opt_ PVOID Parameter1,
     _In_opt_ PVOID Parameter2
@@ -194,7 +199,7 @@ typedef struct _PH_MAIN_TAB_PAGE_EXPORT_CONTENT
 
 typedef struct _PH_MAIN_TAB_PAGE_MENU_INFORMATION
 {
-    struct _PH_EMENU_ITEM *Menu;
+    PPH_EMENU_ITEM Menu;
     ULONG StartIndex;
 } PH_MAIN_TAB_PAGE_MENU_INFORMATION, *PPH_MAIN_TAB_PAGE_MENU_INFORMATION;
 
@@ -246,12 +251,12 @@ BOOLEAN PhMainWndInitialization(
     );
 
 VOID PhAddMiniProcessMenuItems(
-    _Inout_ struct _PH_EMENU_ITEM *Menu,
+    _Inout_ PPH_EMENU_ITEM Menu,
     _In_ HANDLE ProcessId
     );
 
 BOOLEAN PhHandleMiniProcessMenuItem(
-    _Inout_ struct _PH_EMENU_ITEM *MenuItem
+    _Inout_ PPH_EMENU_ITEM MenuItem
     );
 
 VOID PhShowIconContextMenu(
@@ -274,6 +279,11 @@ VOID PhShowDetailsForIconNotification(
 
 VOID PhShowOptionsRestartRequired(
     _In_ HWND WindowHandle
+    );
+
+BOOLEAN PhShowOptionsDefaultInstallLocation(
+    _In_ HWND ParentWindowHandle,
+    _In_ PWSTR Message
     );
 
 VOID PhShowProcessContextMenu(

@@ -97,7 +97,7 @@ PPHP_PROCESS_WMI_TREENODE PhpAddWmiProviderNode(
 
 PPHP_PROCESS_WMI_TREENODE PhpFindWmiProviderNode(
     _In_ PPH_PROCESS_WMI_CONTEXT Context,
-    _In_ PWSTR KeyPath
+    _In_ PWSTR RelativePath
     );
 
 VOID PhpClearWmiProviderTree(
@@ -124,20 +124,14 @@ PVOID PhpGetWmiUtilsDllBase(
 
     if (PhBeginInitOnce(&initOnce))
     {
-        PPH_STRING systemDirectory;
         PPH_STRING systemFileName;
 
-        if (systemDirectory = PhGetSystemDirectory())
+        if (systemFileName = PhGetSystemDirectoryWin32Z(L"\\wbem\\wmiutils.dll"))
         {
-            if (systemFileName = PhConcatStringRefZ(&systemDirectory->sr, L"\\wbem\\wmiutils.dll"))
-            {
-                if (!(imageBaseAddress = PhGetLoaderEntryDllBase(&systemFileName->sr, NULL)))
-                    imageBaseAddress = PhLoadLibrary(PhGetString(systemFileName));
+            if (!(imageBaseAddress = PhGetLoaderEntryDllBase(&systemFileName->sr, NULL)))
+                imageBaseAddress = PhLoadLibrary(PhGetString(systemFileName));
 
-                PhDereferenceObject(systemFileName);
-            }
-
-            PhDereferenceObject(systemDirectory);
+            PhDereferenceObject(systemFileName);
         }
 
         PhEndInitOnce(&initOnce);
@@ -589,7 +583,6 @@ PPH_STRING PhpQueryWmiProviderStatistics(
     )
 {
     static PH_STRINGREF wbemResource = PH_STRINGREF_INIT(L"Root\\CIMV2");
-    static PH_STRINGREF wbemLanguage = PH_STRINGREF_INIT(L"WQL");
     HRESULT status;
     PVOID imageBaseAddress;
     PPH_STRING wbemProviderString = NULL;
@@ -1547,7 +1540,7 @@ BOOLEAN NTAPI PhpWmiProviderTreeNewCallback(
 
             data.TreeNewHandle = hwnd;
             data.MouseEvent = Parameter1;
-            data.DefaultSortColumn = 0;
+            data.DefaultSortColumn = PROCESS_WMI_COLUMN_ITEM_PROVIDER;
             data.DefaultSortOrder = NoSortOrder;
             PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
