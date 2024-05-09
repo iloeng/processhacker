@@ -49,6 +49,12 @@
     <Filter Include="zydis">
       <UniqueIdentifier>{eb165962-c40f-479c-96f2-bbe8f3617100}</UniqueIdentifier>
     </Filter>
+    <Filter Include="yyjson">
+      <UniqueIdentifier>{1818696b-f7ae-415d-b65d-92ed25a53bb4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="pugixml">
+      <UniqueIdentifier>{689af775-4fa6-4276-8a2f-bd4a87034d2a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="jsonc\arraylist.c">
@@ -401,6 +407,12 @@
     </ClCompile>
     <ClCompile Include="zydis\Zydis.c">
       <Filter>zydis</Filter>
+    </ClCompile>
+    <ClCompile Include="yyjson\yyjson.c">
+      <Filter>yyjson</Filter>
+    </ClCompile>
+    <ClCompile Include="pugixml\pugixml.cpp">
+      <Filter>pugixml</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -769,6 +781,18 @@
     </ClInclude>
     <ClInclude Include="zydis\Zydis.h">
       <Filter>zydis</Filter>
+    </ClInclude>
+    <ClInclude Include="yyjson\yyjson.h">
+      <Filter>yyjson</Filter>
+    </ClInclude>
+    <ClInclude Include="jsonc\json_pointer_private.h">
+      <Filter>Json-C\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="pugixml\pugiconfig.hpp">
+      <Filter>pugixml</Filter>
+    </ClInclude>
+    <ClInclude Include="pugixml\pugixml.hpp">
+      <Filter>pugixml</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

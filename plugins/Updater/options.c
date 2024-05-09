@@ -12,13 +12,13 @@
 #include "updater.h"
 
 INT_PTR CALLBACK OptionsDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
+    _In_ HWND WindowHandle,
+    _In_ UINT WindowMessage,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     )
 {
-    switch (uMsg)
+    switch (WindowMessage)
     {
     case WM_INITDIALOG:
         {
@@ -27,7 +27,7 @@ INT_PTR CALLBACK OptionsDlgProc(
                 ULONG64 lastUpdateTimeTicks;
                 PPH_STRING lastUpdateTimeString;
 
-                Button_SetCheck(GetDlgItem(hwndDlg, IDC_AUTOCHECKBOX), BST_CHECKED);
+                Button_SetCheck(GetDlgItem(WindowHandle, IDC_AUTOCHECKBOX), BST_CHECKED);
 
                 if (lastUpdateTimeString = PhGetStringSetting(SETTING_NAME_LAST_CHECK))
                 {
@@ -46,7 +46,7 @@ INT_PTR CALLBACK OptionsDlgProc(
                         PhQuerySystemTime(&currentTime);
                         timeRelativeString = PH_AUTO(PhFormatTimeSpanRelative(currentTime.QuadPart - lastUpdateTimeTicks));
 
-                        PhSetDialogItemText(hwndDlg, IDC_TEXT, PhaFormatString(
+                        PhSetDialogItemText(WindowHandle, IDC_TEXT, PhaFormatString(
                             L"Last update check: %s (%s ago)",
                             PhGetStringOrEmpty(timeString),
                             PhGetStringOrEmpty(timeRelativeString)
@@ -60,7 +60,7 @@ INT_PTR CALLBACK OptionsDlgProc(
                         if (time.QuadPart > 0)
                         {
                             timeRelativeString = PH_AUTO(PhFormatTimeSpanRelative(time.QuadPart));
-                            PhSetDialogItemText(hwndDlg, IDC_TEXT2, PhaFormatString(
+                            PhSetDialogItemText(WindowHandle, IDC_TEXT2, PhaFormatString(
                                 L"Next update check: %s (%s)",
                                 PhGetStringOrEmpty(timeString),
                                 PhGetStringOrEmpty(timeRelativeString)
@@ -68,7 +68,7 @@ INT_PTR CALLBACK OptionsDlgProc(
                         }
                         else
                         {
-                            PhSetDialogItemText(hwndDlg, IDC_TEXT2, PhaFormatString(
+                            PhSetDialogItemText(WindowHandle, IDC_TEXT2, PhaFormatString(
                                 L"Next update check: %s",
                                 PhGetStringOrEmpty(timeString)
                                 )->Buffer);
@@ -81,12 +81,12 @@ INT_PTR CALLBACK OptionsDlgProc(
 
             if (PhGetIntegerSetting(SETTING_NAME_UPDATE_MODE))
             {
-                Button_SetCheck(GetDlgItem(hwndDlg, IDC_SHOWSTARTPROMPTCHECK), BST_CHECKED);
+                Button_SetCheck(GetDlgItem(WindowHandle, IDC_SHOWSTARTPROMPTCHECK), BST_CHECKED);
             }
 
             if (PhGetIntegerSetting(SETTING_NAME_AUTO_CHECK_PAGE))
             {
-                Button_SetCheck(GetDlgItem(hwndDlg, IDC_SKIPWELCOMEPAGECHECK), BST_CHECKED);
+                Button_SetCheck(GetDlgItem(WindowHandle, IDC_SKIPWELCOMEPAGECHECK), BST_CHECKED);
             }
         }
         break;
@@ -116,11 +116,11 @@ INT_PTR CALLBACK OptionsDlgProc(
         }
         break;
     case WM_CTLCOLORBTN:
-        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        return HANDLE_WM_CTLCOLORBTN(WindowHandle, wParam, lParam, PhWindowThemeControlColor);
     case WM_CTLCOLORDLG:
-        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        return HANDLE_WM_CTLCOLORDLG(WindowHandle, wParam, lParam, PhWindowThemeControlColor);
     case WM_CTLCOLORSTATIC:
-        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+        return HANDLE_WM_CTLCOLORSTATIC(WindowHandle, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;
@@ -176,21 +176,54 @@ BOOLEAN PhpUpdaterExtractCoAuthorName(
     return TRUE;
 }
 
+PPH_STRING PhUpdaterCreateUserAgentString(
+    VOID
+    )
+{
+    PH_FORMAT format[8];
+    SIZE_T returnLength;
+    ULONG majorVersion;
+    ULONG minorVersion;
+    ULONG buildVersion;
+    ULONG revisionVersion;
+    WCHAR formatBuffer[260];
+
+    PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
+    PhInitFormatS(&format[0], L"SystemInformer_");
+    PhInitFormatU(&format[1], majorVersion);
+    PhInitFormatC(&format[2], L'.');
+    PhInitFormatU(&format[3], minorVersion);
+    PhInitFormatC(&format[4], L'.');
+    PhInitFormatU(&format[5], buildVersion);
+    PhInitFormatC(&format[6], L'.');
+    PhInitFormatU(&format[7], revisionVersion);
+
+    if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), &returnLength))
+    {
+        PH_STRINGREF stringFormat;
+
+        stringFormat.Buffer = formatBuffer;
+        stringFormat.Length = returnLength - sizeof(UNICODE_NULL);
+
+        return PhCreateString2(&stringFormat);
+    }
+
+    return PhFormat(format, RTL_NUMBER_OF(format), 0);
+}
+
 PPH_LIST PhpUpdaterQueryCommitHistory(
     VOID
     )
 {
     PPH_LIST results = NULL;
     PPH_BYTES jsonString = NULL;
-    PPH_STRING versionString = NULL;
-    PPH_STRING userAgentString = NULL;
+    PPH_STRING userAgentString;
     PPH_HTTP_CONTEXT httpContext = NULL;
     PVOID jsonRootObject = NULL;
     ULONG i;
     ULONG arrayLength;
 
-    versionString = PhGetPhVersion();
-    userAgentString = PhConcatStrings2(L"SystemInformer_", versionString->Buffer);
+    userAgentString = PhUpdaterCreateUserAgentString();
 
     if (!PhHttpSocketCreate(&httpContext, PhGetString(userAgentString)))
         goto CleanupExit;
@@ -320,7 +353,6 @@ CleanupExit:
         PhFreeJsonObject(jsonRootObject);
 
     PhClearReference(&jsonString);
-    PhClearReference(&versionString);
     PhClearReference(&userAgentString);
 
     return results;
@@ -363,7 +395,7 @@ PPH_STRING PhpUpdaterCommitStringToTime(
 
     if (count == 6)
     {
-        if (SystemTimeToTzSpecificLocalTimeEx(NULL, &time, &localTime))
+        if (SystemTimeToTzSpecificLocalTime(NULL, &time, &localTime))
         {
             //result = PhFormatDateTime(&localTime);
             result = PhFormatDate(&localTime, NULL);

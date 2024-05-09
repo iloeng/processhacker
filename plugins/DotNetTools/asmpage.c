@@ -91,7 +91,7 @@ typedef struct _ASMPAGE_CONTEXT
     HWND SearchBoxHandle;
     HWND TreeNewHandle;
 
-    PPH_STRING SearchBoxText;
+    ULONG_PTR SearchMatchHandle;
     PPH_STRING TreeErrorMessage;
 
     PPH_PROCESS_ITEM ProcessItem;
@@ -167,8 +167,8 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
     );
 
 static UNICODE_STRING DotNetLoggerName = RTL_CONSTANT_STRING(L"SiDnLogger");
-static GUID ClrRuntimeProviderGuid = { 0xe13c0d23, 0xccbc, 0x4e12, { 0x93, 0x1b, 0xd9, 0xcc, 0x2e, 0xee, 0x27, 0xe4 } };
-static GUID ClrRundownProviderGuid = { 0xa669021c, 0xc450, 0x4609, { 0xa0, 0x35, 0x5a, 0xf5, 0x9a, 0xf4, 0xdf, 0x18 } };
+DEFINE_GUID(ClrRuntimeProviderGuid, 0xe13c0d23, 0xccbc, 0x4e12, 0x93, 0x1b, 0xd9, 0xcc, 0x2e, 0xee, 0x27, 0xe4);
+DEFINE_GUID(ClrRundownProviderGuid, 0xa669021c, 0xc450, 0x4609, 0xa0, 0x35, 0x5a, 0xf5, 0x9a, 0xf4, 0xdf, 0x18);
 
 static FLAG_DEFINITION AppDomainFlagsMap[] =
 {
@@ -777,6 +777,8 @@ BOOLEAN NTAPI DotNetAsmTreeNewCallback(
                         SORT_FUNCTION(Mvid),
                     };
                     int (__cdecl* sortFunction)(void*, void const*, void const*);
+
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == DNATNC_MAXIMUM, "SortFunctions must equal maximum.");
 
                     if (context->TreeNewSortColumn < DNATNC_MAXIMUM)
                         sortFunction = sortFunctions[context->TreeNewSortColumn];
@@ -1427,7 +1429,7 @@ NTSTATUS UpdateDotNetTraceInfoThreadStart(
     PASMPAGE_QUERY_CONTEXT context = Parameter;
     TRACEHANDLE sessionHandle;
     PEVENT_TRACE_PROPERTIES properties;
-    PGUID guidToEnable;
+    PCGUID guidToEnable;
 
     context->TraceResult = StartDotNetTrace(&sessionHandle, &properties);
 
@@ -1857,34 +1859,51 @@ BOOLEAN DotNetAsmTreeFilterCallback(
     if (context->HideNativeModules && node->Type == DNA_TYPE_ASSEMBLY && (node->u.Assembly.AssemblyFlags & 0x4) == 0x4)
         return FALSE;
 
-    if (PhIsNullOrEmptyString(context->SearchBoxText))
+    if (!context->SearchMatchHandle)
         return TRUE;
 
     if (!PhIsNullOrEmptyString(node->IdText))
     {
-        if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->IdText->sr))
+        if (PhSearchControlMatch(context->SearchMatchHandle, &node->IdText->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(node->FlagsText))
     {
-        if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->FlagsText->sr))
+        if (PhSearchControlMatch(context->SearchMatchHandle, &node->FlagsText->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(node->PathText))
     {
-        if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->PathText->sr))
+        if (PhSearchControlMatch(context->SearchMatchHandle, &node->PathText->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(node->NativePathText))
     {
-        if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->NativePathText->sr))
+        if (PhSearchControlMatch(context->SearchMatchHandle, &node->NativePathText->sr))
             return TRUE;
     }
 
     return FALSE;
+}
+
+VOID NTAPI DotNetAsmSearchControlCallback(
+    _In_ ULONG_PTR MatchHandle,
+    _In_opt_ PVOID Context
+)
+{
+    PASMPAGE_CONTEXT context = Context;
+
+    assert(context);
+
+    DotNetAsmExpandAllTreeNodes(context, TRUE);
+
+    context->SearchMatchHandle = MatchHandle;
+
+    PhApplyTreeNewFilters(&context->TreeFilterSupport);
+    TreeNew_NodesStructured(context->TreeNewHandle);
 }
 
 INT_PTR CALLBACK DotNetAsmPageDlgProc(
@@ -1917,9 +1936,14 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
             context->ProcessItem = processItem;
             context->SearchBoxHandle = GetDlgItem(hwndDlg, IDC_SEARCHEDIT);
             context->TreeNewHandle = GetDlgItem(hwndDlg, IDC_LIST);
-            context->SearchBoxText = PhReferenceEmptyString();
 
-            PhCreateSearchControl(hwndDlg, context->SearchBoxHandle, L"Search Assemblies (Ctrl+K)");
+            PhCreateSearchControl(
+                hwndDlg,
+                context->SearchBoxHandle,
+                L"Search Assemblies (Ctrl+K)",
+                DotNetAsmSearchControlCallback,
+                context
+                );
 
             DotNetAsmInitializeTreeList(context);
 
@@ -1935,8 +1959,6 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
 
             DotNetAsmDeleteTree(context);
 
-            if (context->SearchBoxText)
-                PhDereferenceObject(context->SearchBoxText);
             if (context->TreeErrorMessage)
                 PhDereferenceObject(context->TreeErrorMessage);
 
@@ -1969,29 +1991,6 @@ INT_PTR CALLBACK DotNetAsmPageDlgProc(
         break;
     case WM_COMMAND:
         {
-            switch (GET_WM_COMMAND_CMD(wParam, lParam))
-            {
-            case EN_CHANGE:
-                {
-                    PPH_STRING newSearchboxText;
-
-                    if (GET_WM_COMMAND_HWND(wParam, lParam) != context->SearchBoxHandle)
-                        break;
-
-                    newSearchboxText = PH_AUTO(PhGetWindowText(context->SearchBoxHandle));
-
-                    if (!PhEqualString(context->SearchBoxText, newSearchboxText, FALSE))
-                    {
-                        DotNetAsmExpandAllTreeNodes(context, TRUE);
-
-                        PhSwapReference(&context->SearchBoxText, newSearchboxText);
-                        PhApplyTreeNewFilters(&context->TreeFilterSupport);
-                        TreeNew_NodesStructured(context->TreeNewHandle);
-                    }
-                }
-                break;
-            }
-
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case ID_COPY:

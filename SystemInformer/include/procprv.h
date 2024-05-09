@@ -124,9 +124,6 @@ extern PH_CIRCULAR_BUFFER_ULONG64 PhMaxIoWriteHistory;
 #define PH_PROCESS_ITEM_REMOVED 0x1
 // end_phapppub
 
-#define PH_INTEGRITY_STR_LEN 10
-#define PH_INTEGRITY_STR_LEN_1 (PH_INTEGRITY_STR_LEN + 1)
-
 // begin_phapppub
 typedef enum _VERIFY_RESULT VERIFY_RESULT;
 typedef struct _PH_PROCESS_RECORD *PPH_PROCESS_RECORD;
@@ -150,6 +147,7 @@ typedef struct _PH_PROCESS_ITEM
     HANDLE ParentProcessId;
     PPH_STRING ProcessName;
     ULONG SessionId;
+    ULONG64 ProcessStartKey;
 
     LARGE_INTEGER CreateTime;
 
@@ -231,7 +229,8 @@ typedef struct _PH_PROCESS_ITEM
     WCHAR ProcessIdString[PH_INT32_STR_LEN_1];
     //WCHAR ParentProcessIdString[PH_INT32_STR_LEN_1];
     //WCHAR SessionIdString[PH_INT32_STR_LEN_1];
-    PPH_STRING AlternateProcessIdString;
+    WCHAR LxssProcessIdString[PH_INT32_STR_LEN_1];
+    WCHAR ProcessStartKeyString[PH_PTR_STR_LEN_1];
 
     // Dynamic
 
@@ -293,6 +292,8 @@ typedef struct _PH_PROCESS_ITEM
 
     NTSTATUS ImageCoherencyStatus;
     FLOAT ImageCoherency;
+
+    ULONG LxssProcessId;
 
 } PH_PROCESS_ITEM, *PPH_PROCESS_ITEM;
 // end_phapppub
@@ -515,6 +516,14 @@ HIMAGELIST
 NTAPI
 PhGetProcessSmallImageList(
     VOID
+    );
+
+// Note: Can only be called from same thread as process provider. (dmex)
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhDuplicateProcessInformation(
+    _Out_ PPVOID ProcessInformation
     );
 // end_phapppub
 

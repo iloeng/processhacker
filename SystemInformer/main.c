@@ -22,6 +22,7 @@
 #include <phsettings.h>
 #include <phsvc.h>
 #include <procprv.h>
+#include <devprv.h>
 
 #include <ksisup.h>
 #include <settings.h>
@@ -149,7 +150,18 @@ INT WINAPI wWinMain(
         !PhStartupParameters.ShowOptions &&
         !PhStartupParameters.PhSvc)
     {
-        if (!PhGetOwnTokenAttributes().Elevated)
+        if (PhGetOwnTokenAttributes().Elevated)
+        {
+            if (PhGetIntegerSetting(L"EnableStartAsAdminAlwaysOnTop"))
+            {
+                if (NT_SUCCESS(PhRunAsAdminTaskUIAccess()))
+                {
+                    PhActivatePreviousInstance();
+                    PhExitApplication(STATUS_SUCCESS);
+                }
+            }
+        }
+        else
         {
             AllowSetForegroundWindow(ASFW_ANY);
 
@@ -161,7 +173,7 @@ INT WINAPI wWinMain(
         }
     }
 
-    if (PhGetIntegerSetting(L"EnableKph") &&
+    if (PhGetIntegerSetting(L"KsiEnable") &&
         !PhStartupParameters.NoKph &&
         !PhStartupParameters.ShowOptions &&
         !PhIsExecutingInWow64())
@@ -174,7 +186,7 @@ INT WINAPI wWinMain(
     dbg.StartAddress = wWinMain;
     dbg.Parameter = NULL;
     InsertTailList(&PhDbgThreadListHead, &dbg.ListEntry);
-    TlsSetValue(PhDbgThreadDbgTlsIndex, &dbg);
+    PhTlsSetValue(PhDbgThreadDbgTlsIndex, &dbg);
 #endif
 
     PhInitializeAutoPool(&BaseAutoPool);
@@ -238,7 +250,7 @@ INT WINAPI wWinMain(
         PhSetProcessPriority(NtCurrentProcess(), priorityClass);
     }
 
-    if (PhGetIntegerSetting(L"EnableKph") &&
+    if (PhGetIntegerSetting(L"KsiEnable") &&
         !PhStartupParameters.NoKph &&
         !PhIsExecutingInWow64())
     {
@@ -259,14 +271,11 @@ INT WINAPI wWinMain(
 
     PhEnableTerminationPolicy(FALSE);
 
-    if (PhGetIntegerSetting(L"AllowOnlyOneInstance") &&
-        PhGetIntegerSetting(L"EnableKph") &&
-        PhGetIntegerSetting(L"KsiUnloadOnExitTest") &&
-        !PhStartupParameters.NewInstance &&
+    if (PhGetIntegerSetting(L"KsiEnable") &&
         !PhStartupParameters.NoKph &&
         !PhIsExecutingInWow64())
     {
-        PhDestroyKsi();
+        PhCleanupKsi();
     }
 
     PhExitApplication(result);
@@ -436,7 +445,7 @@ static BOOL CALLBACK PhpPreviousInstanceWindowEnumProc(
 static BOOLEAN NTAPI PhpPreviousInstancesCallback(
     _In_ PPH_STRINGREF Name,
     _In_ PPH_STRINGREF TypeName,
-    _In_opt_ PVOID Context
+    _In_ PVOID Context
     )
 {
     static PH_STRINGREF objectNameSr = PH_STRINGREF_INIT(L"SiMutant_");
@@ -454,7 +463,7 @@ static BOOLEAN NTAPI PhpPreviousInstancesCallback(
         &objectAttributes,
         &objectName,
         OBJ_CASE_INSENSITIVE,
-        PhGetNamespaceHandle(),
+        Context,
         NULL
         );
 
@@ -532,7 +541,11 @@ VOID PhActivatePreviousInstance(
     VOID
     )
 {
-    PhEnumDirectoryObjects(PhGetNamespaceHandle(), PhpPreviousInstancesCallback, NULL);
+    HANDLE directoryHandle;
+
+    directoryHandle = PhGetNamespaceHandle();
+
+    PhEnumDirectoryObjects(directoryHandle, PhpPreviousInstancesCallback, directoryHandle);
 }
 
 VOID PhInitializeCommonControls(
@@ -593,18 +606,18 @@ BOOLEAN PhInitializeDirectoryPolicy(
 
 #pragma region Error Reporting
 #include <symprv.h>
-#include <minidumpapiset.h>
+#include <winsta.h>
 
-typedef enum _PH_DUMP_TYPE
+typedef enum _PH_TRIAGE_DUMP_TYPE
 {
-    PhDumpTypeMinidump,
-    PhDumpTypeNormaldump,
-    PhDumpTypeFulldump,
-} PH_DUMP_TYPE;
+    PhTriageDumpTypeMinimal,
+    PhTriageDumpTypeNormal,
+    PhTriageDumpTypeFull,
+} PH_TRIAGE_DUMP_TYPE;
 
 VOID PhpCreateUnhandledExceptionCrashDump(
     _In_ PEXCEPTION_POINTERS ExceptionInfo,
-    _In_ PH_DUMP_TYPE DumpType
+    _In_ PH_TRIAGE_DUMP_TYPE DumpType
     )
 {
     HANDLE fileHandle;
@@ -615,6 +628,7 @@ VOID PhpCreateUnhandledExceptionCrashDump(
     PhGenerateRandomAlphaString(alphastring, RTL_NUMBER_OF(alphastring));
     directory = PhExpandEnvironmentStringsZ(L"\\??\\%USERPROFILE%\\Desktop\\");
     fileName = PhConcatStrings(5, PhGetString(directory), L"SystemInformer", L"_DumpFile_", alphastring, L".dmp");
+    PhCreateDirectoryFullPath(&fileName->sr);
 
     if (NT_SUCCESS(PhCreateFile(
         &fileHandle,
@@ -627,7 +641,7 @@ VOID PhpCreateUnhandledExceptionCrashDump(
         )))
     {
         MINIDUMP_EXCEPTION_INFORMATION exceptionInfo;
-        ULONG dumpType = PhDumpTypeNormaldump;
+        ULONG dumpType = PhTriageDumpTypeMinimal;
 
         exceptionInfo.ThreadId = HandleToUlong(NtCurrentThreadId());
         exceptionInfo.ExceptionPointers = ExceptionInfo;
@@ -635,10 +649,15 @@ VOID PhpCreateUnhandledExceptionCrashDump(
 
         switch (DumpType)
         {
-        case PhDumpTypeMinidump:
-            dumpType = MiniDumpWithDataSegs | MiniDumpWithUnloadedModules | MiniDumpWithProcessThreadData;
+        case PhTriageDumpTypeMinimal:
+            dumpType =
+                MiniDumpWithDataSegs |
+                MiniDumpWithUnloadedModules |
+                MiniDumpWithProcessThreadData |
+                MiniDumpWithThreadInfo |
+                MiniDumpIgnoreInaccessibleMemory;
             break;
-        case PhDumpTypeNormaldump:
+        case PhTriageDumpTypeNormal:
             dumpType =
                 MiniDumpWithDataSegs |
                 MiniDumpWithHandleData |
@@ -650,7 +669,7 @@ VOID PhpCreateUnhandledExceptionCrashDump(
                 MiniDumpIgnoreInaccessibleMemory |
                 MiniDumpWithTokenInformation;
             break;
-        case PhDumpTypeFulldump:
+        case PhTriageDumpTypeFull:
             dumpType =
                 MiniDumpWithDataSegs |
                 MiniDumpWithFullMemory |
@@ -690,91 +709,145 @@ ULONG CALLBACK PhpUnhandledExceptionCallback(
     PPH_STRING errorMessage;
     PPH_STRING message;
     INT result;
-    TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
-    TASKDIALOG_BUTTON buttons[6] =
-    {
-        { 1, L"Fulldump\nA complete dump of the process, rarely needed most of the time." },
-        { 2, L"Normaldump\nFor most purposes, this dump file is the most useful." },
-        { 3, L"Minidump\nA very limited dump with limited data." },
-        { 4, L"Restart\nRestart the application." }, // and hope it doesn't crash again.";
-        { 5, L"Ignore" },  // \nTry ignore the exception and continue.";
-        { 6, L"Exit" }, // \nTerminate the program.";
-    };
 
     // Let the debugger handle the exception. (dmex)
-    // NOTE: Disable this check when debugging this callback.
     if (PhIsDebuggerPresent())
     {
+        // Remove this return to debug the exception callback. (dmex)
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
-    if (NT_NTWIN32(ExceptionInfo->ExceptionRecord->ExceptionCode))
-        errorMessage = PhGetStatusMessage(0, PhNtStatusToDosError(ExceptionInfo->ExceptionRecord->ExceptionCode));
-    else
-        errorMessage = PhGetStatusMessage(ExceptionInfo->ExceptionRecord->ExceptionCode, 0);
+    if (PhIsInteractiveUserSession())
+    {
+        TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
+        TASKDIALOG_BUTTON buttons[6] =
+        {
+            { 1, L"Full\nA complete dump of the process, rarely needed most of the time." },
+            { 2, L"Normal\nFor most purposes, this dump file is the most useful." },
+            { 3, L"Minimal\nA very limited dump with limited data." },
+            { 4, L"Restart\nRestart the application." }, // and hope it doesn't crash again.";
+            { 5, L"Ignore" },  // \nTry ignore the exception and continue.";
+            { 6, L"Exit" }, // \nTerminate the program.";
+        };
 
-    message = PhFormatString(
-        L"0x%08X (%s)",
-        ExceptionInfo->ExceptionRecord->ExceptionCode,
-        PhGetStringOrEmpty(errorMessage)
-        );
+        if (NT_NTWIN32(ExceptionInfo->ExceptionRecord->ExceptionCode))
+            errorMessage = PhGetStatusMessage(0, PhNtStatusToDosError(ExceptionInfo->ExceptionRecord->ExceptionCode));
+        else
+            errorMessage = PhGetStatusMessage(ExceptionInfo->ExceptionRecord->ExceptionCode, 0);
 
-    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_USE_COMMAND_LINKS | TDF_EXPAND_FOOTER_AREA;
-    config.pszWindowTitle = PhApplicationName;
-    config.pszMainIcon = TD_ERROR_ICON;
-    config.pszMainInstruction = L"System Informer has crashed :(";
-    config.cButtons = RTL_NUMBER_OF(buttons);
-    config.pButtons = buttons;
-    config.nDefaultButton = 6;
-    config.cxWidth = 250;
-    config.pszContent = PhGetString(message);
+        message = PhFormatString(
+            L"0x%08X (%s)",
+            ExceptionInfo->ExceptionRecord->ExceptionCode,
+            PhGetStringOrEmpty(errorMessage)
+            );
+
+        config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_USE_COMMAND_LINKS | TDF_EXPAND_FOOTER_AREA;
+        config.pszWindowTitle = PhApplicationName;
+        config.pszMainIcon = TD_ERROR_ICON;
+        config.pszMainInstruction = L"System Informer has crashed :(";
+        config.cButtons = RTL_NUMBER_OF(buttons);
+        config.pButtons = buttons;
+        config.nDefaultButton = 6;
+        config.cxWidth = 250;
+        config.pszContent = PhGetString(message);
 #ifdef DEBUG
-    config.pszExpandedInformation = PhGetString(PhGetStacktraceAsString());
+        config.pszExpandedInformation = PhGetString(PhGetStacktraceAsString());
 #endif
 
-    if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)))
-    {
-        switch (result)
+        if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)))
         {
-        case 1:
-            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeFulldump);
-            break;
-        case 2:
-            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeNormaldump);
-            break;
-        case 3:
-            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhDumpTypeMinidump);
-            break;
-        case 4:
+            switch (result)
             {
-                PhShellProcessHacker(
-                    NULL,
-                    NULL,
-                    SW_SHOW,
-                    PH_SHELL_EXECUTE_DEFAULT,
-                    PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
-                    0,
-                    NULL
-                    );
+            case 1:
+                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhTriageDumpTypeFull);
+                break;
+            case 2:
+                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhTriageDumpTypeNormal);
+                break;
+            case 3:
+                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhTriageDumpTypeMinimal);
+                break;
+            case 4:
+                {
+                    PhShellProcessHacker(
+                        NULL,
+                        NULL,
+                        SW_SHOW,
+                        PH_SHELL_EXECUTE_DEFAULT,
+                        PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
+                        0,
+                        NULL
+                        );
+                }
+                break;
+            case 5:
+                {
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+                break;
             }
-            break;
-        case 5:
+        }
+        else
+        {
+            if (PhShowMessage(
+                NULL,
+                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
+                L"System Informer has crashed :(\r\n\r\n%s",
+                L"Do you want to create a minidump on the Desktop?"
+                ) == IDYES)
             {
-                return EXCEPTION_CONTINUE_EXECUTION;
+                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, FALSE);
             }
-            break;
         }
     }
     else
     {
-        if (PhShowMessage(
-            NULL,
-            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
-            L"System Informer has crashed :(\r\n\r\n%s",
-            L"Do you want to create a minidump on the Desktop?"
-            ) == IDYES)
+        ULONG response;
+        PPH_STRING errorMessage;
+        PPH_STRING message;
+        PPH_STRING title;
+
+        if (NT_NTWIN32(ExceptionInfo->ExceptionRecord->ExceptionCode))
+            errorMessage = PhGetStatusMessage(0, PhNtStatusToDosError(ExceptionInfo->ExceptionRecord->ExceptionCode));
+        else
+            errorMessage = PhGetStatusMessage(ExceptionInfo->ExceptionRecord->ExceptionCode, 0);
+
+        title = PhCreateString(L"System Informer has crashed :(");
+#ifdef DEBUG
+        message = PhFormatString(
+            L"%s\r\n0x%08X (%s)\r\n%s",
+            PhGetStringOrEmpty(title),
+            ExceptionInfo->ExceptionRecord->ExceptionCode,
+            PhGetStringOrEmpty(errorMessage),
+            PhGetString(PhGetStacktraceAsString())
+            );
+#else
+        message = PhFormatString(
+            L"%s\r\n0x%08X (%s)\r\n%s",
+            PhGetStringOrEmpty(title),
+            ExceptionInfo->ExceptionRecord->ExceptionCode,
+            PhGetStringOrEmpty(errorMessage)
+            );
+#endif
+        if (WinStationSendMessageW(
+            SERVERNAME_CURRENT,
+            USER_SHARED_DATA->ActiveConsoleId, // RtlGetActiveConsoleId
+            title->Buffer,
+            (ULONG)title->Length,
+            message->Buffer,
+            (ULONG)message->Length,
+            MB_OKCANCEL | MB_ICONERROR,
+            30,
+            &response,
+            FALSE
+            ))
         {
-            PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, FALSE);
+#ifdef DEBUG
+            if (response == IDOK)
+            {
+                PhpCreateUnhandledExceptionCrashDump(ExceptionInfo, PhTriageDumpTypeFull);
+            }
+#endif
         }
     }
 
@@ -862,15 +935,25 @@ BOOLEAN PhInitializeMitigationPolicy(
     {
         PROCESS_MITIGATION_POLICY_INFORMATION policyInfo;
 
+        //policyInfo.Policy = ProcessDynamicCodePolicy;
+        //policyInfo.DynamicCodePolicy.Flags = 0;
+        //policyInfo.DynamicCodePolicy.ProhibitDynamicCode = TRUE;
+        //NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
+
+        //policyInfo.Policy = ProcessExtensionPointDisablePolicy;
+        //policyInfo.ExtensionPointDisablePolicy.Flags = 0;
+        //policyInfo.ExtensionPointDisablePolicy.DisableExtensionPoints = TRUE;
+        //NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
+
         policyInfo.Policy = ProcessSignaturePolicy;
         policyInfo.SignaturePolicy.Flags = 0;
         policyInfo.SignaturePolicy.MicrosoftSignedOnly = TRUE;
         NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
 
-        policyInfo.Policy = ProcessRedirectionTrustPolicy;
-        policyInfo.RedirectionTrustPolicy.Flags = 0;
-        policyInfo.RedirectionTrustPolicy.EnforceRedirectionTrust = TRUE;
-        NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
+        //policyInfo.Policy = ProcessRedirectionTrustPolicy;
+        //policyInfo.RedirectionTrustPolicy.Flags = 0;
+        //policyInfo.RedirectionTrustPolicy.EnforceRedirectionTrust = TRUE;
+        //NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
     }
 
     return TRUE;
@@ -1026,7 +1109,7 @@ VOID PhpInitializeSettings(
         //if (PhStartupParameters.SettingsFileName)
         //{
         //    // Get an absolute path now.
-        //    PhSettingsFileName = PhGetFullPath(PhStartupParameters.SettingsFileName->Buffer, NULL);
+        //    PhGetFullPath(PhStartupParameters.SettingsFileName->Buffer, &PhSettingsFileName, NULL);
         //}
 
         // 2. File in program directory
@@ -1108,6 +1191,23 @@ VOID PhpInitializeSettings(
         }
     }
 
+    if (!PhIsNullOrEmptyString(PhStartupParameters.Channel))
+    {
+        static PH_STRINGREF stableChannel = PH_STRINGREF_INIT(L"release");
+        static PH_STRINGREF previewChannel = PH_STRINGREF_INIT(L"preview");
+        static PH_STRINGREF canaryChannel = PH_STRINGREF_INIT(L"canary");
+        static PH_STRINGREF developerChannel = PH_STRINGREF_INIT(L"developer");
+
+        if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &stableChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhReleaseChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &previewChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhPreviewChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &canaryChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhCanaryChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &developerChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhDeveloperChannel);
+    }
+
     PhUpdateCachedSettings();
 
     // Apply basic global settings.
@@ -1119,6 +1219,9 @@ VOID PhpInitializeSettings(
     PhEnableThemeAcrylicSupport = WindowsVersion >= WINDOWS_11 && !!PhGetIntegerSetting(L"EnableThemeAcrylicSupport");
     PhEnableThemeListviewBorder = !!PhGetIntegerSetting(L"TreeListBorderEnable");
     PhEnableDeferredLayout = !!PhGetIntegerSetting(L"EnableDeferredLayout");
+    PhEnableServiceNonPoll = !!PhGetIntegerSetting(L"EnableServiceNonPoll");
+    PhEnableServiceNonPollNotify = !!PhGetIntegerSetting(L"EnableServiceNonPollNotify");
+    PhServiceNonPollFlushInterval = PhGetIntegerSetting(L"NonPollFlushInterval");
 
     if (PhGetIntegerSetting(L"SampleCountAutomatic"))
     {
@@ -1126,8 +1229,8 @@ VOID PhpInitializeSettings(
 
         sampleCount = (PhGetSystemMetrics(SM_CXVIRTUALSCREEN, 0) + 1) / 2;
 
-        if (sampleCount > 2048)
-            sampleCount = 2048;
+        if (sampleCount > 4096)
+            sampleCount = 4096;
 
         PhSetIntegerSetting(L"SampleCount", sampleCount);
     }
@@ -1157,7 +1260,8 @@ typedef enum _PH_COMMAND_ARG
     PH_ARG_SELECTTAB,
     PH_ARG_SYSINFO,
     PH_ARG_KPHSTARTUPHIGH,
-    PH_ARG_KPHSTARTUPMAX
+    PH_ARG_KPHSTARTUPMAX,
+    PH_ARG_CHANNEL,
 } PH_COMMAND_ARG;
 
 BOOLEAN NTAPI PhpCommandLineOptionCallback(
@@ -1265,6 +1369,9 @@ BOOLEAN NTAPI PhpCommandLineOptionCallback(
         case PH_ARG_KPHSTARTUPMAX:
             PhStartupParameters.KphStartupMax = TRUE;
             break;
+        case PH_ARG_CHANNEL:
+            PhSwapReference(&PhStartupParameters.Channel, Value);
+            break;
         }
     }
     else
@@ -1317,7 +1424,8 @@ VOID PhpProcessStartupParameters(
         { PH_ARG_SELECTTAB, L"selecttab", MandatoryArgumentType },
         { PH_ARG_SYSINFO, L"sysinfo", OptionalArgumentType },
         { PH_ARG_KPHSTARTUPHIGH, L"kh", NoArgumentType },
-        { PH_ARG_KPHSTARTUPMAX, L"kx", NoArgumentType }
+        { PH_ARG_KPHSTARTUPMAX, L"kx", NoArgumentType },
+        { PH_ARG_CHANNEL, L"channel", MandatoryArgumentType },
     };
     PH_STRINGREF commandLine;
 
@@ -1350,6 +1458,7 @@ VOID PhpProcessStartupParameters(
             L"-selectpid pid-to-select\n"
             L"-selecttab name-of-tab-to-select\n"
             L"-sysinfo [section-name]\n"
+            L"-channel [channel-name]\n"
             L"-v\n"
             );
 
@@ -1390,33 +1499,30 @@ VOID PhpEnablePrivileges(
         &tokenHandle
         )))
     {
-        CHAR privilegesBuffer[FIELD_OFFSET(TOKEN_PRIVILEGES, Privileges) + sizeof(LUID_AND_ATTRIBUTES) * 9];
-        PTOKEN_PRIVILEGES privileges;
-        ULONG i;
-
-        privileges = (PTOKEN_PRIVILEGES)privilegesBuffer;
-        privileges->PrivilegeCount = 9;
-
-        for (i = 0; i < privileges->PrivilegeCount; i++)
+        const LUID_AND_ATTRIBUTES privileges[] =
         {
-            privileges->Privileges[i].Attributes = SE_PRIVILEGE_ENABLED;
-            privileges->Privileges[i].Luid.HighPart = 0;
-        }
+            { RtlConvertUlongToLuid(SE_DEBUG_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_INC_BASE_PRIORITY_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_INC_WORKING_SET_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_LOAD_DRIVER_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_PROF_SINGLE_PROCESS_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_BACKUP_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_RESTORE_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_SHUTDOWN_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_TAKE_OWNERSHIP_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+            { RtlConvertUlongToLuid(SE_SECURITY_PRIVILEGE), SE_PRIVILEGE_ENABLED },
+        };
+        UCHAR privilegesBuffer[FIELD_OFFSET(TOKEN_PRIVILEGES, Privileges) + sizeof(privileges)];
+        PTOKEN_PRIVILEGES tokenPrivileges;
 
-        privileges->Privileges[0].Luid.LowPart = SE_DEBUG_PRIVILEGE;
-        privileges->Privileges[1].Luid.LowPart = SE_INC_BASE_PRIORITY_PRIVILEGE;
-        privileges->Privileges[2].Luid.LowPart = SE_INC_WORKING_SET_PRIVILEGE;
-        privileges->Privileges[3].Luid.LowPart = SE_LOAD_DRIVER_PRIVILEGE;
-        privileges->Privileges[4].Luid.LowPart = SE_PROF_SINGLE_PROCESS_PRIVILEGE;
-        privileges->Privileges[5].Luid.LowPart = SE_BACKUP_PRIVILEGE;
-        privileges->Privileges[6].Luid.LowPart = SE_RESTORE_PRIVILEGE;
-        privileges->Privileges[7].Luid.LowPart = SE_SHUTDOWN_PRIVILEGE;
-        privileges->Privileges[8].Luid.LowPart = SE_TAKE_OWNERSHIP_PRIVILEGE;
+        tokenPrivileges = (PTOKEN_PRIVILEGES)privilegesBuffer;
+        tokenPrivileges->PrivilegeCount = RTL_NUMBER_OF(privileges);
+        memcpy(tokenPrivileges->Privileges, privileges, sizeof(privileges));
 
         NtAdjustPrivilegesToken(
             tokenHandle,
             FALSE,
-            privileges,
+            tokenPrivileges,
             0,
             NULL,
             NULL

@@ -196,8 +196,6 @@ PVOID EtWaitChainContextCreate(
     return PhCreateObjectZero(sizeof(WCT_CONTEXT), EtWaitChainContextType);
 }
 
-#define SIP(String, Integer) { (String), (PVOID)((Integer)) }
-#define SREF(String) ((PVOID)&(PH_STRINGREF)PH_STRINGREF_INIT((String)))
 static PH_STRINGREF WaitChainUnknownString = PH_STRINGREF_INIT(L"Unknown");
 
 static PH_KEY_VALUE_PAIR WaitChainObjectTypePairs[] =
@@ -297,7 +295,7 @@ VOID WaitChainCheckThread(
     }
 }
 
-BOOLEAN WaitChainEnumNextThread(
+NTSTATUS WaitChainEnumNextThread(
     _In_ HANDLE ThreadHandle,
     _In_ PWCT_CONTEXT Context
     )
@@ -309,7 +307,7 @@ BOOLEAN WaitChainEnumNextThread(
         WaitChainCheckThread(Context, basicInfo.ClientId.UniqueThread);
     }
 
-    return TRUE;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS WaitChainCallbackThread(
@@ -685,6 +683,8 @@ BOOLEAN NTAPI WtcWaitTreeNewCallback(
                     };
                     int (__cdecl* sortFunction)(void*, void const*, void const*);
 
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
+
                     if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
                         sortFunction = sortFunctions[context->TreeNewSortColumn];
                     else
@@ -1007,8 +1007,8 @@ VOID WctAddChildWaitNode(
     childNode->WaitTime = WctNode->ThreadObject.WaitTime;
     childNode->ContextSwitches = WctNode->ThreadObject.ContextSwitches;
     childNode->Timeout = WctNode->LockObject.Timeout;
-    childNode->ProcessIdString = PhFormatUInt64(childNode->ProcessId, TRUE);
-    childNode->ThreadIdString = PhFormatUInt64(childNode->ThreadId, TRUE);
+    childNode->ProcessIdString = PhFormatUInt64(childNode->ProcessId, FALSE);
+    childNode->ThreadIdString = PhFormatUInt64(childNode->ThreadId, FALSE);
     childNode->WaitTimeString = PhFormatUInt64(childNode->WaitTime, TRUE);
     childNode->ContextSwitchesString = PhFormatUInt64(childNode->ContextSwitches, TRUE);
 

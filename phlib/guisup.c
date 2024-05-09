@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2023
+ *     dmex    2017-2024
  *
  */
 
@@ -78,6 +78,10 @@ static _GetDpiForSystem GetDpiForSystem_I = NULL; // win10rs1+
 //static _GetDpiForSession GetDpiForSession_I = NULL; // ordinal 2713
 static _GetSystemMetricsForDpi GetSystemMetricsForDpi_I = NULL;
 static _SystemParametersInfoForDpi SystemParametersInfoForDpi_I = NULL;
+static _CreateMRUList CreateMRUList_I = NULL;
+static _AddMRUString AddMRUString_I = NULL;
+static _EnumMRUList EnumMRUList_I = NULL;
+static _FreeMRUList FreeMRUList_I = NULL;
 
 VOID PhGuiSupportInitialization(
     VOID
@@ -600,6 +604,18 @@ LONG PhGetSystemMetrics(
     return GetSystemMetrics(Index);
 }
 
+BOOLEAN PhGetSystemSafeBootMode(
+    VOID
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW)
+    {
+        return !!USER_SHARED_DATA->SafeBootMode;
+    }
+
+    return !!PhGetSystemMetrics(SM_CLEANBOOT, 0);
+}
+
 BOOL PhGetSystemParametersInfo(
     _In_ INT Action,
     _In_ UINT Param1,
@@ -824,6 +840,16 @@ VOID PhSetListViewSubItem(
     ListView_SetItem(ListViewHandle, &item);
 }
 
+VOID PhRedrawListViewItems(
+    _In_ HWND ListViewHandle
+    )
+{
+    ListView_RedrawItems(ListViewHandle, 0, INT_MAX);
+    // Note: UpdateWindow() is a workaround for ListView_RedrawItems() failing to send LVN_GETDISPINFO
+    // and fixes RedrawItems() graphical artifacts when the listview doesn't have foreground focus. (dmex)
+    UpdateWindow(ListViewHandle);
+}
+
 INT PhAddListViewGroup(
     _In_ HWND ListViewHandle,
     _In_ INT GroupId,
@@ -883,17 +909,17 @@ INT PhAddTabControlTab(
 }
 
 PPH_STRING PhGetWindowText(
-    _In_ HWND hwnd
+    _In_ HWND WindowHandle
     )
 {
     PPH_STRING text;
 
-    PhGetWindowTextEx(hwnd, 0, &text);
+    PhGetWindowTextEx(WindowHandle, 0, &text);
     return text;
 }
 
 ULONG PhGetWindowTextEx(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG Flags,
     _Out_opt_ PPH_STRING *Text
     )
@@ -906,14 +932,14 @@ ULONG PhGetWindowTextEx(
         if (Flags & PH_GET_WINDOW_TEXT_LENGTH_ONLY)
         {
             WCHAR buffer[32];
-            length = InternalGetWindowText(hwnd, buffer, sizeof(buffer) / sizeof(WCHAR));
+            length = InternalGetWindowText(WindowHandle, buffer, sizeof(buffer) / sizeof(WCHAR));
             if (Text) *Text = NULL;
         }
         else
         {
             // TODO: Resize the buffer until we get the entire thing.
             string = PhCreateStringEx(NULL, 256 * sizeof(WCHAR));
-            length = InternalGetWindowText(hwnd, string->Buffer, (ULONG)string->Length / sizeof(WCHAR) + 1);
+            length = InternalGetWindowText(WindowHandle, string->Buffer, (ULONG)string->Length / sizeof(WCHAR) + 1);
             string->Length = length * sizeof(WCHAR);
 
             if (Text)
@@ -926,7 +952,7 @@ ULONG PhGetWindowTextEx(
     }
     else
     {
-        length = GetWindowTextLength(hwnd);
+        length = GetWindowTextLength(WindowHandle);
 
         if (length == 0 || (Flags & PH_GET_WINDOW_TEXT_LENGTH_ONLY))
         {
@@ -938,7 +964,7 @@ ULONG PhGetWindowTextEx(
 
         string = PhCreateStringEx(NULL, length * sizeof(WCHAR));
 
-        if (GetWindowText(hwnd, string->Buffer, (ULONG)string->Length / sizeof(WCHAR) + 1))
+        if (GetWindowText(WindowHandle, string->Buffer, (ULONG)string->Length / sizeof(WCHAR) + 1))
         {
             if (Text)
                 *Text = string;
@@ -959,24 +985,26 @@ ULONG PhGetWindowTextEx(
     }
 }
 
-ULONG PhGetWindowTextToBuffer(
-    _In_ HWND hwnd,
+NTSTATUS PhGetWindowTextToBuffer(
+    _In_ HWND WindowHandle,
     _In_ ULONG Flags,
     _Out_writes_bytes_(BufferLength) PWSTR Buffer,
     _In_opt_ ULONG BufferLength,
     _Out_opt_ PULONG ReturnLength
     )
 {
-    ULONG status = ERROR_SUCCESS;
+    NTSTATUS status;
     ULONG length;
 
     if (Flags & PH_GET_WINDOW_TEXT_INTERNAL)
-        length = InternalGetWindowText(hwnd, Buffer, BufferLength);
+        length = InternalGetWindowText(WindowHandle, Buffer, BufferLength);
     else
-        length = GetWindowText(hwnd, Buffer, BufferLength);
+        length = GetWindowText(WindowHandle, Buffer, BufferLength);
 
     if (length == 0)
-        status = GetLastError();
+        status = PhGetLastWin32ErrorAsNtStatus();
+    else
+        status = STATUS_SUCCESS;
 
     if (ReturnLength)
         *ReturnLength = length;
@@ -984,20 +1012,8 @@ ULONG PhGetWindowTextToBuffer(
     return status;
 }
 
-VOID PhAddComboBoxStrings(
-    _In_ HWND hWnd,
-    _In_ PWSTR *Strings,
-    _In_ ULONG NumberOfStrings
-    )
-{
-    ULONG i;
-
-    for (i = 0; i < NumberOfStrings; i++)
-        ComboBox_AddString(hWnd, Strings[i]);
-}
-
 PPH_STRING PhGetComboBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ INT Index
     )
 {
@@ -1006,13 +1022,13 @@ PPH_STRING PhGetComboBoxString(
 
     if (Index == INT_ERROR)
     {
-        Index = ComboBox_GetCurSel(hwnd);
+        Index = ComboBox_GetCurSel(WindowHandle);
 
         if (Index == CB_ERR)
             return NULL;
     }
 
-    length = ComboBox_GetLBTextLen(hwnd, Index);
+    length = ComboBox_GetLBTextLen(WindowHandle, Index);
 
     if (length == CB_ERR)
         return NULL;
@@ -1021,7 +1037,7 @@ PPH_STRING PhGetComboBoxString(
 
     string = PhCreateStringEx(NULL, length * sizeof(WCHAR));
 
-    if (ComboBox_GetLBText(hwnd, Index, string->Buffer) != CB_ERR)
+    if (ComboBox_GetLBText(WindowHandle, Index, string->Buffer) != CB_ERR)
     {
         return string;
     }
@@ -1033,34 +1049,34 @@ PPH_STRING PhGetComboBoxString(
 }
 
 INT PhSelectComboBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR String,
     _In_ BOOLEAN Partial
     )
 {
     if (Partial)
     {
-        return ComboBox_SelectString(hwnd, INT_ERROR, String);
+        return ComboBox_SelectString(WindowHandle, INT_ERROR, String);
     }
     else
     {
         INT index;
 
-        index = ComboBox_FindStringExact(hwnd, INT_ERROR, String);
+        index = ComboBox_FindStringExact(WindowHandle, INT_ERROR, String);
 
         if (index == CB_ERR)
             return CB_ERR;
 
-        ComboBox_SetCurSel(hwnd, index);
+        ComboBox_SetCurSel(WindowHandle, index);
 
-        InvalidateRect(hwnd, NULL, TRUE);
+        InvalidateRect(WindowHandle, NULL, TRUE);
 
         return index;
     }
 }
 
 PPH_STRING PhGetListBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ INT Index
     )
 {
@@ -1069,13 +1085,13 @@ PPH_STRING PhGetListBoxString(
 
     if (Index == INT_ERROR)
     {
-        Index = ListBox_GetCurSel(hwnd);
+        Index = ListBox_GetCurSel(WindowHandle);
 
         if (Index == LB_ERR)
             return NULL;
     }
 
-    length = ListBox_GetTextLen(hwnd, Index);
+    length = ListBox_GetTextLen(WindowHandle, Index);
 
     if (length == LB_ERR)
         return NULL;
@@ -1084,7 +1100,7 @@ PPH_STRING PhGetListBoxString(
 
     string = PhCreateStringEx(NULL, length * sizeof(WCHAR));
 
-    if (ListBox_GetText(hwnd, Index, string->Buffer) != LB_ERR)
+    if (ListBox_GetText(WindowHandle, Index, string->Buffer) != LB_ERR)
     {
         return string;
     }
@@ -1096,7 +1112,7 @@ PPH_STRING PhGetListBoxString(
 }
 
 VOID PhSetStateAllListViewItems(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG State,
     _In_ ULONG Mask
     )
@@ -1104,26 +1120,26 @@ VOID PhSetStateAllListViewItems(
     INT i;
     INT count;
 
-    count = ListView_GetItemCount(hWnd);
+    count = ListView_GetItemCount(WindowHandle);
 
     if (count <= 0)
         return;
 
     for (i = 0; i < count; i++)
     {
-        ListView_SetItemState(hWnd, i, State, Mask);
+        ListView_SetItemState(WindowHandle, i, State, Mask);
     }
 }
 
 PVOID PhGetSelectedListViewItemParam(
-    _In_ HWND hWnd
+    _In_ HWND WindowHandle
     )
 {
     INT index;
     PVOID param;
 
     index = PhFindListViewItemByFlags(
-        hWnd,
+        WindowHandle,
         INT_ERROR,
         LVNI_SELECTED
         );
@@ -1131,7 +1147,7 @@ PVOID PhGetSelectedListViewItemParam(
     if (index != INT_ERROR)
     {
         if (PhGetListViewItemParam(
-            hWnd,
+            WindowHandle,
             index,
             &param
             ))
@@ -1144,7 +1160,7 @@ PVOID PhGetSelectedListViewItemParam(
 }
 
 VOID PhGetSelectedListViewItemParams(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _Out_ PVOID **Items,
     _Out_ PULONG NumberOfItems
     )
@@ -1157,12 +1173,12 @@ VOID PhGetSelectedListViewItemParams(
     index = INT_ERROR;
 
     while ((index = PhFindListViewItemByFlags(
-        hWnd,
+        WindowHandle,
         index,
         LVNI_SELECTED
         )) != INT_ERROR)
     {
-        if (PhGetListViewItemParam(hWnd, index, &param))
+        if (PhGetListViewItemParam(WindowHandle, index, &param))
             PhAddItemArray(&array, &param);
     }
 
@@ -1492,12 +1508,12 @@ VOID PhGetStockApplicationIcon(
 //}
 
 VOID PhpSetClipboardData(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG Format,
     _In_ HANDLE Data
     )
 {
-    if (OpenClipboard(hWnd))
+    if (OpenClipboard(WindowHandle))
     {
         if (!EmptyClipboard())
             goto Fail;
@@ -1515,7 +1531,7 @@ Fail:
 }
 
 VOID PhSetClipboardString(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PPH_STRINGREF String
     )
 {
@@ -1530,7 +1546,40 @@ VOID PhSetClipboardString(
 
     GlobalUnlock(memory);
 
-    PhpSetClipboardData(hWnd, CF_UNICODETEXT, data);
+    PhpSetClipboardData(WindowHandle, CF_UNICODETEXT, data);
+}
+
+PPH_STRING PhGetClipboardString(
+    _In_ HWND WindowHandle
+    )
+{
+    PPH_STRING string;
+    HGLOBAL data;
+
+    string = PhReferenceEmptyString();
+
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT))
+        return string;
+
+    if (!OpenClipboard(WindowHandle))
+        return string;
+
+    data = GetClipboardData(CF_UNICODETEXT);
+    if (data)
+    {
+        PVOID str;
+
+        str = GlobalLock(data);
+        if (str)
+        {
+            PhMoveReference(&string, PhCreateString(str));
+            GlobalUnlock(data);
+        }
+    }
+
+    CloseClipboard();
+
+    return string;
 }
 
 HWND PhCreateDialogFromTemplate(
@@ -2661,6 +2710,44 @@ BOOLEAN PhGetPhysicallyInstalledSystemMemory(
     return FALSE;
 }
 
+NTSTATUS PhGetSessionGuiResources(
+    _In_ ULONG Flags,
+    _Out_ PULONG Total
+    )
+{
+    return PhGetProcessGuiResources(GR_GLOBAL, Flags, Total);
+}
+
+NTSTATUS PhGetProcessGuiResources(
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG Flags,
+    _Out_ PULONG Total
+    )
+{
+    if (*Total = GetGuiResources(ProcessHandle, Flags))
+        return STATUS_SUCCESS;
+
+    return PhGetLastWin32ErrorAsNtStatus();
+}
+
+_Success_(return)
+BOOLEAN PhGetThreadWin32Thread(
+    _In_ HANDLE ThreadId
+    )
+{
+    GUITHREADINFO info;
+
+    memset(&info, 0, sizeof(GUITHREADINFO));
+    info.cbSize = sizeof(GUITHREADINFO);
+
+    if (GetGUIThreadInfo(HandleToUlong(ThreadId), &info))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 _Success_(return)
 BOOLEAN PhGetSendMessageReceiver(
     _In_ HANDLE ThreadId,
@@ -2898,8 +2985,6 @@ HICON PhCreateIconFromResourceDirectory(
         ((PBITMAPCOREHEADER)iconResourceBuffer)->bcSize != MAKEFOURCC('J', 'P', 'E', 'G')
         )
     {
-        // CreateIconFromResourceEx seems to know what formats are supported so these
-        // size/format checks are probably redundant and not required? (dmex)
         return NULL;
     }
 
@@ -2914,6 +2999,19 @@ HICON PhCreateIconFromResourceDirectory(
         );
 }
 
+// rev from LdrLoadAlternateResourceModuleEx and GetMunResourceModuleForEnumIfExist (dmex)
+/**
+ * Retrieves the filename of the \SystemResources\.mun alternate resource (mandatory on 19H1 and later).
+ *
+ * \param FileName A string containing a file name.
+ * \param NativeFileName The type of name format.
+ * \param ResourceFileName A pointer to the MUN filename.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks LdrLoadAlternateResourceModuleEx and GetMunResourceModuleForEnumIfExist always search the parent directory
+ * and this function has the same logic and semantics. For example: C:\Windows\explorer.exe -> C:\SystemResources\explorer.exe.mun
+ */
 _Success_(return)
 BOOLEAN PhGetSystemResourcesFileName(
     _In_ PPH_STRINGREF FileName,
@@ -2921,46 +3019,30 @@ BOOLEAN PhGetSystemResourcesFileName(
     _Out_ PPH_STRING* ResourceFileName
     )
 {
-    static PH_STRINGREF systemResourcesPath = PH_STRINGREF_INIT(L"\\SystemResources\\");
-    static PH_STRINGREF systemResourcesExtension = PH_STRINGREF_INIT(L".mun");
-    PPH_STRING fileName = NULL;
+    static PH_STRINGREF directoryName = PH_STRINGREF_INIT(L"\\SystemResources\\");
+    static PH_STRINGREF extensionName = PH_STRINGREF_INIT(L".mun");
+    PPH_STRING fileName;
     PH_STRINGREF directoryPart;
     PH_STRINGREF fileNamePart;
-    PH_STRINGREF directoryBasePart;
+    PH_STRINGREF baseNamePart;
 
     if (WindowsVersion < WINDOWS_10_19H1)
         return FALSE;
     if (PhDetermineDosPathNameType(FileName) == RtlPathTypeUncAbsolute)
         return FALSE;
-
-    // 19H1 and above relocated binary resources into the \SystemResources\ directory.
-    // This is implemented as a hook inside EnumResourceNamesExW:
-    // PrivateExtractIconExW -> EnumResourceNamesExW -> GetMunResourceModuleForEnumIfExist.
-    //
-    // GetMunResourceModuleForEnumIfExist trims the path and inserts '\SystemResources\' and '.mun'
-    // to locate the binary with the icon resources. For example:
-    // From: C:\Windows\system32\notepad.exe
-    // To: C:\Windows\SystemResources\notepad.exe.mun
-    //
-    // It doesn't currently hard-code the \SystemResources\ path and ends up accessing other directories:
-    // From: C:\Windows\explorer.exe
-    // To: C:\SystemResources\explorer.exe.mun
-    //
-    // The below code has the same logic and semantics. (dmex)
-
     if (!PhGetBasePath(FileName, &directoryPart, &fileNamePart))
         return FALSE;
 
     if (directoryPart.Length && fileNamePart.Length)
     {
-        if (!PhGetBasePath(&directoryPart, &directoryBasePart, NULL))
+        if (!PhGetBasePath(&directoryPart, &baseNamePart, NULL))
             return FALSE;
 
         fileName = PhConcatStringRef4(
-            &directoryBasePart,
-            &systemResourcesPath,
+            &baseNamePart,
+            &directoryName,
             &fileNamePart,
-            &systemResourcesExtension
+            &extensionName
             );
 
         if (NativeFileName)
@@ -2979,14 +3061,28 @@ BOOLEAN PhGetSystemResourcesFileName(
                 return TRUE;
             }
         }
+
+        PhClearReference(&fileName);
     }
 
-    PhClearReference(&fileName);
     return FALSE;
 }
 
-// rev from PrivateExtractIconExW with changes
-// for using SEC_COMMIT instead of SEC_IMAGE. (dmex)
+/**
+ * \brief Extracts icons from the specified executable file.
+ *
+ * \param FileName A string containing a file name.
+ * \param NativeFileName The type of name format.
+ * \param IconIndex The zero-based index of the icon within the group or a negative number for a specific resource identifier.
+ * \param IconLarge A handle to the large icon within the group or handle to the an icon from the resource identifier.
+ * \param IconSmall A handle to the small icon within the group or handle to the an icon from the resource identifier.
+ * \param WindowDpi The DPI to use for scaling the metric.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks Use this function instead of PrivateExtractIconExW() because images are mapped with SEC_COMMIT and READONLY
+ * while PrivateExtractIconExW loads images with EXECUTE and SEC_IMAGE (section allocations and relocation processing).
+ */
 _Success_(return)
 BOOLEAN PhExtractIconEx(
     _In_ PPH_STRINGREF FileName,
@@ -2994,7 +3090,7 @@ BOOLEAN PhExtractIconEx(
     _In_ INT32 IconIndex,
     _Out_opt_ HICON *IconLarge,
     _Out_opt_ HICON *IconSmall,
-    _In_ LONG SystemDpi
+    _In_ LONG WindowDpi
     )
 {
     NTSTATUS status;
@@ -3089,8 +3185,8 @@ BOOLEAN PhExtractIconEx(
                 &mappedImage,
                 resourceDirectory,
                 iconDirectoryResource,
-                PhGetSystemMetrics(SM_CXICON, SystemDpi),
-                PhGetSystemMetrics(SM_CYICON, SystemDpi),
+                PhGetSystemMetrics(SM_CXICON, WindowDpi),
+                PhGetSystemMetrics(SM_CYICON, WindowDpi),
                 LR_DEFAULTCOLOR
                 );
         }
@@ -3101,8 +3197,8 @@ BOOLEAN PhExtractIconEx(
                 &mappedImage,
                 resourceDirectory,
                 iconDirectoryResource,
-                PhGetSystemMetrics(SM_CXSMICON, SystemDpi),
-                PhGetSystemMetrics(SM_CYSMICON, SystemDpi),
+                PhGetSystemMetrics(SM_CXSMICON, WindowDpi),
+                PhGetSystemMetrics(SM_CYSMICON, WindowDpi),
                 LR_DEFAULTCOLOR
                 );
         }
@@ -3422,6 +3518,45 @@ ULONG PhInitiateShutdown(
     return status;
 }
 
+/**
+ * Sets shutdown parameters for the current process relative to the other processes in the system.
+ *
+ * \param Level The shutdown priority for the current process.
+ * \param Flags Optional flags for terminating the current process.
+ *
+ * \return Successful or errant status.
+ */
+BOOLEAN PhSetProcessShutdownParameters(
+    _In_ ULONG Level,
+    _In_ ULONG Flags
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static BOOL (WINAPI *SetProcessShutdownParameters_I)(
+        _In_ ULONG dwLevel,
+        _In_ ULONG dwFlags
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"kernel32.dll"))
+        {
+            SetProcessShutdownParameters_I = PhGetDllBaseProcedureAddress(baseAddress, "SetProcessShutdownParameters", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!SetProcessShutdownParameters_I)
+        return FALSE;
+
+    return !!SetProcessShutdownParameters_I(Level, Flags);
+}
+
+// Timeline drawing support
+
 VOID PhCustomDrawTreeTimeLine(
     _In_ HDC Hdc,
     _In_ RECT CellRect,
@@ -3430,11 +3565,10 @@ VOID PhCustomDrawTreeTimeLine(
     _In_ PLARGE_INTEGER CreateTime
     )
 {
-    HBRUSH previousBrush = NULL;
     RECT rect = CellRect;
     RECT borderRect = CellRect;
-    FLOAT percent = 0;
-    FLOAT percentabs = 0;
+    FLOAT percent;
+    ULONG flags = 0;
     LARGE_INTEGER systemTime;
     LARGE_INTEGER startTime;
     LARGE_INTEGER createTime;
@@ -3452,18 +3586,6 @@ VOID PhCustomDrawTreeTimeLine(
         if (bootTime.QuadPart == 0)
         {
             PhGetSystemBootTime(&bootTime);
-
-            //if (NT_SUCCESS(NtQuerySystemInformation(
-            //    SystemTimeOfDayInformation,
-            //    &timeOfDayInfo,
-            //    RTL_SIZEOF_THROUGH_FIELD(SYSTEM_TIMEOFDAY_INFORMATION, CurrentTime),
-            //    NULL
-            //    )))
-            //{
-            //    startTime.QuadPart = timeOfDayInfo.CurrentTime.QuadPart - timeOfDayInfo.BootTime.QuadPart;
-            //    createTime.QuadPart = timeOfDayInfo.CurrentTime.QuadPart - processItem->CreateTime.QuadPart;
-            //    percent = round((DOUBLE)((FLOAT)createTime.QuadPart / (FLOAT)startTime.QuadPart * 100));
-            //}
         }
 
         PhQuerySystemTime(&systemTime);
@@ -3471,62 +3593,55 @@ VOID PhCustomDrawTreeTimeLine(
         createTime.QuadPart = systemTime.QuadPart - CreateTime->QuadPart;
     }
 
-    // Note: Time is 8 bytes, Float is 4 bytes. Use DOUBLE type at some stage. (dmex)
-    percent = (FLOAT)createTime.QuadPart / (FLOAT)startTime.QuadPart * 100.f;
-    percentabs = fabsf(percent);
-
-    if (!(Flags & PH_DRAW_TIMELINE_OVERFLOW))
+    if (createTime.QuadPart > startTime.QuadPart)
     {
-        // Prevent overflow from changing the system time to an earlier date. (dmex)
-        if (percentabs > 100.f)
-            percent = 100.f;
-        if (percentabs < 0.0005f)
-            percent = 0.f;
+        SetFlag(flags, PH_DRAW_TIMELINE_OVERFLOW);
     }
 
-    if (Flags & PH_DRAW_TIMELINE_DARKTHEME)
+    percent = (FLOAT)createTime.QuadPart / (FLOAT)startTime.QuadPart * 100.f;
+
+    if (percent > 100.f)
+        percent = 100.f;
+    if (percent < 0.0005f)
+        percent = 0.0f;
+
+    if (FlagOn(Flags, PH_DRAW_TIMELINE_DARKTHEME))
         FillRect(Hdc, &rect, PhThemeWindowBackgroundBrush);
     else
         FillRect(Hdc, &rect, GetSysColorBrush(COLOR_WINDOW));
 
     PhInflateRect(&rect, -1, -1);
     rect.bottom += 1;
+    PhInflateRect(&borderRect, -1, -1);
+    borderRect.bottom += 1;
 
-    if (Flags & PH_DRAW_TIMELINE_DARKTHEME)
+    if (FlagOn(Flags, PH_DRAW_TIMELINE_DARKTHEME))
     {
         FillRect(Hdc, &rect, PhThemeWindowBackgroundBrush);
 
-        if (Flags & PH_DRAW_TIMELINE_OVERFLOW) // System threads created before startup. (dmex)
-            SetDCBrushColor(Hdc, percent > 100.f ? RGB(128, 128, 128) : RGB(0, 130, 135));
+        if (FlagOn(flags, PH_DRAW_TIMELINE_OVERFLOW))
+            SetDCBrushColor(Hdc, RGB(128, 128, 128));
         else
             SetDCBrushColor(Hdc, RGB(0, 130, 135));
 
-        previousBrush = SelectBrush(Hdc, GetStockBrush(DC_BRUSH));
+        SelectBrush(Hdc, GetStockBrush(DC_BRUSH));
     }
     else
     {
         FillRect(Hdc, &rect, GetSysColorBrush(COLOR_3DFACE));
 
-        if (Flags & PH_DRAW_TIMELINE_OVERFLOW) // System threads created before startup. (dmex)
-            SetDCBrushColor(Hdc, percent > 100.f ? RGB(128, 128, 128) : RGB(158, 202, 158));
+        if (FlagOn(flags, PH_DRAW_TIMELINE_OVERFLOW))
+            SetDCBrushColor(Hdc, RGB(128, 128, 128));
         else
             SetDCBrushColor(Hdc, RGB(158, 202, 158));
 
-        previousBrush = SelectBrush(Hdc, GetStockBrush(DC_BRUSH));
+        SelectBrush(Hdc, GetStockBrush(DC_BRUSH));
     }
 
-    if (Flags & PH_DRAW_TIMELINE_OVERFLOW)
-    {
-        // Prevent overflow from changing the system time to an earlier date. (dmex)
-        if (percentabs > 100.f)
-            percent = 100.f;
-        if (percentabs < 0.0005f)
-            percent = 0.f;
-    }
+    rect.left = (LONG)((LONG)rect.right + ((LONG)(rect.left - rect.right) * (percent / 100.f)));
 
-    //rect.right = ((LONG)(rect.left + ((rect.right - rect.left) * (LONG)percent) / 100));
-    //rect.left = ((LONG)(rect.right + ((rect.left - rect.right) * (LONG)percent) / 100));
-    rect.left = (LONG)(rect.right + ((rect.left - rect.right) * percent / 100));
+    if (rect.left < borderRect.left)
+        rect.left = borderRect.left;
 
     PatBlt(
         Hdc,
@@ -3537,10 +3652,6 @@ VOID PhCustomDrawTreeTimeLine(
         PATCOPY
         );
 
-    if (previousBrush) SelectBrush(Hdc, previousBrush);
-
-    PhInflateRect(&borderRect, -1, -1);
-    borderRect.bottom += 1;
     FrameRect(Hdc, &borderRect, GetStockBrush(GRAY_BRUSH));
 }
 
@@ -4105,4 +4216,240 @@ HCURSOR PhLoadDividerCursor(
     }
 
     return dividerCursorHandle;
+}
+
+BOOLEAN PhIsInteractiveUserSession(
+    VOID
+    )
+{
+    USEROBJECTFLAGS flags;
+
+    memset(&flags, 0, sizeof(USEROBJECTFLAGS));
+
+    if (GetUserObjectInformation(
+        GetProcessWindowStation(),
+        UOI_FLAGS,
+        &flags,
+        sizeof(USEROBJECTFLAGS),
+        NULL
+        ))
+    {
+        if (BooleanFlagOn(flags.dwFlags, WSF_VISIBLE))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+PPH_STRING PhGetCurrentWindowStationName(
+    VOID
+    )
+{
+    PPH_STRING string;
+
+    string = PhCreateStringEx(NULL, 0x200);
+
+    if (GetUserObjectInformation(
+        GetProcessWindowStation(),
+        UOI_NAME,
+        string->Buffer,
+        (ULONG)string->Length + sizeof(UNICODE_NULL),
+        NULL
+        ))
+    {
+        PhTrimToNullTerminatorString(string);
+        return string;
+    }
+    else
+    {
+        PhDereferenceObject(string);
+        return PhCreateString(L"WinSta0"); // assume the current window station is WinSta0
+    }
+}
+
+PPH_STRING PhGetCurrentThreadDesktopName(
+    VOID
+    )
+{
+    PPH_STRING string;
+
+    string = PhCreateStringEx(NULL, 0x200);
+
+    if (GetUserObjectInformation(
+        GetThreadDesktop(HandleToUlong(NtCurrentThreadId())),
+        UOI_NAME,
+        string->Buffer,
+        (ULONG)string->Length + sizeof(UNICODE_NULL),
+        NULL
+        ))
+    {
+        PhTrimToNullTerminatorString(string);
+        return string;
+    }
+    else
+    {
+        PhDereferenceObject(string);
+        return PhCreateString(L"Default");
+    }
+}
+
+BOOLEAN PhpInitializeMRUList(VOID)
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static PVOID comctl32ModuleHandle = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        if (comctl32ModuleHandle = PhLoadLibrary(L"comctl32.dll"))
+        {
+            CreateMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "CreateMRUListW", 0);
+            AddMRUString_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "AddMRUStringW", 0);
+            EnumMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "EnumMRUListW", 0);
+            FreeMRUList_I = PhGetDllBaseProcedureAddress(comctl32ModuleHandle, "FreeMRUList", 0);
+
+            if (!(CreateMRUList_I && AddMRUString_I && EnumMRUList_I && FreeMRUList_I))
+            {
+                PhFreeLibrary(comctl32ModuleHandle);
+                comctl32ModuleHandle = NULL;
+            }
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (comctl32ModuleHandle)
+        return TRUE;
+
+    return FALSE;
+}
+
+BOOLEAN PhRecentListCreate(
+    _Out_ PHANDLE RecentHandle
+    )
+{
+    HANDLE handle;
+    MRUINFO info;
+
+    if (!PhpInitializeMRUList())
+        return FALSE;
+
+    memset(&info, 0, sizeof(MRUINFO));
+    info.cbSize = sizeof(MRUINFO);
+    info.uMaxItems = UINT_MAX;
+    info.hKey = HKEY_CURRENT_USER;
+    info.lpszSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RunMRU";
+
+    if (handle = CreateMRUList_I(&info))
+    {
+        *RecentHandle = handle;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+VOID PhRecentListDestroy(
+    _In_ HANDLE RecentHandle
+    )
+{
+    if (!PhpInitializeMRUList())
+        return;
+
+    if (RecentHandle)
+    {
+        FreeMRUList_I(RecentHandle);
+    }
+}
+
+BOOLEAN PhRecentListAddString(
+    _In_ HANDLE RecentHandle,
+    _In_ PCWSTR String
+    )
+{
+    if (!PhpInitializeMRUList())
+        return FALSE;
+
+    return AddMRUString_I(RecentHandle, String) != INT_ERROR;
+}
+
+BOOLEAN PhRecentListAddCommand(
+    _In_ PPH_STRINGREF Command
+    )
+{
+    static PH_STRINGREF prefixSr = PH_STRINGREF_INIT(L"\\1");
+    BOOLEAN status;
+    HANDLE listHandle;
+    PPH_STRING command;
+
+    if (!PhpInitializeMRUList())
+        return FALSE;
+    if (!PhRecentListCreate(&listHandle))
+        return FALSE;
+
+    command = PhConcatStringRef2(Command, &prefixSr);
+
+    status = PhRecentListAddString(listHandle, PhGetString(command));
+
+    PhDereferenceObject(command);
+
+    PhRecentListDestroy(listHandle);
+
+    return status;
+}
+
+VOID PhEnumerateRecentList(
+    _In_ PPH_ENUM_MRULIST_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    HANDLE listHandle;
+    INT listCount;
+
+    if (!PhpInitializeMRUList())
+        return;
+    if (!PhRecentListCreate(&listHandle))
+        return;
+
+    listCount = EnumMRUList_I(
+        listHandle,
+        MAXINT,
+        NULL,
+        0
+        );
+
+    for (INT i = 0; i < listCount; i++)
+    {
+        PH_STRINGREF string;
+        SIZE_T returnLength;
+        WCHAR buffer[DOS_MAX_PATH_LENGTH] = L"";
+
+        returnLength = EnumMRUList_I(
+            listHandle,
+            i,
+            buffer,
+            RTL_NUMBER_OF(buffer)
+            );
+
+        if (returnLength >= RTL_NUMBER_OF(buffer))
+            continue;
+        if (returnLength < sizeof(UNICODE_NULL))
+            continue;
+
+        buffer[returnLength] = UNICODE_NULL;
+
+        string.Buffer = buffer;
+        string.Length = returnLength * sizeof(WCHAR);
+
+        // trim \\1 (dmex)
+        if (string.Buffer[returnLength - 1] == L'1' && string.Buffer[returnLength - 2] == L'\\')
+        {
+            string.Buffer[returnLength - 2] = UNICODE_NULL;
+            string.Length -= 4;
+        }
+
+        if (!Callback(&string, Context))
+            break;
+    }
+
+    FreeMRUList_I(listHandle);
 }

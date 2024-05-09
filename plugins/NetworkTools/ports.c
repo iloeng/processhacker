@@ -5,14 +5,14 @@
  *
  * Authors:
  *
- *     dmex    2015-2016
+ *     dmex    2015-2023
  *     TETYYS  2015-2016
  *
  */
 
 #include "nettools.h"
 
-RESOLVED_PORT ResolvedPortsTable[] =
+CONST RESOLVED_PORT ResolvedPortsTable[] =
 {
     { L"1ci-smcs", 3091 }, { L"2ping", 15998 }, { L"3com-amp3", 629 }, { L"3com-net-mgmt", 2391 },
     { L"3com-njack-1", 5264 }, { L"3com-njack-2", 5265 }, { L"3Com-nsd", 1742 }, { L"3com-tsmux", 106 },
@@ -1584,3 +1584,20 @@ RESOLVED_PORT ResolvedPortsTable[] =
     { L"zion-lm", 1425 }, { L"zmp", 3925 }, { L"zoomcp", 9666 }, { L"zre-disc", 5670 },
     { L"zsecure", 7173 }, { L"zserv", 346 }, { L"zymed-zpp", 2133 }
 };
+
+BOOLEAN LookupPortServiceName(
+    _In_ ULONG Port,
+    _Out_ PPH_STRINGREF ServiceName
+    )
+{
+    for (UINT i = 0; i < RTL_NUMBER_OF(ResolvedPortsTable); i++)
+    {
+        if (Port == ResolvedPortsTable[i].Port)
+        {
+            PhInitializeStringRefLongHint(ServiceName, ResolvedPortsTable[i].Name);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}

@@ -23,13 +23,6 @@
 
 #include "../tools/thirdparty/pcre/pcre2.h"
 
-GUID XP_CONTEXT_GUID = { 0xbeb1b341, 0x6837, 0x4c83, { 0x83, 0x66, 0x2b, 0x45, 0x1e, 0x7c, 0xe6, 0x9b } };
-GUID VISTA_CONTEXT_GUID = { 0xe2011457, 0x1546, 0x43c5, { 0xa5, 0xfe, 0x00, 0x8d, 0xee, 0xe3, 0xd3, 0xf0 } };
-GUID WIN7_CONTEXT_GUID = { 0x35138b9a, 0x5d96, 0x4fbd, { 0x8e, 0x2d, 0xa2, 0x44, 0x02, 0x25, 0xf9, 0x3a } };
-GUID WIN8_CONTEXT_GUID = { 0x4a2f28e3, 0x53b9, 0x4441, { 0xba, 0x9c, 0xd6, 0x9d, 0x4a, 0x4a, 0x6e, 0x38 } };
-GUID WINBLUE_CONTEXT_GUID = { 0x1f676c76, 0x80e1, 0x4239, { 0x95, 0xbb, 0x83, 0xd0, 0xf6, 0xd0, 0xda, 0x78 } };
-GUID WIN10_CONTEXT_GUID = { 0x8e0f7a12, 0xbfb3, 0x4fe8, { 0xb9, 0xa5, 0x48, 0xfd, 0x50, 0xa1, 0x5a, 0x9a } };
-
 /**
  * Determines whether a process is suspended.
  *
@@ -1209,7 +1202,7 @@ VOID PhWritePhTextHeader(
     PhDereferenceObject(timeString);
 }
 
-BOOLEAN PhShellProcessHacker(
+NTSTATUS PhShellProcessHacker(
     _In_opt_ HWND WindowHandle,
     _In_opt_ PWSTR Parameters,
     _In_ ULONG ShowWindowType,
@@ -1248,7 +1241,7 @@ VOID PhpAppendCommandLineArgument(
     PhAppendCharStringBuilder(StringBuilder, L'\"');
 }
 
-BOOLEAN PhShellProcessHackerEx(
+NTSTATUS PhShellProcessHackerEx(
     _In_opt_ HWND WindowHandle,
     _In_opt_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
@@ -1259,7 +1252,7 @@ BOOLEAN PhShellProcessHackerEx(
     _Out_opt_ PHANDLE ProcessHandle
     )
 {
-    BOOLEAN result;
+    NTSTATUS status;
     PPH_STRING applicationFileName;
     PH_STRING_BUILDER sb;
     PWSTR parameters;
@@ -1356,7 +1349,7 @@ BOOLEAN PhShellProcessHackerEx(
         parameters = Parameters;
     }
 
-    result = PhShellExecuteEx(
+    status = PhShellExecuteEx(
         WindowHandle,
         FileName ? FileName : PhGetString(applicationFileName),
         parameters,
@@ -1372,7 +1365,7 @@ BOOLEAN PhShellProcessHackerEx(
 
     PhDereferenceObject(applicationFileName);
 
-    return result;
+    return status;
 }
 
 BOOLEAN PhCreateProcessIgnoreIfeoDebugger(
@@ -2144,16 +2137,38 @@ VOID PhShellOpenKey(
 
     if (PhGetOwnTokenAttributes().Elevated)
     {
-        if (!PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, NULL, SW_SHOW, 0, 0, NULL))
+        status = PhShellExecuteEx(
+            WindowHandle,
+            regeditFileName->Buffer,
+            NULL,
+            NULL,
+            SW_SHOW,
+            0,
+            0,
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
         {
-            PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
+            PhShowStatus(WindowHandle, L"Unable to execute the program.", status, 0);
         }
     }
     else
     {
-        if (!PhShellExecuteEx(WindowHandle, regeditFileName->Buffer, NULL, NULL, SW_SHOW, PH_SHELL_EXECUTE_ADMIN, 0, NULL))
+        status = PhShellExecuteEx(
+            WindowHandle,
+            regeditFileName->Buffer,
+            NULL,
+            NULL,
+            SW_SHOW,
+            PH_SHELL_EXECUTE_ADMIN,
+            0,
+            NULL
+            );
+
+        if (!NT_SUCCESS(status))
         {
-            PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
+            PhShowStatus(WindowHandle, L"Unable to execute the program.", status, 0);
         }
     }
 
@@ -2369,29 +2384,61 @@ HICON PhGetApplicationIconEx(
     return PhLoadIcon(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER), PH_LOAD_ICON_SIZE_LARGE, 0, 0, WindowDpi);
 }
 
+VOID PhSetWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_opt_ HICON SmallIcon,
+    _In_opt_ HICON LargeIcon,
+    _In_ BOOLEAN CleanupIcon
+    )
+{
+    if (SmallIcon)
+    {
+        HICON iconHandle = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, (LPARAM)SmallIcon);
+
+        if (iconHandle && CleanupIcon)
+        {
+            DestroyIcon(iconHandle);
+        }
+    }
+
+    if (LargeIcon)
+    {
+        HICON iconHandle = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_BIG, (LPARAM)LargeIcon);
+
+        if (iconHandle && CleanupIcon)
+        {
+            DestroyIcon(iconHandle);
+        }
+    }
+}
+
+VOID PhDestroyWindowIcon(
+    _In_ HWND WindowHandle
+    )
+{
+    HICON iconHandle;
+
+    if (iconHandle = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, 0))
+    {
+        DestroyIcon(iconHandle);
+    }
+
+    if (iconHandle = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_BIG, 0))
+    {
+        DestroyIcon(iconHandle);
+    }
+}
+
 VOID PhSetApplicationWindowIcon(
     _In_ HWND WindowHandle
     )
 {
-    HICON smallIcon;
-    HICON largeIcon;
-    HICON destroyIcon;
-
-    if (smallIcon = PhGetApplicationIcon(TRUE))
-    {
-        if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon))
-        {
-            DestroyIcon(destroyIcon);
-        }
-    }
-
-    if (largeIcon = PhGetApplicationIcon(FALSE))
-    {
-        if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_BIG, (LPARAM)largeIcon))
-        {
-            DestroyIcon(destroyIcon);
-        }
-    }
+    PhSetWindowIcon(
+        WindowHandle,
+        PhGetApplicationIcon(TRUE),
+        PhGetApplicationIcon(FALSE),
+        TRUE
+        );
 }
 
 VOID PhSetApplicationWindowIconEx(
@@ -2399,42 +2446,12 @@ VOID PhSetApplicationWindowIconEx(
     _In_opt_ LONG WindowDpi
     )
 {
-    HICON smallIcon;
-    HICON largeIcon;
-    HICON destroyIcon;
-
-    if (smallIcon = PhGetApplicationIconEx(TRUE, WindowDpi))
-    {
-        if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon))
-        {
-            DestroyIcon(destroyIcon);
-        }
-    }
-
-    if (largeIcon = PhGetApplicationIconEx(FALSE, WindowDpi))
-    {
-        if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_BIG, (LPARAM)largeIcon))
-        {
-            DestroyIcon(destroyIcon);
-        }
-    }
-}
-
-VOID PhDeleteApplicationWindowIcon(
-    _In_ HWND WindowHandle
-    )
-{
-    HICON destroyIcon;
-
-    if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, 0))
-    {
-        DestroyIcon(destroyIcon);
-    }
-
-    if (destroyIcon = (HICON)SendMessage(WindowHandle, WM_SETICON, ICON_BIG, 0))
-    {
-        DestroyIcon(destroyIcon);
-    }
+    PhSetWindowIcon(
+        WindowHandle,
+        PhGetApplicationIconEx(TRUE, WindowDpi),
+        PhGetApplicationIconEx(FALSE, WindowDpi),
+        TRUE
+        );
 }
 
 VOID PhSetStaticWindowIcon(

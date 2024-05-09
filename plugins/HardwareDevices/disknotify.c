@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2016-2023
+ *     dmex    2016-2024
  *
  */
 
@@ -21,6 +21,9 @@ VOID NTAPI HardwareDevicesDeviceChangeCallback(
 {
     PMSG message = Parameter;
 
+    if (message->message != WM_DEVICECHANGE)
+        return;
+
     switch (message->wParam)
     {
     case DBT_DEVICEARRIVAL: // Drive letter added
@@ -32,13 +35,13 @@ VOID NTAPI HardwareDevicesDeviceChangeCallback(
             {
                 //PDEV_BROADCAST_VOLUME deviceVolume = (PDEV_BROADCAST_VOLUME)deviceBroadcast;
 
-                PhAcquireQueuedLockShared(&DiskDrivesListLock);
+                PhAcquireQueuedLockShared(&DiskDevicesListLock);
 
-                for (ULONG i = 0; i < DiskDrivesList->Count; i++)
+                for (ULONG i = 0; i < DiskDevicesList->Count; i++)
                 {
                     PDV_DISK_ENTRY entry;
 
-                    entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
+                    entry = PhReferenceObjectSafe(DiskDevicesList->Items[i]);
 
                     if (!entry)
                         continue;
@@ -48,14 +51,15 @@ VOID NTAPI HardwareDevicesDeviceChangeCallback(
                     // Reset the DiskIndexName so we can re-query the name on the next interval update.
                     PhClearReference(&entry->DiskIndexName);
                     // Submit the query to the work queue.
-                    DiskDriveQueueNameUpdate(entry);
+                    DiskDeviceQueueNameUpdate(entry);
 
                     PhDereferenceObjectDeferDelete(entry);
                 }
 
-                PhReleaseQueuedLockShared(&DiskDrivesListLock);
+                PhReleaseQueuedLockShared(&DiskDevicesListLock);
             }
         }
+        break;
     }
 }
 
@@ -68,7 +72,7 @@ VOID AddRemoveDeviceChangeCallback(
         return;
 
     // Add the subclass only when disks are being monitored, remove when no longer needed.
-    if (DiskDrivesList->Count)
+    if (DiskDevicesList->Count)
     {
         if (!MainWndDeviceChangeRegistrationEnabled)
         {

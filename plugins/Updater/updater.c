@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2011-2023
+ *     dmex    2011-2024
  *
  */
 
@@ -28,7 +28,7 @@ VOID UpdateContextDeleteProcedure(
     {
         if (context->Cleanup)
         {
-            PhDeleteCacheFile(context->SetupFilePath);
+            PhDeleteCacheFile(context->SetupFilePath, FALSE);
         }
 
         PhDereferenceObject(context->SetupFilePath);
@@ -64,35 +64,35 @@ PPH_UPDATER_CONTEXT CreateUpdateContext(
         PhEndInitOnce(&UpdateContextTypeInitOnce);
     }
 
-    context = PhCreateObject(sizeof(PH_UPDATER_CONTEXT), UpdateContextType);
-    memset(context, 0, sizeof(PH_UPDATER_CONTEXT));
-
+    context = PhCreateObjectZero(sizeof(PH_UPDATER_CONTEXT), UpdateContextType);
     context->CurrentVersionString = PhGetPhVersion();
     context->StartupCheck = StartupCheck;
     context->Cleanup = TRUE;
+    context->PortableMode = !!ProcessHacker_IsPortableMode();
 
     return context;
 }
 
-BOOLEAN UpdateShellExecute(
+NTSTATUS UpdateShellExecute(
     _In_ PPH_UPDATER_CONTEXT Context,
     _In_opt_ HWND WindowHandle
     )
 {
+    NTSTATUS status;
     PPH_STRING parameters;
 
     // Reset the cache so we don't prompt again after the update.
     PhSetStringSetting(SETTING_NAME_UPDATE_DATA, L"");
 
     if (PhIsNullOrEmptyString(Context->SetupFilePath))
-        return FALSE;
+        return STATUS_FAIL_CHECK;
 
     parameters = PH_AUTO(PhCreateKsiSettingsBlob());
     parameters = PH_AUTO(PhConcatStrings(3, L"-update \"", PhGetStringOrEmpty(parameters), L"\""));
 
     ProcessHacker_PrepareForEarlyShutdown();
 
-    if (PhShellExecuteEx(
+    status = PhShellExecuteEx(
         WindowHandle,
         PhGetString(Context->SetupFilePath),
         PhGetString(parameters),
@@ -101,34 +101,30 @@ BOOLEAN UpdateShellExecute(
         Context->DirectoryElevationRequired ? PH_SHELL_EXECUTE_ADMIN : PH_SHELL_EXECUTE_DEFAULT,
         0,
         NULL
-        ))
+        );
+
+    if (NT_SUCCESS(status))
     {
         Context->Cleanup = FALSE;
 
         ProcessHacker_Destroy();
-
-        return TRUE;
     }
     else
     {
-        ULONG errorCode = GetLastError();
-
-        // Install failed, cancel the shutdown.
         ProcessHacker_CancelEarlyShutdown();
 
-        // Show error dialog.
-        if (errorCode != ERROR_CANCELLED) // Ignore UAC decline.
+        if (status != STATUS_CANCELLED) // Ignore UAC decline.
         {
-            PhShowStatus(WindowHandle, L"Unable to execute the setup.", 0, errorCode);
+            PhShowStatus(WindowHandle, L"Unable to execute the setup.", status, 0);
 
             if (Context->StartupCheck)
                 ShowAvailableDialog(Context);
             else
                 ShowCheckForUpdatesDialog(Context);
         }
-
-        return FALSE;
     }
+
+    return status;
 }
 
 BOOLEAN UpdateCheckDirectoryElevationRequired(
@@ -257,18 +253,18 @@ PPH_STRING UpdateVersionString(
     ULONG buildVersion;
     ULONG revisionVersion;
     SIZE_T returnLength;
-    PH_FORMAT format[7];
+    PH_FORMAT format[8];
     WCHAR formatBuffer[260];
 
     PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
-
-    PhInitFormatU(&format[0], majorVersion);
-    PhInitFormatC(&format[1], L'.');
-    PhInitFormatU(&format[2], minorVersion);
-    PhInitFormatC(&format[3], L'.');
-    PhInitFormatU(&format[4], buildVersion);
-    PhInitFormatC(&format[5], L'.');
-    PhInitFormatU(&format[6], revisionVersion);
+    PhInitFormatSR(&format[0], versionHeader);
+    PhInitFormatU(&format[1], majorVersion);
+    PhInitFormatC(&format[2], L'.');
+    PhInitFormatU(&format[3], minorVersion);
+    PhInitFormatC(&format[4], L'.');
+    PhInitFormatU(&format[5], buildVersion);
+    PhInitFormatC(&format[6], L'.');
+    PhInitFormatU(&format[7], revisionVersion);
 
     if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), &returnLength))
     {
@@ -277,20 +273,11 @@ PPH_STRING UpdateVersionString(
         stringFormat.Buffer = formatBuffer;
         stringFormat.Length = returnLength - sizeof(UNICODE_NULL);
 
-        return PhConcatStringRef2(&versionHeader, &stringFormat);
+        return PhCreateString2(&stringFormat);
     }
     else
     {
-        PPH_STRING currentVersion = NULL;
-        PPH_STRING stringFormat;
-
-        if (stringFormat = PhFormatString(L"%lu.%lu.%lu.%lu", majorVersion, minorVersion, buildVersion, revisionVersion))
-        {
-            currentVersion = PhConcatStringRef2(&versionHeader, &stringFormat->sr);
-            PhDereferenceObject(currentVersion);
-        }
-
-        return currentVersion;
+        return PhFormat(format, RTL_NUMBER_OF(format), 0);
     }
 }
 
@@ -374,18 +361,14 @@ BOOLEAN QueryUpdateData(
     BOOLEAN success = FALSE;
     PPH_HTTP_CONTEXT httpContext = NULL;
     PPH_BYTES jsonString = NULL;
-    PVOID jsonObject = NULL;
+    PVOID jsonObject;
+    PWSTR urlPath;
 
     if (!PhHttpSocketCreate(&httpContext, NULL))
     {
         Context->ErrorCode = GetLastError();
         goto CleanupExit;
     }
-
-    //
-    // TODO configurable nightly/release option.
-    //
-    Context->Type = UpdaterTypeNightly;
 
     if (!PhHttpSocketConnect(
         httpContext,
@@ -397,10 +380,32 @@ BOOLEAN QueryUpdateData(
         goto CleanupExit;
     }
 
+    if (!Context->SwitchingChannel)
+        Context->Channel = PhGetIntegerSetting(L"ReleaseChannel");
+
+    switch (Context->Channel)
+    {
+    case PhReleaseChannel:
+        urlPath = L"/update.php?channel=release";
+        break;
+    //case PhPreviewChannel:
+    //    urlPath = L"/update.php?channel=preview";
+    //    break;
+    case PhCanaryChannel:
+        urlPath = L"/update.php?channel=canary";
+        break;
+    //case PhDeveloperChannel:
+    //    urlPath = L"/update.php?channel=developer";
+    //    break;
+    default:
+        Context->ErrorCode = ERROR_UNKNOWN_PATCH;
+        goto CleanupExit;
+    }
+
     if (!PhHttpSocketBeginRequest(
         httpContext,
         NULL,
-        L"/nightly.php?update",
+        urlPath,
         PH_HTTP_FLAG_REFRESH | PH_HTTP_FLAG_SECURE
         ))
     {
@@ -454,7 +459,10 @@ BOOLEAN QueryUpdateData(
     Context->SetupFileHash = PhGetJsonValueAsString(jsonObject, "setup_hash");
     Context->SetupFileSignature = PhGetJsonValueAsString(jsonObject, "setup_sig");
 
-#ifdef FORCE_LATEST_VERSION
+#if defined(FORCE_FUTURE_VERSION)
+    Context->CurrentVersion = ParseVersionString(PhCreateString(L"9999.9999.9999.9999"));
+    Context->LatestVersion = ParseVersionString(Context->CurrentVersionString);
+#elif defined(FORCE_LATEST_VERSION)
     Context->CurrentVersion = ParseVersionString(PhCreateString(L"0.0.0.0"));
     Context->LatestVersion = ParseVersionString(Context->CurrentVersionString);
 #else
@@ -533,7 +541,7 @@ NTSTATUS UpdateCheckSilentThread(
 
     PhDelayExecution(5 * 1000);
 
-    PhClearCacheDirectory();
+    PhClearCacheDirectory(context->PortableMode);
 
     // Query latest update information from the server.
     if (!QueryUpdateDataWithFailover(context))
@@ -592,7 +600,12 @@ NTSTATUS UpdateCheckThread(
         goto CleanupExit;
     }
 
-    if (context->CurrentVersion == context->LatestVersion)
+    if (context->SwitchingChannel)
+    {
+        // Switching channels, force the update.
+        PostMessage(context->DialogHandle, PH_SHOWUPDATE, 0, 0);
+    }
+    else if (context->CurrentVersion == context->LatestVersion)
     {
         // User is running the latest version
         PostMessage(context->DialogHandle, PH_SHOWLATEST, 0, 0);
@@ -616,6 +629,7 @@ CleanupExit:
 }
 
 PPH_STRING UpdateParseDownloadFileName(
+    _In_ PPH_UPDATER_CONTEXT Context,
     _In_ PPH_STRING DownloadUrlPath
     )
 {
@@ -628,7 +642,7 @@ PPH_STRING UpdateParseDownloadFileName(
         return NULL;
 
     downloadFileName = PhCreateString2(&namePart);
-    localfileName = PhCreateCacheFile(downloadFileName);
+    localfileName = PhCreateCacheFile(Context->PortableMode, downloadFileName, FALSE);
     PhDereferenceObject(downloadFileName);
 
     return localfileName;
@@ -647,7 +661,6 @@ NTSTATUS UpdateDownloadThread(
     PPH_STRING downloadHostPath = NULL;
     PPH_STRING downloadUrlPath = NULL;
     PUPDATER_HASH_CONTEXT hashContext = NULL;
-    PUPDATER_HASH_CONTEXT hashContextLegacy = NULL;
     ULONG contentLength = 0;
     USHORT httpPort = 0;
     LARGE_INTEGER timeNow;
@@ -744,7 +757,7 @@ NTSTATUS UpdateDownloadThread(
         NTSTATUS status;
 
         // Create temporary path.
-        context->SetupFilePath = UpdateParseDownloadFileName(downloadUrlPath);
+        context->SetupFilePath = UpdateParseDownloadFileName(context, downloadUrlPath);
 
         if (PhIsNullOrEmptyString(context->SetupFilePath))
         {
@@ -774,12 +787,8 @@ NTSTATUS UpdateDownloadThread(
         }
     }
 
-    assert((context->Type == UpdaterTypeNightly) || (context->Type == UpdaterTypeRelease));
-
     // Initialize hash algorithm.
-    if (!(hashContext = UpdaterInitializeHash(context->Type)))
-        goto CleanupExit;
-    if (!(hashContextLegacy = UpdaterInitializeHash(context->Type + 1)))
+    if (!(hashContext = UpdaterInitializeHash(context->Channel)))
         goto CleanupExit;
 
     // Start the clock.
@@ -804,7 +813,6 @@ NTSTATUS UpdateDownloadThread(
 
         // Update the hash of bytes we downloaded.
         UpdaterUpdateHash(hashContext, httpBuffer, bytesDownloaded);
-        UpdaterUpdateHash(hashContextLegacy, httpBuffer, bytesDownloaded);
 
         // Write the downloaded bytes to disk.
         if (!NT_SUCCESS(NtWriteFile(
@@ -879,21 +887,6 @@ NTSTATUS UpdateDownloadThread(
         }
     }
 
-    if (!signatureSuccess)
-    {
-        hashSuccess = FALSE;
-
-        if (UpdaterVerifyHash(hashContextLegacy, context->SetupFileHash))
-        {
-            hashSuccess = TRUE;
-
-            if (UpdaterVerifySignature(hashContextLegacy, context->SetupFileSignature))
-            {
-                signatureSuccess = TRUE;
-            }
-        }
-    }
-
     if (hashSuccess && signatureSuccess)
     {
         downloadSuccess = TRUE;
@@ -902,8 +895,6 @@ NTSTATUS UpdateDownloadThread(
 CleanupExit:
     if (httpContext)
         PhHttpSocketDestroy(httpContext);
-    if (hashContextLegacy)
-        UpdaterDestroyHash(hashContextLegacy);
     if (hashContext)
         UpdaterDestroyHash(hashContext);
     if (tempFileHandle)
@@ -923,7 +914,7 @@ CleanupExit:
     {
         if (context->SetupFilePath)
         {
-            PhDeleteCacheFile(context->SetupFilePath);
+            PhDeleteCacheFile(context->SetupFilePath, FALSE);
         }
 
         if (signatureSuccess)
@@ -1207,12 +1198,8 @@ VOID ShowStartupUpdateDialog(
     PhInitializeAutoPool(&autoPool);
 
     context = CreateUpdateContext(TRUE);
-    jsonString = PH_AUTO(PhGetStringSetting(SETTING_NAME_UPDATE_DATA));
 
-    //
-    // TODO configurable nightly/release option.
-    //
-    context->Type = UpdaterTypeNightly;
+    jsonString = PhGetStringSetting(SETTING_NAME_UPDATE_DATA);
 
     if (jsonString && jsonString->Length)
     {
@@ -1237,6 +1224,8 @@ VOID ShowStartupUpdateDialog(
         }
     }
 
+    PhClearReference(&jsonString);
+
     if (PhIsNullOrEmptyString(context->Version) &&
         PhIsNullOrEmptyString(context->RelDate) &&
         PhIsNullOrEmptyString(context->SetupFileDownloadUrl) &&
@@ -1245,7 +1234,7 @@ VOID ShowStartupUpdateDialog(
         PhIsNullOrEmptyString(context->SetupFileSignature) &&
         PhIsNullOrEmptyString(context->CommitHash))
     {
-        return;
+        goto CleanupExit;
     }
 
     TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
@@ -1256,7 +1245,7 @@ VOID ShowStartupUpdateDialog(
     config.pfCallback = TaskDialogBootstrapCallback;
     TaskDialogIndirect(&config, NULL, NULL, NULL);
 
+CleanupExit:
     PhDereferenceObject(context);
-
     PhDeleteAutoPool(&autoPool);
 }

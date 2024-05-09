@@ -61,12 +61,7 @@
 #include <phintrin.h>
 #include <circbuf.h>
 
-#define PH_VECTOR_LEVEL_NONE 0
-#define PH_VECTOR_LEVEL_SSE2 1
-#define PH_VECTOR_LEVEL_AVX 2
-
 #define PH_NATIVE_STRING_CONVERSION 1
-#define PH_NATIVE_THREAD_CREATE 1
 
 typedef struct _PHP_BASE_THREAD_CONTEXT
 {
@@ -112,7 +107,7 @@ PH_QUEUED_LOCK PhDbgThreadListLock = PH_QUEUED_LOCK_INIT;
 
 // Data
 
-static ULONG PhpPrimeNumbers[] =
+static CONST ULONG PhpPrimeNumbers[] =
 {
     0x3, 0x7, 0xb, 0x11, 0x17, 0x1d, 0x25, 0x2f, 0x3b, 0x47, 0x59, 0x6b, 0x83,
     0xa3, 0xc5, 0xef, 0x125, 0x161, 0x1af, 0x209, 0x277, 0x2f9, 0x397, 0x44f,
@@ -150,7 +145,7 @@ BOOLEAN PhBaseInitialization(
     PhInitializeFreeList(&PhpBaseThreadContextFreeList, sizeof(PHP_BASE_THREAD_CONTEXT), 16);
 
 #ifdef DEBUG
-    PhDbgThreadDbgTlsIndex = TlsAlloc();
+    PhDbgThreadDbgTlsIndex = PhTlsAlloc();
 #endif
 
     return TRUE;
@@ -181,7 +176,7 @@ NTSTATUS PhpBaseThreadStart(
     InsertTailList(&PhDbgThreadListHead, &dbg.ListEntry);
     PhReleaseQueuedLockExclusive(&PhDbgThreadListLock);
 
-    TlsSetValue(PhDbgThreadDbgTlsIndex, &dbg);
+    PhTlsSetValue(PhDbgThreadDbgTlsIndex, &dbg);
 #endif
 
     // Initialization code
@@ -240,6 +235,19 @@ NTSTATUS PhCreateUserThread(
     )
 {
 #if (PH_NATIVE_THREAD_CREATE)
+    return RtlCreateUserThread(
+        ProcessHandle,
+        ThreadSecurityDescriptor,
+        BooleanFlagOn(CreateFlags, THREAD_CREATE_FLAGS_CREATE_SUSPENDED),
+        (ULONG)ZeroBits,
+        MaximumStackSize,
+        StackSize,
+        StartRoutine,
+        Argument,
+        ThreadHandle,
+        ClientId
+        );
+#else
     NTSTATUS status;
     HANDLE threadHandle;
     OBJECT_ATTRIBUTES objectAttributes;
@@ -247,15 +255,7 @@ NTSTATUS PhCreateUserThread(
     PPS_ATTRIBUTE_LIST attributeList = (PPS_ATTRIBUTE_LIST)buffer;
     CLIENT_ID clientId = { 0 };
 
-    InitializeObjectAttributes(
-        &objectAttributes,
-        NULL,
-        0,
-        NULL,
-        NULL
-        );
-    objectAttributes.SecurityDescriptor = ThreadSecurityDescriptor;
-
+    InitializeObjectAttributes(&objectAttributes, NULL, 0, NULL, NULL);
     attributeList->TotalLength = sizeof(buffer);
     attributeList->Attributes[0].Attribute = PS_ATTRIBUTE_CLIENT_ID;
     attributeList->Attributes[0].Size = sizeof(CLIENT_ID);
@@ -294,19 +294,6 @@ NTSTATUS PhCreateUserThread(
     }
 
     return status;
-#else
-    return RtlCreateUserThread(
-        ProcessHandle,
-        ThreadSecurityDescriptor,
-        BooleanFlagOn(CreateFlags, THREAD_CREATE_FLAGS_CREATE_SUSPENDED),
-        (ULONG)ZeroBits,
-        MaximumStackSize,
-        StackSize,
-        StartRoutine,
-        Argument,
-        ThreadHandle,
-        ClientId
-        );
 #endif
 }
 
@@ -422,6 +409,51 @@ NTSTATUS PhCreateThread2(
         NULL,
         NULL
         );
+
+    if (NT_SUCCESS(status))
+    {
+        PHLIB_INC_STATISTIC(BaseThreadsCreated);
+    }
+    else
+    {
+        PHLIB_INC_STATISTIC(BaseThreadsCreateFailed);
+        PhFreeToFreeList(&PhpBaseThreadContextFreeList, context);
+    }
+
+    return status;
+}
+
+VOID PhpBaseThreadQueueStart(
+    _Inout_ PTP_CALLBACK_INSTANCE Instance,
+    _Inout_opt_ PVOID Context
+    )
+{
+    PHP_BASE_THREAD_CONTEXT context;
+
+    context = *(PPHP_BASE_THREAD_CONTEXT)Context;
+    PhFreeToFreeList(&PhpBaseThreadContextFreeList, Context);
+
+    context.StartAddress(context.Parameter);
+}
+
+NTSTATUS PhQueueUserWorkItem(
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
+    _In_opt_ PVOID Parameter
+    )
+{
+    NTSTATUS status;
+    PPHP_BASE_THREAD_CONTEXT context;
+    TP_CALLBACK_ENVIRON environment;
+
+    context = PhAllocateFromFreeList(&PhpBaseThreadContextFreeList);
+    context->StartAddress = StartRoutine;
+    context->Parameter = Parameter;
+
+    TpInitializeCallbackEnviron(&environment);
+    TpSetCallbackLongFunction(&environment);
+    TpSetCallbackPriority(&environment, TP_CALLBACK_PRIORITY_LOW);
+
+    status = TpSimpleTryPost(PhpBaseThreadQueueStart, context, &environment);
 
     if (NT_SUCCESS(status))
     {
@@ -700,7 +732,11 @@ PVOID PhAllocate(
     )
 {
     assert(Size);
+#if defined(PH_DEBUG_HEAP)
+    return malloc(Size);
+#else
     return RtlAllocateHeap(PhHeapHandle, HEAP_GENERATE_EXCEPTIONS, Size);
+#endif
 }
 
 /**
@@ -718,7 +754,11 @@ PVOID PhAllocateSafe(
     )
 {
     assert(Size);
+#if defined(PH_DEBUG_HEAP)
+    return malloc(Size);
+#else
     return RtlAllocateHeap(PhHeapHandle, 0, Size);
+#endif
 }
 
 /**
@@ -738,7 +778,11 @@ PVOID PhAllocateExSafe(
     )
 {
     assert(Size);
+#if defined(PH_DEBUG_HEAP)
+    return malloc(Size);
+#else
     return RtlAllocateHeap(PhHeapHandle, Flags, Size);
+#endif
 }
 
 /**
@@ -750,7 +794,11 @@ VOID PhFree(
     _Frees_ptr_opt_ PVOID Memory
     )
 {
+#if defined(PH_DEBUG_HEAP)
+    free(Memory);
+#else
     RtlFreeHeap(PhHeapHandle, 0, Memory);
+#endif
 }
 
 /**
@@ -772,7 +820,17 @@ PVOID PhReAllocate(
     )
 {
     assert(Size);
+#if defined(PH_DEBUG_HEAP)
+    return realloc(Memory, Size);
+#else
+    // RtlReAllocateHeap does not behave the same as realloc when Memory is NULL.
+    // For consistency with realloc above and easier drop-in replacements for
+    // realloc, produce the same behavior as realloc. If Memory is NULL, then
+    // allocate a new block.
+    if (!Memory) return RtlAllocateHeap(PhHeapHandle, HEAP_GENERATE_EXCEPTIONS, Size);
+
     return RtlReAllocateHeap(PhHeapHandle, HEAP_GENERATE_EXCEPTIONS, Memory, Size);
+#endif
 }
 
 /**
@@ -793,7 +851,17 @@ PVOID PhReAllocateSafe(
     )
 {
     assert(Size);
+#if defined(PH_DEBUG_HEAP)
+    return realloc(Memory, Size);
+#else
+    // RtlReAllocateHeap does not behave the same as realloc when Memory is NULL.
+    // For consistency with realloc above and easier drop-in replacements for
+    // realloc, produce the same behavior as realloc. If Memory is NULL, then
+    // allocate a new block.
+    if (!Memory) return RtlAllocateHeap(PhHeapHandle, 0, Size);
+
     return RtlReAllocateHeap(PhHeapHandle, 0, Memory, Size);
+#endif
 }
 
 /**
@@ -902,6 +970,74 @@ VOID PhFreePage(
         &Memory,
         &size,
         MEM_RELEASE
+        );
+}
+
+/**
+ * Reserves, commits, or both, a region of pages within the user-mode virtual address space of a specified process.
+ *
+ * \param ProcessHandle A handle to the process.
+ * \param BaseAddress The pointer that specifies a desired starting address for the region of pages that you want to allocate.
+ * If you are reserving memory, the function rounds this address down to the nearest multiple of the allocation granularity.
+ * If you are committing memory that is already reserved, the function rounds this address down to the nearest page boundary.
+ * \param AllocationSize The size of the region of memory to allocate, in bytes. If BaseAddress is NULL, the function rounds Size up to the next page boundary.
+ * \param AllocationType The type of memory allocation.
+ * \param Protection The type of memory protection.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhAllocateVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PVOID* BaseAddress,
+    _In_ SIZE_T AllocationSize,
+    _In_ ULONG AllocationType,
+    _In_ ULONG Protection
+    )
+{
+    NTSTATUS status;
+    PVOID baseAddress = NULL;
+    SIZE_T allocationSize = AllocationSize;
+
+    status = NtAllocateVirtualMemory(
+        ProcessHandle,
+        &baseAddress,
+        0,
+        &allocationSize,
+        AllocationType,
+        Protection
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *BaseAddress = baseAddress;
+    }
+
+    return status;
+}
+
+/**
+ * Releases, decommits, or both releases and decommits, a region of pages within the virtual address space of a specified process.
+ *
+ * \param ProcessHandle A handle to the process.
+ * \param BaseAddress The pointer that specifies a desired starting address for the region of pages that you want to allocate.
+ * \param FreeType A bitmask containing flags that describe the type of free operation.
+ *
+ * \return Successful or errant status.
+ */
+NTSTATUS PhFreeVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _In_ ULONG FreeType
+    )
+{
+    PVOID baseAddress = BaseAddress;
+    SIZE_T allocationSize = 0;
+
+    return NtFreeVirtualMemory(
+        ProcessHandle,
+        &baseAddress,
+        &allocationSize,
+        FreeType
         );
 }
 
@@ -5827,7 +5963,7 @@ VOID PhInitializeFreeList(
     _In_ ULONG MaximumCount
     )
 {
-    RtlInitializeSListHead(&FreeList->ListHead);
+    PhInitializeSListHead(&FreeList->ListHead);
     FreeList->Count = 0;
     FreeList->MaximumCount = MaximumCount;
     FreeList->Size = Size;
@@ -6265,7 +6401,7 @@ PPH_STRING PhBufferToHexStringEx(
     )
 {
     PPH_STRING string;
-    PCHAR table;
+    PCCH table;
     ULONG i;
 
     if (UpperCase)
@@ -6289,12 +6425,12 @@ BOOLEAN PhBufferToHexStringBuffer(
     _In_reads_bytes_(InputLength) PUCHAR InputBuffer,
     _In_ SIZE_T InputLength,
     _In_ BOOLEAN UpperCase,
-    _Out_writes_bytes_to_opt_(OutputLength, *ReturnLength) PWSTR OutputBuffer,
+    _Out_writes_bytes_to_(OutputLength, *ReturnLength) PWSTR OutputBuffer,
     _In_ SIZE_T OutputLength,
     _Out_opt_ PSIZE_T ReturnLength
     )
 {
-    PCHAR table;
+    PCCH table;
     ULONG i;
 
     if (OutputLength < InputLength * sizeof(WCHAR) * 2)
@@ -7548,4 +7684,108 @@ ULONG PhCountBitsUlongPtr(
         //
         //return count;
     }
+}
+
+#pragma region Thread Local Storage (TLS)
+
+ULONG PhTlsAlloc(
+    VOID
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW)
+    {
+        PTEB currentTeb;
+        PPEB currentPeb;
+        ULONG i;
+
+        currentTeb = NtCurrentTeb();
+        currentPeb = currentTeb->ProcessEnvironmentBlock;
+        RtlAcquirePebLock();
+
+        for (
+            i = RtlFindClearBitsAndSet(currentPeb->TlsBitmap, 1, 0);
+            ;
+            i = RtlFindClearBitsAndSet(currentPeb->TlsBitmap, 1, 0)
+            )
+        {
+            if (i != ULONG_MAX)
+            {
+                RtlReleasePebLock();
+                currentTeb->TlsSlots[i] = NULL;
+                return i;
+            }
+
+            if (currentTeb->TlsExpansionSlots)
+                break;
+
+            RtlReleasePebLock();
+            currentTeb->TlsExpansionSlots = (PVOID*)RtlAllocateHeap(RtlProcessHeap(), HEAP_ZERO_MEMORY, 0x2000);
+            if (!currentTeb->TlsExpansionSlots) goto CleanupExit;
+            RtlAcquirePebLock();
+        }
+
+        i = RtlFindClearBitsAndSet(currentPeb->TlsExpansionBitmap, 1, 0);
+        RtlReleasePebLock();
+
+        if (i != ULONG_MAX)
+        {
+            currentTeb->TlsExpansionSlots[i] = NULL;
+            return i + TLS_MINIMUM_AVAILABLE;
+        }
+    }
+
+CleanupExit:
+    //RtlSetLastWin32ErrorAndNtStatusFromNtStatus(STATUS_NO_MEMORY);
+    //return ULONG_MAX;
+    return TlsAlloc();
+}
+
+PVOID PhTlsGetValue(
+    _In_ ULONG Index
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW && Index < TLS_MINIMUM_AVAILABLE)
+    {
+        return NtCurrentTeb()->TlsSlots[Index];
+    }
+
+    return TlsGetValue(Index);
+}
+
+NTSTATUS PhTlsSetValue(
+    _In_ ULONG Index,
+    _In_opt_ PVOID Value
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW && Index < TLS_MINIMUM_AVAILABLE)
+    {
+        NtCurrentTeb()->TlsSlots[Index] = Value;
+        return STATUS_SUCCESS;
+    }
+
+    if (TlsSetValue(Index, Value))
+        return STATUS_SUCCESS;
+
+    return PhGetLastWin32ErrorAsNtStatus();
+}
+
+#pragma endregion
+
+ULONG PhGetLastError(
+    VOID
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW)
+        return NtCurrentTeb()->LastErrorValue;
+    return GetLastError();
+}
+
+VOID PhSetLastError(
+    _In_ ULONG ErrorValue
+    )
+{
+    if (WindowsVersion < WINDOWS_NEW)
+        NtCurrentTeb()->LastErrorValue = ErrorValue;
+    else
+        SetLastError(ErrorValue);
 }

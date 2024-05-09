@@ -16,7 +16,6 @@
 #include <processsnapshot.h>
 #include <sddl.h>
 #include <shellapi.h>
-#include <shellscalingapi.h>
 #include <shlobj.h>
 #include <winsta.h>
 
@@ -83,20 +82,20 @@ VOID PhCenterRectangle(
 /**
  * Ensures a rectangle is positioned within the working area of the specified window's monitor.
  *
- * \param hWnd A handle to a window. If NULL, the monitor closest to \a Rectangle is used.
+ * \param WindowHandle A handle to a window. If NULL, the monitor closest to \a Rectangle is used.
  * \param Rectangle The rectangle to be adjusted.
  */
 VOID PhAdjustRectangleToWorkingArea(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _Inout_ PPH_RECTANGLE Rectangle
     )
 {
     HMONITOR monitor;
     MONITORINFO monitorInfo = { sizeof(monitorInfo) };
 
-    if (hWnd)
+    if (WindowHandle)
     {
-        monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+        monitor = MonitorFromWindow(WindowHandle, MONITOR_DEFAULTTONEAREST);
     }
     else
     {
@@ -177,13 +176,10 @@ LCID PhGetSystemDefaultLCID(
 #if (PHNT_NATIVE_LOCALE)
     return GetSystemDefaultLCID();
 #else
-    if (NtQueryDefaultLocale_Import())
-    {
-        LCID localeId = LOCALE_SYSTEM_DEFAULT;
+    LCID localeId = LOCALE_SYSTEM_DEFAULT;
 
-        if (NT_SUCCESS(NtQueryDefaultLocale_Import()(FALSE, &localeId)))
-            return localeId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultLocale(FALSE, &localeId)))
+        return localeId;
 
     return LOCALE_SYSTEM_DEFAULT; // MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 #endif
@@ -197,13 +193,10 @@ LCID PhGetUserDefaultLCID(
 #if (PHNT_NATIVE_LOCALE)
     return GetUserDefaultLCID();
 #else
-    if (NtQueryDefaultLocale_Import())
-    {
-        LCID localeId = LOCALE_USER_DEFAULT;
+    LCID localeId = LOCALE_USER_DEFAULT;
 
-        if (NT_SUCCESS(NtQueryDefaultLocale_Import()(TRUE, &localeId)))
-            return localeId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultLocale(TRUE, &localeId)))
+        return localeId;
 
     return LOCALE_USER_DEFAULT; // MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 #endif
@@ -260,13 +253,12 @@ LANGID PhGetUserDefaultUILanguage(
 #if (PHNT_NATIVE_LOCALE)
     return GetUserDefaultUILanguage();
 #else
-    if (NtQueryDefaultUILanguage_Import())
-    {
-        LANGID languageId = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
+    LANGID languageId;
 
-        if (NT_SUCCESS(NtQueryDefaultUILanguage_Import()(&languageId)))
-            return languageId;
-    }
+    if (NT_SUCCESS(NtQueryDefaultUILanguage(&languageId)))
+        return languageId;
+    if (NT_SUCCESS(NtQueryInstallUILanguage(&languageId)))
+        return languageId;
 
     return MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
 #endif
@@ -425,6 +417,50 @@ VOID PhLargeIntegerToLocalSystemTime(
 #endif
 }
 
+BOOLEAN PhLocalSystemTimeToLargeInteger(
+    _Out_ PLARGE_INTEGER LargeInteger,
+    _In_ PSYSTEMTIME SystemTime
+    )
+{
+    LARGE_INTEGER timeZoneBias;
+
+    if (!PhSystemTimeToLargeInteger(LargeInteger, SystemTime))
+        return FALSE;
+
+    PhQueryTimeZoneBias(&timeZoneBias);
+    LargeInteger->QuadPart += timeZoneBias.QuadPart;
+
+    return TRUE;
+}
+
+BOOLEAN PhSystemTimeToTzSpecificLocalTime(
+    _In_ CONST SYSTEMTIME* UniversalTime,
+    _Out_ PSYSTEMTIME LocalTime
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static BOOL (WINAPI* SystemTimeToTzSpecificLocalTimeEx_I)(
+        _In_opt_ CONST DYNAMIC_TIME_ZONE_INFORMATION * lpTimeZoneInformation,
+        _In_ CONST SYSTEMTIME * lpUniversalTime,
+        _Out_ LPSYSTEMTIME lpLocalTime
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        SystemTimeToTzSpecificLocalTimeEx_I = PhGetDllProcedureAddress(L"kernel32.dll", "SystemTimeToTzSpecificLocalTimeEx", 0);
+        PhEndInitOnce(&initOnce);
+    }
+
+    memset(LocalTime, 0, sizeof(SYSTEMTIME));
+
+    if (SystemTimeToTzSpecificLocalTimeEx_I)
+    {
+        return !!SystemTimeToTzSpecificLocalTimeEx_I(NULL, UniversalTime, LocalTime);
+    }
+
+    return !!SystemTimeToTzSpecificLocalTime(NULL, UniversalTime, LocalTime);
+}
+
 /**
  * Gets a string stored in a DLL's message table.
  *
@@ -504,7 +540,9 @@ PPH_STRING PhGetNtMessage(
 {
     PPH_STRING message;
 
-    if (!NT_NTWIN32(Status))
+    if (NT_CUSTOMER(Status))
+        message = PhGetMessage(PhGetLoaderEntryDllBase(NULL, NULL), 0xb, PhGetUserDefaultLangID(), (ULONG)Status);
+    else if (!NT_NTWIN32(Status))
         message = PhGetMessage(PhGetLoaderEntryDllBaseZ(L"ntdll.dll"), 0xb, PhGetUserDefaultLangID(), (ULONG)Status);
     else
         message = PhGetWin32Message(PhNtStatusToDosError(Status));
@@ -619,14 +657,14 @@ PPH_STRING PhGetWin32FormatMessage(
 /**
  * Displays a message box.
  *
- * \param hWnd The owner window of the message box.
+ * \param WindowHandle The owner window of the message box.
  * \param Type The type of message box to display.
  * \param Format A format string.
  *
  * \return The user's response.
  */
 INT PhShowMessage(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Type,
     _In_ PWSTR Format,
     ...
@@ -641,9 +679,9 @@ INT PhShowMessage(
     va_end(argptr);
 
     if (!message)
-        return -1;
+        return INT_ERROR;
 
-    result = MessageBoxW_Import()(hWnd, message->Buffer, PhApplicationName, Type);
+    result = MessageBox(WindowHandle, message->Buffer, PhApplicationName, Type);
     PhDereferenceObject(message);
 
     return result;
@@ -660,7 +698,7 @@ static const PH_FLAG_MAPPING PhShowMessageTaskDialogButtonFlagMappings[] =
 };
 
 INT PhShowMessage2(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Buttons,
     _In_opt_ PWSTR Icon,
     _In_opt_ PWSTR Title,
@@ -689,9 +727,9 @@ INT PhShowMessage2(
         ARRAYSIZE(PhShowMessageTaskDialogButtonFlagMappings)
         );
 
-    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((hWnd && IsWindowVisible(hWnd) && !IsMinimized(hWnd)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((WindowHandle && IsWindowVisible(WindowHandle) && !IsMinimized(WindowHandle)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
     config.dwCommonButtons = buttonsFlags;
-    config.hwndParent = hWnd;
+    config.hwndParent = WindowHandle;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainIcon = Icon;
     config.pszMainInstruction = Title;
@@ -715,7 +753,7 @@ INT PhShowMessage2(
 }
 
 BOOLEAN PhShowMessageOneTime(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG Buttons,
     _In_opt_ PWSTR Icon,
     _In_opt_ PWSTR Title,
@@ -745,9 +783,9 @@ BOOLEAN PhShowMessageOneTime(
         ARRAYSIZE(PhShowMessageTaskDialogButtonFlagMappings)
         );
 
-    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((hWnd && IsWindowVisible(hWnd) && !IsMinimized(hWnd)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((WindowHandle && IsWindowVisible(WindowHandle) && !IsMinimized(WindowHandle)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
     config.dwCommonButtons = buttonsFlags;
-    config.hwndParent = hWnd;
+    config.hwndParent = WindowHandle;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainIcon = Icon;
     config.pszMainInstruction = Title;
@@ -807,13 +845,13 @@ PPH_STRING PhGetStatusMessage(
 /**
  * Displays an error message for a NTSTATUS value or Win32 error code.
  *
- * \param hWnd The owner window of the message box.
+ * \param WindowHandle The owner window of the message box.
  * \param Message A message describing the operation that failed.
  * \param Status A NTSTATUS value, or 0 if there is none.
  * \param Win32Result A Win32 error code, or 0 if there is none.
  */
 VOID PhShowStatus(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_opt_ PWSTR Message,
     _In_ NTSTATUS Status,
     _In_opt_ ULONG Win32Result
@@ -825,11 +863,11 @@ VOID PhShowStatus(
     {
         if (Message)
         {
-            PhShowError2(hWnd, Message, L"%s", statusMessage->Buffer);
+            PhShowError2(WindowHandle, Message, L"%s", statusMessage->Buffer);
         }
         else
         {
-            PhShowError(hWnd, L"%s", statusMessage->Buffer);
+            PhShowError(WindowHandle, L"%s", statusMessage->Buffer);
         }
 
         PhDereferenceObject(statusMessage);
@@ -838,11 +876,11 @@ VOID PhShowStatus(
     {
         if (Message)
         {
-            PhShowError(hWnd, L"%s", Message);
+            PhShowError(WindowHandle, L"%s", Message);
         }
         else
         {
-            PhShowError(hWnd, L"%s", L"Unable to perform the operation.");
+            PhShowError(WindowHandle, L"%s", L"Unable to perform the operation.");
         }
     }
 }
@@ -851,7 +889,7 @@ VOID PhShowStatus(
  * Displays an error message for a NTSTATUS value or Win32 error code, and allows the user to cancel
  * the current operation.
  *
- * \param hWnd The owner window of the message box.
+ * \param WindowHandle The owner window of the message box.
  * \param Message A message describing the operation that failed.
  * \param Status A NTSTATUS value, or 0 if there is none.
  * \param Win32Result A Win32 error code, or 0 if there is none.
@@ -859,7 +897,7 @@ VOID PhShowStatus(
  * \return TRUE if the user wishes to continue with the current operation, otherwise FALSE.
  */
 BOOLEAN PhShowContinueStatus(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_opt_ PWSTR Message,
     _In_ NTSTATUS Status,
     _In_opt_ ULONG Win32Result
@@ -871,13 +909,13 @@ BOOLEAN PhShowContinueStatus(
     statusMessage = PhGetStatusMessage(Status, Win32Result);
 
     if (Message && statusMessage)
-        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CLOSE_BUTTON, TD_ERROR_ICON, Message, L"%s", PhGetString(statusMessage));
+        result = PhShowMessage2(WindowHandle, TD_OK_BUTTON | TD_CLOSE_BUTTON, TD_ERROR_ICON, Message, L"%s", PhGetString(statusMessage));
     else if (Message)
-        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", Message);
+        result = PhShowMessage2(WindowHandle, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", Message);
     else if (statusMessage)
-        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", PhGetString(statusMessage));
+        result = PhShowMessage2(WindowHandle, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"", L"%s", PhGetString(statusMessage));
     else
-        result = PhShowMessage2(hWnd, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"Unable to perform the operation.", L"%s", L"");
+        result = PhShowMessage2(WindowHandle, TD_OK_BUTTON | TD_CANCEL_BUTTON, TD_ERROR_ICON, L"Unable to perform the operation.", L"%s", L"");
 
     if (statusMessage) PhDereferenceObject(statusMessage);
 
@@ -887,7 +925,7 @@ BOOLEAN PhShowContinueStatus(
 /**
  * Displays a confirmation message.
  *
- * \param hWnd The owner window of the message box.
+ * \param WindowHandle The owner window of the message box.
  * \param Verb A verb describing the operation, e.g. "terminate".
  * \param Object The object of the operation, e.g. "the process".
  * \param Message A message describing the operation.
@@ -896,7 +934,7 @@ BOOLEAN PhShowContinueStatus(
  * \return TRUE if the user wishes to continue, otherwise FALSE.
  */
 BOOLEAN PhShowConfirmMessage(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR Verb,
     _In_ PWSTR Object,
     _In_opt_ PWSTR Message,
@@ -924,9 +962,9 @@ BOOLEAN PhShowConfirmMessage(
 
         memset(&config, 0, sizeof(TASKDIALOGCONFIG));
         config.cbSize = sizeof(TASKDIALOGCONFIG);
-        config.hwndParent = hWnd;
+        config.hwndParent = WindowHandle;
         config.hInstance = PhInstanceHandle;
-        config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((hWnd && IsWindowVisible(hWnd) && !IsMinimized(hWnd)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
+        config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | ((WindowHandle && IsWindowVisible(WindowHandle) && !IsMinimized(WindowHandle)) ? TDF_POSITION_RELATIVE_TO_WINDOW : 0);
         config.pszWindowTitle = PhApplicationName;
         config.pszMainIcon = Warning ? TD_WARNING_ICON : TD_INFORMATION_ICON;
         config.pszMainInstruction = PhaConcatStrings(3, L"Do you want to ", action->Buffer, L"?")->Buffer;
@@ -954,95 +992,13 @@ BOOLEAN PhShowConfirmMessage(
         else
         {
             return PhShowMessage(
-                hWnd,
+                WindowHandle,
                 MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
                 L"Are you sure you want to %s?",
                 action->Buffer
                 ) == IDYES;
         }
     }
-}
-
-/**
- * Finds an integer in an array of string-integer pairs.
- *
- * \param KeyValuePairs The array.
- * \param SizeOfKeyValuePairs The size of the array, in bytes.
- * \param String The string to search for.
- * \param Integer A variable which receives the found integer.
- *
- * \return TRUE if the string was found, otherwise FALSE.
- *
- * \remarks The search is case-sensitive.
- */
-_Success_(return)
-BOOLEAN PhFindIntegerSiKeyValuePairs(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ PWSTR String,
-    _Out_ PULONG Integer
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PhEqualStringZ(KeyValuePairs[i].Key, String, TRUE))
-        {
-            *Integer = PtrToUlong(KeyValuePairs[i].Value);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-/**
- * Finds a string in an array of string-integer pairs.
- *
- * \param KeyValuePairs The array.
- * \param SizeOfKeyValuePairs The size of the array, in bytes.
- * \param Integer The integer to search for.
- * \param String A variable which receives the found string.
- *
- * \return TRUE if the integer was found, otherwise FALSE.
- */
-_Success_(return)
-BOOLEAN PhFindStringSiKeyValuePairs(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ ULONG Integer,
-    _Out_ PWSTR *String
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PtrToUlong(KeyValuePairs[i].Value) == Integer)
-        {
-            *String = (PWSTR)KeyValuePairs[i].Key;
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-_Success_(return)
-BOOLEAN PhFindIntegerSiKeyValuePairsStringRef(
-    _In_ PPH_KEY_VALUE_PAIR KeyValuePairs,
-    _In_ ULONG SizeOfKeyValuePairs,
-    _In_ PPH_STRINGREF String,
-    _Out_ PULONG Integer
-    )
-{
-    for (ULONG i = 0; i < SizeOfKeyValuePairs / sizeof(PH_KEY_VALUE_PAIR); i++)
-    {
-        if (PhEqualStringRef(KeyValuePairs[i].Key, String, TRUE))
-        {
-            *Integer = PtrToUlong(KeyValuePairs[i].Value);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }
 
 /**
@@ -1175,6 +1131,51 @@ VOID PhGenerateGuidFromName(
     guid->s2.Variant |= GUID_VARIANT_STANDARD;
 }
 
+// rev from ntoskrnl.exe!RtlGenerateClass5Guid (dmex)
+VOID PhGenerateClass5Guid(
+    _In_ REFGUID NamespaceGuid,
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONG BufferSize,
+    _Out_ PGUID Guid
+    )
+{
+    A_SHA_CTX context;
+    GUID data;
+    PGUID_EX guid;
+    UCHAR hash[20];
+
+    data = *NamespaceGuid;
+    data.Data1 = _byteswap_ulong(NamespaceGuid->Data1);
+    data.Data2 = _rotr16(NamespaceGuid->Data2, 8);
+    data.Data3 = _rotr16(NamespaceGuid->Data3, 8);
+
+    A_SHAInit(&context);
+    A_SHAUpdate(&context, (PUCHAR)&data, sizeof(GUID));
+    A_SHAUpdate(&context, Buffer, BufferSize);
+    A_SHAFinal(&context, hash);
+
+    guid = (PGUID_EX)Guid;
+    memcpy(guid->Data, hash, sizeof(GUID));
+    guid->Guid.Data1 = _byteswap_ulong(guid->Guid.Data1);
+    guid->Guid.Data2 = _rotr16(guid->Guid.Data2, 8);
+    guid->Guid.Data3 = _rotr16(guid->Guid.Data3, 8);
+    guid->s2.Version = GUID_VERSION_SHA1;
+    guid->s2.Variant &= ~GUID_VARIANT_STANDARD_MASK;
+    guid->s2.Variant |= GUID_VARIANT_STANDARD;
+}
+
+// rev from Windows SDK\\ComputerHardwareIds.exe (dmex)
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/computerhardwareids
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/install/specifying-hardware-ids-for-a-computer
+VOID PhGenerateHardwareIDGuid(
+    _In_reads_bytes_(BufferSize) PVOID Buffer,
+    _In_ ULONG BufferSize,
+    _Out_ PGUID Guid
+    )
+{
+    PhGenerateClass5Guid(&GUID_NAMESPACE_MICROSOFT, Buffer, BufferSize, Guid);
+}
+
 /**
  * Fills a buffer with random uppercase alphabetical characters.
  *
@@ -1184,7 +1185,7 @@ VOID PhGenerateGuidFromName(
  */
 VOID PhGenerateRandomAlphaString(
     _Out_writes_z_(Count) PWSTR Buffer,
-    _In_ ULONG Count
+    _In_ SIZE_T Count
     )
 {
     LARGE_INTEGER seed;
@@ -1208,10 +1209,14 @@ ULONG64 PhGenerateRandomNumber64(
     )
 {
     LARGE_INTEGER seed;
+    ULARGE_INTEGER value;
 
     PhQueryPerformanceCounter(&seed);
 
-    return (ULONG64)RtlRandomEx(&seed.LowPart) | ((ULONG64)RtlRandomEx(&seed.LowPart) << 31);
+    value.LowPart = RtlRandomEx(&seed.LowPart);
+    value.HighPart = RtlRandomEx(&seed.LowPart);
+
+    return value.QuadPart;
 }
 
 BOOLEAN PhGenerateRandomNumber(
@@ -1943,6 +1948,43 @@ PPH_STRING PhFormatUInt64Prefix(
     return PhFormat(format, 2, 0);
 }
 
+PPH_STRING PhFormatUInt64BitratePrefix(
+    _In_ ULONG64 Value,
+    _In_ BOOLEAN GroupDigits
+    )
+{
+    static const PH_STRINGREF SiPrefixUnitNamesCounted[7] =
+    {
+        PH_STRINGREF_INIT(L" Bps"),
+        PH_STRINGREF_INIT(L" Kbps"),
+        PH_STRINGREF_INIT(L" Mbps"),
+        PH_STRINGREF_INIT(L" Gbps"),
+        PH_STRINGREF_INIT(L" Tbps"),
+        PH_STRINGREF_INIT(L" Pbps"),
+        PH_STRINGREF_INIT(L" Ebps")
+    };
+    DOUBLE number = (DOUBLE)Value;
+    ULONG i = 0;
+    PH_FORMAT format[2];
+
+    while (
+        number >= 1000 &&
+        i < RTL_NUMBER_OF(SiPrefixUnitNamesCounted) &&
+        i < PhMaxSizeUnit
+        )
+    {
+        number /= 1000;
+        i++;
+    }
+
+    format[0].Type = DoubleFormatType | FormatUsePrecision | (GroupDigits ? FormatGroupDigits : 0);
+    format[0].Precision = 1;
+    format[0].u.Double = number;
+    PhInitFormatSR(&format[1], SiPrefixUnitNamesCounted[i]);
+
+    return PhFormat(format, 2, 0);
+}
+
 PPH_STRING PhFormatDecimal(
     _In_ PWSTR Value,
     _In_ ULONG FractionalDigits,
@@ -2045,6 +2087,62 @@ PPH_STRING PhFormatGuid(
     return string;
 }
 
+/**
+ * Converts a UUID to its string representation.
+ *
+ * \param Guid A UUID.
+ * \param Buffer A buffer. If NULL, no data is written.
+ * \param BufferLength The number of bytes available in Buffer, including space for the null terminator.
+ * \param ReturnLength The number of bytes required to hold the string, including the null terminator.
+ */
+NTSTATUS PhFormatGuidToBuffer(
+    _In_ PGUID Guid,
+    _Writable_bytes_(BufferLength) _When_(BufferLength != 0, _Notnull_) PWCHAR Buffer,
+    _In_opt_ USHORT BufferLength,
+    _Out_opt_ PSIZE_T ReturnLength
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static NTSTATUS (NTAPI* RtlStringFromGUIDEx_I)(
+        _In_ PGUID Guid,
+        _Inout_ PUNICODE_STRING GuidString,
+        _In_ BOOLEAN AllocateGuidString
+        ) = NULL;
+    NTSTATUS status;
+    UNICODE_STRING unicodeString;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        if (WindowsVersion >= WINDOWS_10)
+        {
+            RtlStringFromGUIDEx_I = PhGetDllProcedureAddress(L"ntdll.dll", "RtlStringFromGUIDEx", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!RtlStringFromGUIDEx_I)
+        return STATUS_PROCEDURE_NOT_FOUND;
+
+    RtlInitEmptyUnicodeString(&unicodeString, Buffer, BufferLength);
+
+    status = RtlStringFromGUIDEx_I(
+        Guid,
+        &unicodeString,
+        FALSE
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (ReturnLength)
+        {
+            *ReturnLength = unicodeString.Length + sizeof(UNICODE_NULL);
+        }
+    }
+
+    return status;
+}
+
 NTSTATUS PhStringToGuid(
     _In_ PPH_STRINGREF GuidString,
     _Out_ PGUID Guid
@@ -2110,7 +2208,7 @@ PVOID PhGetFileVersionInfoEx(
     PVOID imageBaseAddress;
     PVOID versionInfo;
 
-    if (!NT_SUCCESS(PhLoadLibraryAsImageResource(FileName, &imageBaseAddress)))
+    if (!NT_SUCCESS(PhLoadLibraryAsImageResource(FileName, TRUE, &imageBaseAddress)))
         return NULL;
 
     if (PhLoadResourceCopy(
@@ -2809,18 +2907,20 @@ VOID PhFlushImageVersionInfoCache(
  * Gets an absolute file name.
  *
  * \param FileName A file name.
+ * \param FullPath An absolute file name, or NULL if the function failed.
  * \param IndexOfFileName A variable which receives the index of the base name.
  *
- * \return An absolute file name, or NULL if the function failed.
+ * \return Successful or errant status.
  */
-_Success_(return != NULL)
-PPH_STRING PhGetFullPath(
+NTSTATUS PhGetFullPath(
     _In_ PWSTR FileName,
+    _Out_ PPH_STRING *FullPath,
     _Out_opt_ PULONG IndexOfFileName
     )
 {
+    NTSTATUS status;
     PPH_STRING fullPath;
-    ULONG bufferSize;
+    ULONG fullPathLength;
     ULONG returnLength;
     PWSTR filePart;
 
@@ -2828,83 +2928,16 @@ PPH_STRING PhGetFullPath(
     assert(RtlEqualMemory(FileName, RtlNtPathSeperatorString.Buffer, RtlNtPathSeperatorString.Length) == FALSE);
 #endif
 
-    bufferSize = 0x80;
-    fullPath = PhCreateStringEx(NULL, bufferSize * sizeof(WCHAR));
-
-    returnLength = RtlGetFullPathName_U(FileName, bufferSize, fullPath->Buffer, &filePart);
-
-    if (returnLength > bufferSize)
-    {
-        PhDereferenceObject(fullPath);
-        bufferSize = returnLength;
-        fullPath = PhCreateStringEx(NULL, bufferSize * sizeof(WCHAR));
-
-        returnLength = RtlGetFullPathName_U(FileName, bufferSize, fullPath->Buffer, &filePart);
-    }
-
-    if (returnLength == 0)
-    {
-        PhDereferenceObject(fullPath);
-        return NULL;
-    }
-
-    PhTrimToNullTerminatorString(fullPath);
-
-    if (IndexOfFileName)
-    {
-        if (filePart)
-        {
-            // The path points to a file.
-            *IndexOfFileName = (ULONG)(filePart - fullPath->Buffer);
-        }
-        else
-        {
-            // The path points to a directory.
-            *IndexOfFileName = ULONG_MAX;
-        }
-    }
-
-    return fullPath;
-}
-
-NTSTATUS PhGetFullPathEx(
-    _In_ PWSTR FileName,
-    _Out_opt_ PULONG IndexOfFileName,
-    _Out_ PPH_STRING *FullPath
-    )
-{
-#if (PHNT_VERSION >= PHNT_WIN7)
-    NTSTATUS status;
-    PPH_STRING fullPath;
-    ULONG bufferSize;
-    ULONG returnLength = 0;
-    PWSTR filePart;
-
-    bufferSize = 0x80;
-    fullPath = PhCreateStringEx(NULL, bufferSize * sizeof(WCHAR));
+    fullPathLength = DOS_MAX_PATH_LENGTH;
+    fullPath = PhCreateStringEx(NULL, fullPathLength);
 
     status = RtlGetFullPathName_UEx(
         FileName,
-        bufferSize,
+        fullPathLength,
         fullPath->Buffer,
         &filePart,
         &returnLength
         );
-
-    if (returnLength > bufferSize)
-    {
-        PhDereferenceObject(fullPath);
-        bufferSize = returnLength;
-        fullPath = PhCreateStringEx(NULL, bufferSize * sizeof(WCHAR));
-
-        status = RtlGetFullPathName_UEx(
-            FileName,
-            bufferSize,
-            fullPath->Buffer,
-            &filePart,
-            &returnLength
-            );
-    }
 
     if (!NT_SUCCESS(status))
     {
@@ -2912,8 +2945,29 @@ NTSTATUS PhGetFullPathEx(
         return status;
     }
 
-    fullPath->Length = returnLength;
-    //PhTrimToNullTerminatorString(fullPath);
+    if (returnLength > fullPathLength)
+    {
+        PhDereferenceObject(fullPath);
+        fullPathLength = returnLength;
+        fullPath = PhCreateStringEx(NULL, fullPathLength);
+
+        status = RtlGetFullPathName_UEx(
+            FileName,
+            fullPathLength,
+            fullPath->Buffer,
+            &filePart,
+            &returnLength
+            );
+
+        if (!NT_SUCCESS(status))
+        {
+            PhDereferenceObject(fullPath);
+            return status;
+        }
+    }
+
+    PhTrimToNullTerminatorString(fullPath);
+    *FullPath = fullPath;
 
     if (IndexOfFileName)
     {
@@ -2929,20 +2983,7 @@ NTSTATUS PhGetFullPathEx(
         }
     }
 
-    *FullPath = fullPath;
-
     return status;
-#else
-    PPH_STRING fullPath;
-
-    if (fullPath = PhGetFullPath(FileName, IndexOfFileName))
-    {
-        *FullPath = fullPath;
-        return STATUS_SUCCESS;
-    }
-
-    return STATUS_UNSUCCESSFUL;
-#endif
 }
 
 /**
@@ -3193,6 +3234,46 @@ VOID PhGetSystemRoot(
     systemRoot.Buffer = localSystemRoot.Buffer;
 }
 
+/**
+ * Retrieves the Windows directory path.
+ */
+PPH_STRING PhGetWindowsDirectory(
+    _In_opt_ PPH_STRINGREF AppendPath
+    )
+{
+    PH_STRINGREF systemRoot;
+    PPH_STRING systemRootNative;
+
+    PhGetSystemRoot(&systemRoot);
+    systemRootNative = PhDosPathNameToNtPathName(&systemRoot);
+
+    if (systemRootNative && AppendPath)
+    {
+        PhMoveReference(&systemRootNative, PhConcatStringRef2(&systemRootNative->sr, AppendPath));
+    }
+
+    return systemRootNative;
+}
+
+/**
+ * Retrieves the Windows directory path.
+ */
+PPH_STRING PhGetWindowsDirectoryWin32(
+    _In_opt_ PPH_STRINGREF AppendPath
+    )
+{
+    PH_STRINGREF systemRoot;
+
+    PhGetSystemRoot(&systemRoot);
+
+    if (AppendPath)
+    {
+        return PhConcatStringRef2(&systemRoot, AppendPath);
+    }
+
+    return PhCreateString2(&systemRoot);
+}
+
 PPH_STRING PhGetApplicationFileName(
     VOID
     )
@@ -3252,7 +3333,7 @@ PPH_STRING PhGetApplicationFileNameWin32(
     //{
     //    PPH_STRING fullPath;
     //
-    //    if (fullPath = PhGetFullPath(PhGetString(fileName), NULL))
+    //    if (NT_SUCCESS(PhGetFullPath(PhGetString(fileName), &fullPath, NULL)))
     //    {
     //        PhMoveReference(&fileName, fullPath);
     //    }
@@ -3415,7 +3496,7 @@ PPH_STRING PhGetTemporaryDirectoryRandomAlphaFileName(
     PH_STRINGREF randomAlphaString;
     WCHAR randomAlphaStringBuffer[33] = L"";
 
-    PhGenerateRandomAlphaString(randomAlphaStringBuffer, ARRAYSIZE(randomAlphaStringBuffer));
+    PhGenerateRandomAlphaString(randomAlphaStringBuffer, RTL_NUMBER_OF(randomAlphaStringBuffer));
     randomAlphaStringBuffer[0] = OBJ_NAME_PATH_SEPARATOR;
     randomAlphaString.Buffer = randomAlphaStringBuffer;
     randomAlphaString.Length = sizeof(randomAlphaStringBuffer) - sizeof(UNICODE_NULL);
@@ -3423,8 +3504,26 @@ PPH_STRING PhGetTemporaryDirectoryRandomAlphaFileName(
     return PhGetTemporaryDirectory(&randomAlphaString);
 }
 
+PPH_STRING PhGetLocalAppDataDirectory(
+    _In_opt_ PPH_STRINGREF FileName,
+    _In_ BOOLEAN NativeFileName
+    )
+{
+    PPH_STRING localAppDataFileName = NULL;
+    PPH_STRING localAppDataDirectory;
+
+    if (localAppDataDirectory = PhGetKnownLocationZ(PH_FOLDERID_LocalAppData, L"\\SystemInformer\\", NativeFileName))
+    {
+        if (!FileName) return localAppDataDirectory;
+        localAppDataFileName = PhConcatStringRef2(&localAppDataDirectory->sr, FileName);
+        PhReferenceObject(localAppDataDirectory);
+    }
+
+    return localAppDataFileName;
+}
+
 PPH_STRING PhGetRoamingAppDataDirectory(
-    _In_ PPH_STRINGREF FileName,
+    _In_opt_ PPH_STRINGREF FileName,
     _In_ BOOLEAN NativeFileName
     )
 {
@@ -3433,6 +3532,7 @@ PPH_STRING PhGetRoamingAppDataDirectory(
 
     if (roamingAppDataDirectory = PhGetKnownLocationZ(PH_FOLDERID_RoamingAppData, L"\\SystemInformer\\", NativeFileName))
     {
+        if (!FileName) return roamingAppDataDirectory;
         roamingAppDataFileName = PhConcatStringRef2(&roamingAppDataDirectory->sr, FileName);
         PhReferenceObject(roamingAppDataDirectory);
     }
@@ -3520,6 +3620,13 @@ PPH_STRING PhGetApplicationDataFileName(
 //    return NULL;
 //}
 
+/**
+ * Retrieves the full path of a known folder.
+ *
+ * \param Folder A reference that identifies the folder.
+ * \param AppendPath The string to append to the path.
+ * \param NativeFileName A boolean to return the native path or Win32 path.
+ */
 PPH_STRING PhGetKnownLocation(
     _In_ ULONG Folder,
     _In_opt_ PPH_STRINGREF AppendPath,
@@ -3531,93 +3638,123 @@ PPH_STRING PhGetKnownLocation(
     {
     case PH_FOLDERID_LocalAppData:
         {
-            static UNICODE_STRING variableName = RTL_CONSTANT_STRING(L"LOCALAPPDATA");
-            UNICODE_STRING variableValue;
+            static PH_STRINGREF variableName = PH_STRINGREF_INIT(L"LOCALAPPDATA");
+            static PH_STRINGREF variableNameProfile = PH_STRINGREF_INIT(L"USERPROFILE");
+            NTSTATUS status;
+            PH_STRINGREF variableValue;
             WCHAR variableBuffer[DOS_MAX_PATH_LENGTH];
 
-            RtlInitEmptyUnicodeString(&variableValue, variableBuffer, sizeof(variableBuffer));
+            PhInitializeBufferStringRef(&variableValue, variableBuffer, sizeof(variableBuffer));
 
-            if (NT_SUCCESS(RtlQueryEnvironmentVariable_U(
+            status = PhQueryEnvironmentVariableStringRef(
                 NULL,
                 &variableName,
                 &variableValue
-                )))
-            {
-                PH_STRINGREF string;
+                );
 
-                PhUnicodeStringToStringRef(&variableValue, &string);
+            if (!NT_SUCCESS(status))
+            {
+                status = PhQueryEnvironmentVariableStringRef(
+                    NULL,
+                    &variableNameProfile,
+                    &variableValue
+                    );
+            }
+
+            if (NT_SUCCESS(status))
+            {
+                PPH_STRING fileName;
 
                 if (AppendPath)
                 {
                     if (NativeFileName)
                     {
-                        PPH_STRING fileName;
-
-                        if (fileName = PhDosPathNameToNtPathName(&string))
+                        if (fileName = PhDosPathNameToNtPathName(&variableValue))
                         {
                             PhMoveReference(&fileName, PhConcatStringRef2(&fileName->sr, AppendPath));
                         }
-
-                        return fileName;
+                        else
+                        {
+                            fileName = NULL;
+                        }
                     }
-
-                    return PhConcatStringRef2(&string, AppendPath);
+                    else
+                    {
+                        fileName = PhConcatStringRef2(&variableValue, AppendPath);
+                    }
                 }
                 else
                 {
                     if (NativeFileName)
-                    {
-                        return PhDosPathNameToNtPathName(&string);
-                    }
-
-                    return PhCreateString2(&string);
+                        fileName = PhDosPathNameToNtPathName(&variableValue);
+                    else
+                        fileName = PhCreateString2(&variableValue);
                 }
+
+                return fileName;
             }
         }
         break;
     case PH_FOLDERID_RoamingAppData:
         {
-            static UNICODE_STRING variableName = RTL_CONSTANT_STRING(L"APPDATA");
-            UNICODE_STRING variableValue;
+            static PH_STRINGREF variableName = PH_STRINGREF_INIT(L"APPDATA");
+            static PH_STRINGREF variableNameProfile = PH_STRINGREF_INIT(L"USERPROFILE");
+            NTSTATUS status;
+            PH_STRINGREF variableValue;
             WCHAR variableBuffer[DOS_MAX_PATH_LENGTH];
 
-            RtlInitEmptyUnicodeString(&variableValue, variableBuffer, sizeof(variableBuffer));
+            PhInitializeBufferStringRef(&variableValue, variableBuffer, sizeof(variableBuffer));
 
-            if (NT_SUCCESS(RtlQueryEnvironmentVariable_U(
+            status = PhQueryEnvironmentVariableStringRef(
                 NULL,
                 &variableName,
                 &variableValue
-                )))
-            {
-                PH_STRINGREF string;
+                );
 
-                PhUnicodeStringToStringRef(&variableValue, &string);
+            if (!NT_SUCCESS(status))
+            {
+                status = PhQueryEnvironmentVariableStringRef(
+                    NULL,
+                    &variableNameProfile,
+                    &variableValue
+                    );
+            }
+
+            if (NT_SUCCESS(status))
+            {
+                PPH_STRING fileName;
 
                 if (AppendPath)
                 {
                     if (NativeFileName)
                     {
-                        PPH_STRING fileName;
-
-                        if (fileName = PhDosPathNameToNtPathName(&string))
+                        if (fileName = PhDosPathNameToNtPathName(&variableValue))
                         {
                             PhMoveReference(&fileName, PhConcatStringRef2(&fileName->sr, AppendPath));
                         }
-
-                        return fileName;
+                        else
+                        {
+                            fileName = NULL;
+                        }
                     }
-
-                    return PhConcatStringRef2(&string, AppendPath);
+                    else
+                    {
+                        fileName = PhConcatStringRef2(&variableValue, AppendPath);
+                    }
                 }
                 else
                 {
                     if (NativeFileName)
                     {
-                        return PhDosPathNameToNtPathName(&string);
+                        fileName = PhDosPathNameToNtPathName(&variableValue);
                     }
-
-                    return PhCreateString2(&string);
+                    else
+                    {
+                        fileName = PhCreateString2(&variableValue);
+                    }
                 }
+
+                return fileName;
             }
         }
         break;
@@ -3641,9 +3778,35 @@ PPH_STRING PhGetKnownLocation(
     switch (Folder)
     {
     case PH_FOLDERID_LocalAppData:
-        return PhGetKnownFolderPath(&FOLDERID_LocalAppData, AppendPath);
+        {
+            PPH_STRING value;
+
+            if (value = PhGetKnownFolderPath(&FOLDERID_LocalAppData, AppendPath))
+            {
+                if (NativeFileName)
+                {
+                    PhMoveReference(&value, PhDosPathNameToNtPathName(&value->sr));
+                }
+
+                return value;
+            }
+        }
+        break;
     case PH_FOLDERID_RoamingAppData:
-        return PhGetKnownFolderPath(&FOLDERID_RoamingAppData, AppendPath);
+        {
+            PPH_STRING value;
+
+            if (value = PhGetKnownFolderPath(&FOLDERID_RoamingAppData, AppendPath))
+            {
+                if (NativeFileName)
+                {
+                    PhMoveReference(&value, PhDosPathNameToNtPathName(&value->sr));
+                }
+
+                return value;
+            }
+        }
+        break;
     //case PH_FOLDERID_ProgramFiles:
     //    return PhGetKnownFolderPath(&FOLDERID_ProgramFiles, AppendPath);
     }
@@ -3652,7 +3815,7 @@ PPH_STRING PhGetKnownLocation(
 }
 
 PPH_STRING PhGetKnownFolderPath(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_opt_ PPH_STRINGREF AppendPath
     )
 {
@@ -3666,7 +3829,7 @@ static const PH_FLAG_MAPPING PhpKnownFolderFlagMappings[] =
 };
 
 PPH_STRING PhGetKnownFolderPathEx(
-    _In_ PGUID Folder,
+    _In_ PCGUID Folder,
     _In_ ULONG Flags,
     _In_opt_ HANDLE TokenHandle,
     _In_opt_ PPH_STRINGREF AppendPath
@@ -3681,7 +3844,7 @@ PPH_STRING PhGetKnownFolderPathEx(
     flags = 0;
     PhMapFlags1(&flags, Flags, PhpKnownFolderFlagMappings, ARRAYSIZE(PhpKnownFolderFlagMappings));
 
-    if (FAILED(SHGetKnownFolderPath(
+    if (FAILED(PhShellGetKnownFolderPath(
         Folder,
         flags | KF_FLAG_DONT_VERIFY,
         TokenHandle,
@@ -3720,16 +3883,16 @@ PPH_STRING PhGetTemporaryDirectory(
     _In_opt_ PPH_STRINGREF AppendPath
     )
 {
-    static UNICODE_STRING variableNameTmp = RTL_CONSTANT_STRING(L"TMP");
-    static UNICODE_STRING variableNameTemp = RTL_CONSTANT_STRING(L"TEMP");
-    static UNICODE_STRING variableNameProfile = RTL_CONSTANT_STRING(L"USERPROFILE");
+    static PH_STRINGREF variableNameTmp = PH_STRINGREF_INIT(L"TMP");
+    static PH_STRINGREF variableNameTemp = PH_STRINGREF_INIT(L"TEMP");
+    static PH_STRINGREF variableNameProfile = PH_STRINGREF_INIT(L"USERPROFILE");
     NTSTATUS status;
-    UNICODE_STRING variableValue;
+    PH_STRINGREF variableValue;
     WCHAR variableBuffer[DOS_MAX_PATH_LENGTH];
 
     if (
         PhGetOwnTokenAttributes().Elevated ||
-        PhEqualSid(PhGetOwnTokenAttributes().TokenSid, &PhSeLocalSystemSid)
+        PhEqualSid(PhGetOwnTokenAttributes().TokenSid, (PSID)&PhSeLocalSystemSid)
         )
     {
         static PH_STRINGREF systemTemp = PH_STRINGREF_INIT(L"SystemTemp");
@@ -3755,9 +3918,9 @@ PPH_STRING PhGetTemporaryDirectory(
         PhDereferenceObject(systemPath);
     }
 
-    RtlInitEmptyUnicodeString(&variableValue, variableBuffer, sizeof(variableBuffer));
+    PhInitializeBufferStringRef(&variableValue, variableBuffer, sizeof(variableBuffer));
 
-    status = RtlQueryEnvironmentVariable_U(
+    status = PhQueryEnvironmentVariableStringRef(
         NULL,
         &variableNameTmp,
         &variableValue
@@ -3765,7 +3928,9 @@ PPH_STRING PhGetTemporaryDirectory(
 
     if (!NT_SUCCESS(status))
     {
-        status = RtlQueryEnvironmentVariable_U(
+        PhInitializeBufferStringRef(&variableValue, variableBuffer, sizeof(variableBuffer));
+
+        status = PhQueryEnvironmentVariableStringRef(
             NULL,
             &variableNameTemp,
             &variableValue
@@ -3773,7 +3938,9 @@ PPH_STRING PhGetTemporaryDirectory(
 
         if (!NT_SUCCESS(status))
         {
-            status = RtlQueryEnvironmentVariable_U(
+            PhInitializeBufferStringRef(&variableValue, variableBuffer, sizeof(variableBuffer));
+
+            status = PhQueryEnvironmentVariableStringRef(
                 NULL,
                 &variableNameProfile,
                 &variableValue
@@ -3785,16 +3952,10 @@ PPH_STRING PhGetTemporaryDirectory(
     {
         if (AppendPath)
         {
-            PH_STRINGREF string;
-
-            PhUnicodeStringToStringRef(&variableValue, &string);
-
-            return PhConcatStringRef2(&string, AppendPath);
+            return PhConcatStringRef2(&variableValue, AppendPath);
         }
-        else
-        {
-            return PhCreateStringFromUnicodeString(&variableValue);
-        }
+
+        return PhCreateString2(&variableValue);
     }
 
     return NULL;
@@ -3803,20 +3964,22 @@ PPH_STRING PhGetTemporaryDirectory(
 /**
  * Waits on multiple objects while processing window messages.
  *
- * \param hWnd The window to process messages for, or NULL to process all messages for the current
+ * \param WindowHandle The window to process messages for, or NULL to process all messages for the current
  * thread.
  * \param NumberOfHandles The number of handles specified in \a Handles. This must not be greater
  * than MAXIMUM_WAIT_OBJECTS - 1.
  * \param Handles An array of handles.
  * \param Timeout The number of milliseconds to wait on the objects, or INFINITE for no timeout.
+ * \param WakeMask The input types for which an input event object handle will be added to the array of object handles.
  *
  * \remarks The wait is always in WaitAny mode.
  */
 NTSTATUS PhWaitForMultipleObjectsAndPump(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ ULONG NumberOfHandles,
     _In_ PHANDLE Handles,
-    _In_ ULONG Timeout
+    _In_ ULONG Timeout,
+    _In_ ULONG WakeMask
     )
 {
     NTSTATUS status;
@@ -3834,7 +3997,7 @@ NTSTATUS PhWaitForMultipleObjectsAndPump(
             Handles,
             FALSE,
             (ULONG)currentTimeout,
-            QS_ALLEVENTS
+            WakeMask
             );
 
         if (
@@ -3850,7 +4013,7 @@ NTSTATUS PhWaitForMultipleObjectsAndPump(
 
             // Pump messages
 
-            while (PeekMessage(&msg, hWnd, 0, 0, PM_REMOVE))
+            while (PeekMessage(&msg, WindowHandle, 0, 0, PM_REMOVE))
             {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
@@ -4147,27 +4310,32 @@ NTSTATUS PhCreateProcessWin32Ex(
             PPH_STRING escaped;
 
             escaped = PhConcatStringRef3(&seperator, &commandLineFileName, &seperator);
-            PhMoveReference(&escaped, PhConcatStringRef3(&commandLine->sr, &space, &commandLineArguments));
-            PhMoveReference(&commandLine, escaped); // Note: Only update 'commandLine' after escape or arguments capture the old string (dmex)
+
+            if (commandLineArguments.Length)
+            {
+                PhMoveReference(&escaped, PhConcatStringRef3(&escaped->sr, &space, &commandLineArguments));
+            }
+
+            PhMoveReference(&commandLine, escaped);
         }
 
         //INT cmdlineArgCount;
         //PWSTR* cmdlineArgList;
         //
         //// Try extract the filename or CreateProcess might execute the wrong executable. (dmex)
-        //if (commandLine && (cmdlineArgList = CommandLineToArgvW(commandLine->Buffer, &cmdlineArgCount)))
+        //if (commandLine && (cmdlineArgList = PhCommandLineToArgv(commandLine->Buffer, &cmdlineArgCount)))
         //{
         //    PhMoveReference(&fileName, PhCreateString(cmdlineArgList[0]));
         //    LocalFree(cmdlineArgList);
         //}
 
-        if (fileName && !PhDoesFileExistWin32(fileName->Buffer))
+        if (fileName && !PhDoesFileExistWin32(PhGetString(fileName)))
         {
-            PPH_STRING filePathSr;
+            PPH_STRING filePath;
 
             // The user typed a name without a path so attempt to locate the executable. (dmex)
-            if (filePathSr = PhSearchFilePath(fileName->Buffer, L".exe"))
-                PhMoveReference(&fileName, filePathSr);
+            if (filePath = PhSearchFilePath(PhGetString(fileName), L".exe"))
+                PhMoveReference(&fileName, filePath);
             else
                 PhClearReference(&fileName);
         }
@@ -4444,11 +4612,12 @@ NTSTATUS PhCreateProcessAsUser(
         WINSTATIONUSERTOKEN userToken;
         ULONG returnLength;
 
-        if (!WinStationQueryInformationW_Import())
-            return STATUS_PROCEDURE_NOT_FOUND;
+        memset(&userToken, 0, sizeof(WINSTATIONUSERTOKEN));
+        //userToken.ProcessId = NtCurrentProcessId();
+        //userToken.ThreadId = NtCurrentThreadId();
 
-        if (!WinStationQueryInformationW_Import()(
-            NULL,
+        if (!WinStationQueryInformationW(
+            WINSTATION_CURRENT_SERVER,
             Information->SessionIdWithToken,
             WinStationUserToken,
             &userToken,
@@ -4946,12 +5115,12 @@ BOOLEAN PhShellExecuteWin32(
 /**
  * Opens a file or location through the shell.
  *
- * \param hWnd The window to display user interface components on.
+ * \param WindowHandle The window to display user interface components on.
  * \param FileName A file name or location.
  * \param Parameters The parameters to pass to the executed application.
  */
 VOID PhShellExecute(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters
     )
@@ -4962,18 +5131,18 @@ VOID PhShellExecute(
     info.lpParameters = Parameters;
     info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
     info.nShow = SW_SHOW;
-    info.hwnd = hWnd;
+    info.hwnd = WindowHandle;
 
     if (!PhShellExecuteWin32(&info))
     {
-        PhShowStatus(hWnd, L"Unable to execute the program.", 0, GetLastError());
+        PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
     }
 }
 
 /**
  * Opens a file or location through the shell.
  *
- * \param hWnd The window to display user interface components on.
+ * \param WindowHandle The window to display user interface components on.
  * \param FileName A file name or location.
  * \param Parameters The parameters to pass to the executed application.
  * \param Directory The default working directory. If this value is NULL, the current process working directory is used.
@@ -4986,9 +5155,8 @@ VOID PhShellExecute(
  * after the application is started.
  * \param ProcessHandle A variable which receives a handle to the new process.
  */
-_Success_(return)
-BOOLEAN PhShellExecuteEx(
-    _In_opt_ HWND hWnd,
+NTSTATUS PhShellExecuteEx(
+    _In_opt_ HWND WindowHandle,
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
     _In_opt_ PWSTR Directory,
@@ -4998,34 +5166,36 @@ BOOLEAN PhShellExecuteEx(
     _Out_opt_ PHANDLE ProcessHandle
     )
 {
-    SHELLEXECUTEINFO info = { sizeof(SHELLEXECUTEINFO) };
+    SHELLEXECUTEINFO info;
 
+    memset(&info, 0, sizeof(SHELLEXECUTEINFO));
+    info.cbSize = sizeof(SHELLEXECUTEINFO);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOZONECHECKS;
+    info.hwnd = WindowHandle;
     info.lpFile = FileName;
     info.lpParameters = Parameters;
     info.lpDirectory = Directory;
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC | SEE_MASK_NOZONECHECKS;
     info.nShow = ShowWindowType;
-    info.hwnd = hWnd;
 
-    if (Flags & PH_SHELL_EXECUTE_ADMIN)
+    if (FlagOn(Flags, PH_SHELL_EXECUTE_ADMIN))
+    {
         info.lpVerb = L"runas";
+    }
 
     if (PhShellExecuteWin32(&info))
     {
         if (Timeout)
         {
-            if (!(Flags & PH_SHELL_EXECUTE_PUMP_MESSAGES))
+            if (FlagOn(Flags, PH_SHELL_EXECUTE_PUMP_MESSAGES))
             {
-                if (info.hProcess)
-                {
-                    LARGE_INTEGER timeout;
-
-                    NtWaitForSingleObject(info.hProcess, FALSE, PhTimeoutFromMilliseconds(&timeout, Timeout));
-                }
+                PhWaitForMultipleObjectsAndPump(NULL, 1, &info.hProcess, Timeout, QS_ALLEVENTS);
             }
             else
             {
-                PhWaitForMultipleObjectsAndPump(NULL, 1, &info.hProcess, Timeout);
+                if (info.hProcess)
+                {
+                    PhWaitForSingleObject(info.hProcess, PhTimeoutFromMillisecondsEx(Timeout));
+                }
             }
         }
 
@@ -5034,22 +5204,22 @@ BOOLEAN PhShellExecuteEx(
         else if (info.hProcess)
             NtClose(info.hProcess);
 
-        return TRUE;
+        return STATUS_SUCCESS;
     }
     else
     {
-        return FALSE;
+        return PhGetLastWin32ErrorAsNtStatus();
     }
 }
 
 /**
  * Opens Windows Explorer with a file selected.
  *
- * \param hWnd A handle to the parent window.
+ * \param WindowHandle A handle to the parent window.
  * \param FileName A file name.
  */
 VOID PhShellExploreFile(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR FileName
     )
 {
@@ -5092,7 +5262,7 @@ VOID PhShellExploreFile(
         }
         else
         {
-            PhShowError2(hWnd, L"The location could not be found.", L"%s", FileName);
+            PhShowError2(WindowHandle, L"The location could not be found.", L"%s", FileName);
         }
     }
     else
@@ -5100,7 +5270,7 @@ VOID PhShellExploreFile(
         PPH_STRING selectFileName;
 
         selectFileName = PhConcatStrings2(L"/select,", FileName);
-        PhShellExecute(hWnd, L"explorer.exe", selectFileName->Buffer);
+        PhShellExecute(WindowHandle, L"explorer.exe", selectFileName->Buffer);
         PhDereferenceObject(selectFileName);
     }
 }
@@ -5108,11 +5278,11 @@ VOID PhShellExploreFile(
 /**
  * Shows properties for a file.
  *
- * \param hWnd A handle to the parent window.
+ * \param WindowHandle A handle to the parent window.
  * \param FileName A file name.
  */
 VOID PhShellProperties(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR FileName
     )
 {
@@ -5122,11 +5292,11 @@ VOID PhShellProperties(
     info.nShow = SW_SHOW;
     info.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI;
     info.lpVerb = L"properties";
-    info.hwnd = hWnd;
+    info.hwnd = WindowHandle;
 
     if (!PhShellExecuteWin32(&info))
     {
-        PhShowStatus(hWnd, L"Unable to execute the program.", 0, GetLastError());
+        PhShowStatus(WindowHandle, L"Unable to execute the program.", 0, GetLastError());
     }
 }
 
@@ -5165,6 +5335,74 @@ BOOLEAN PhShellNotifyIcon(
         return FALSE;
 
     return !!Shell_NotifyIconW_I(Message, NotifyIconData);
+}
+
+HRESULT PhShellGetKnownFolderPath(
+    _In_ PCGUID rfid,
+    _In_ ULONG Flags,
+    _In_opt_ HANDLE TokenHandle,
+    _Outptr_ PWSTR* FolderPath
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HRESULT (WINAPI *SHGetKnownFolderPath_I)(
+        _In_ REFKNOWNFOLDERID rfid,
+        _In_ ULONG dwFlags, // KNOWN_FOLDER_FLAG
+        _In_opt_ HANDLE hToken,
+        _Outptr_ PWSTR* ppszPath // CoTaskMemFree
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"shell32.dll"))
+        {
+            SHGetKnownFolderPath_I = PhGetDllBaseProcedureAddress(baseAddress, "SHGetKnownFolderPath", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!SHGetKnownFolderPath_I)
+        return E_FAIL;
+
+    return SHGetKnownFolderPath_I(rfid, Flags, TokenHandle, FolderPath);
+}
+
+HRESULT PhShellGetKnownFolderItem(
+    _In_ PCGUID rfid,
+    _In_ ULONG Flags,
+    _In_opt_ HANDLE TokenHandle,
+    _In_ REFIID riid,
+    _Outptr_ PVOID* ppv
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HRESULT (WINAPI *SHGetKnownFolderItem_I)(
+        _In_ REFKNOWNFOLDERID rfid,
+        _In_ ULONG flags, // KNOWN_FOLDER_FLAG
+        _In_opt_ HANDLE hToken,
+        _In_ REFIID riid,
+        _Outptr_ void** ppv
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID baseAddress;
+
+        if (baseAddress = PhLoadLibrary(L"shell32.dll"))
+        {
+            SHGetKnownFolderItem_I = PhGetDllBaseProcedureAddress(baseAddress, "SHGetKnownFolderItem", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!SHGetKnownFolderItem_I)
+        return E_FAIL;
+
+    return SHGetKnownFolderItem_I(rfid, Flags, TokenHandle, riid, ppv);
 }
 
 /**
@@ -5568,14 +5806,14 @@ VOID PhFreeFileDialog(
 /**
  * Shows a file dialog to the user.
  *
- * \param hWnd A handle to the parent window.
+ * \param WindowHandle A handle to the parent window.
  * \param FileDialog The file dialog.
  *
  * \return TRUE if the user selected a file, FALSE if the user cancelled the operation or an error
  * occurred.
  */
 BOOLEAN PhShowFileDialog(
-    _In_opt_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PVOID FileDialog
     )
 {
@@ -5587,13 +5825,13 @@ BOOLEAN PhShowFileDialog(
         // file type.
         IFileDialog_SetDefaultExtension(fileDialog->u.FileDialog, L"");
 
-        return SUCCEEDED(IFileDialog_Show(fileDialog->u.FileDialog, hWnd));
+        return SUCCEEDED(IFileDialog_Show(fileDialog->u.FileDialog, WindowHandle));
     }
     else
     {
         OPENFILENAME *ofn = fileDialog->u.OpenFileName;
 
-        ofn->hwndOwner = hWnd;
+        ofn->hwndOwner = WindowHandle;
 
         // Determine whether the structure represents a open or save dialog and call the appropriate
         // function.
@@ -5861,7 +6099,7 @@ PPH_STRING PhGetFileDialogFileName(
             IShellItem_Release(result);
         }
 
-        if (!fileName)
+        if (PhIsNullOrEmptyString(fileName))
         {
             PWSTR name;
 
@@ -5870,6 +6108,15 @@ PPH_STRING PhGetFileDialogFileName(
                 fileName = PhCreateString(name);
                 CoTaskMemFree(name);
             }
+        }
+
+        if (PhIsNullOrEmptyString(fileName))
+        {
+            // NOTE: When the user selects IShellItem types with SIGDN_URL from the OpenFileDialog/SaveFileDialog
+            // the shell returns S_OK for the file dialog then immediately returns E_FAIL when we query the filename.
+            // This case was unexpected, and plugins/legacy callers will auto-dereference the filename when the dialog
+            // returns success, so return an empty string to prevent plugins/legacy callers referencing invalid memory. (dmex)
+            PhMoveReference(&fileName, PhReferenceEmptyString());
         }
 
         return fileName;
@@ -6692,12 +6939,11 @@ BOOLEAN PhParseCommandLineFuzzy(
     )
 {
     static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L" \t");
-
     PH_STRINGREF commandLine;
     PH_STRINGREF temp;
     PH_STRINGREF currentPart;
     PH_STRINGREF remainingPart;
-    PPH_STRING filePathSr;
+    PPH_STRING filePath;
 
     commandLine = *CommandLine;
     PhTrimStringRef(&commandLine, &whitespace, 0);
@@ -6743,9 +6989,9 @@ BOOLEAN PhParseCommandLineFuzzy(
 
             tempCommandLine = PhCreateString2(&commandLine);
 
-            if (filePathSr = PhSearchFilePath(tempCommandLine->Buffer, L".exe"))
+            if (filePath = PhSearchFilePath(tempCommandLine->Buffer, L".exe"))
             {
-                *FullFileName = filePathSr;
+                *FullFileName = filePath;
             }
             else
             {
@@ -6789,25 +7035,37 @@ BOOLEAN PhParseCommandLineFuzzy(
             *(remainingPart.Buffer - 1) = UNICODE_NULL;
         }
 
-        filePathSr = PhSearchFilePath(temp.Buffer, L".exe");
+        filePath = PhSearchFilePath(temp.Buffer, L".exe");
 
         if (found)
         {
             *(remainingPart.Buffer - 1) = originalChar;
         }
 
-        if (filePathSr)
+        if (filePath)
         {
             FileName->Buffer = commandLine.Buffer;
             FileName->Length = (SIZE_T)PTR_SUB_OFFSET(currentPart.Buffer, temp.Buffer) + currentPart.Length;
 
-            PhTrimStringRef(&remainingPart, &whitespace, PH_TRIM_START_ONLY);
-            *Arguments = remainingPart;
+            if (Arguments)
+            {
+                PhTrimStringRef(&remainingPart, &whitespace, PH_TRIM_START_ONLY);
+
+                if (remainingPart.Length)
+                {
+                    Arguments->Buffer = PTR_ADD_OFFSET(commandLine.Buffer, PTR_SUB_OFFSET(remainingPart.Buffer, temp.Buffer));
+                    Arguments->Length = commandLine.Length - (SIZE_T)PTR_SUB_OFFSET(remainingPart.Buffer, temp.Buffer);
+                }
+                else
+                {
+                    PhInitializeEmptyStringRef(Arguments);
+                }
+            }
 
             if (FullFileName)
-                *FullFileName = filePathSr;
+                *FullFileName = filePath;
             else
-                PhDereferenceObject(filePathSr);
+                PhDereferenceObject(filePath);
 
             PhFree(temp.Buffer);
 
@@ -6885,6 +7143,29 @@ PPH_LIST PhCommandLineToList(
     return commandLineList;
 }
 
+PPH_STRING PhCommandLineQuoteSpaces(
+    _In_ PPH_STRINGREF CommandLine
+    )
+{
+    static PH_STRINGREF seperator = PH_STRINGREF_INIT(L"\"");
+    static PH_STRINGREF space = PH_STRINGREF_INIT(L" ");
+    PH_STRINGREF commandLineFileName;
+    PH_STRINGREF commandLineArguments;
+    PPH_STRING escaped;
+
+    if (!PhParseCommandLineFuzzy(CommandLine, &commandLineFileName, &commandLineArguments, NULL))
+        return NULL;
+
+    escaped = PhConcatStringRef3(&seperator, &commandLineFileName, &seperator);
+
+    if (commandLineArguments.Length)
+    {
+        PhMoveReference(&escaped, PhConcatStringRef3(&escaped->sr, &space, &commandLineArguments));
+    }
+
+    return escaped;
+}
+
 PPH_STRING PhSearchFilePath(
     _In_ PWSTR FileName,
     _In_opt_ PWSTR Extension
@@ -6935,7 +7216,8 @@ PPH_STRING PhSearchFilePath(
 
     if (!NT_SUCCESS(PhQueryAttributesFileWin32(fullPath->Buffer, &basicInfo)))
         goto CleanupExit;
-    if (basicInfo.FileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+
+    if (FlagOn(basicInfo.FileAttributes, FILE_ATTRIBUTE_DIRECTORY))
         goto CleanupExit;
 
     return fullPath;
@@ -6974,70 +7256,24 @@ CleanupExit:
 //}
 
 PPH_STRING PhCreateCacheFile(
-    _In_ PPH_STRING FileName
+    _In_ BOOLEAN PortableDirectory,
+    _In_ PPH_STRING FileName,
+    _In_ BOOLEAN NativeFileName
     )
 {
-    static PH_STRINGREF settingsSuffix = PH_STRINGREF_INIT(L".settings.xml");
     static PH_STRINGREF settingsDirectory = PH_STRINGREF_INIT(L"cache");
-    PPH_STRING fileName;
-    PPH_STRING settingsFileName;
     PPH_STRING cacheDirectory;
     PPH_STRING cacheFilePath;
     PH_STRINGREF randomAlphaStringRef;
     WCHAR randomAlphaString[32] = L"";
 
-    fileName = PhGetApplicationFileName();
-    settingsFileName = PhConcatStringRef2(&fileName->sr, &settingsSuffix);
-
-    if (PhDoesFileExist(&settingsFileName->sr))
-    {
-        HANDLE fileHandle;
-        PPH_STRING applicationDirectory;
-        PPH_STRING applicationFileName;
-
-        PhGenerateRandomAlphaString(randomAlphaString, RTL_NUMBER_OF(randomAlphaString));
-        randomAlphaStringRef.Buffer = randomAlphaString;
-        randomAlphaStringRef.Length = sizeof(randomAlphaString) - sizeof(UNICODE_NULL);
-
-        applicationDirectory = PhGetApplicationDirectoryWin32();
-        applicationFileName = PhConcatStringRef3(
-            &applicationDirectory->sr,
-            &PhNtPathSeperatorString,
-            &randomAlphaStringRef
-            );
-
-        if (NT_SUCCESS(PhCreateFileWin32(
-            &fileHandle,
-            PhGetString(applicationFileName),
-            FILE_GENERIC_WRITE | DELETE,
-            FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_DELETE,
-            FILE_OPEN_IF,
-            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE
-            )))
-        {
-            cacheDirectory = PhConcatStringRef2(&applicationDirectory->sr, &settingsDirectory);
-            NtClose(fileHandle);
-        }
-        else
-        {
-            cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, FALSE);
-        }
-
-        PhDereferenceObject(applicationFileName);
-        PhDereferenceObject(applicationDirectory);
-    }
+    if (PortableDirectory)
+        cacheDirectory = PhGetApplicationDirectoryFileName(&settingsDirectory, TRUE);
     else
-    {
-        cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, FALSE);
+        cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, TRUE);
 
-        if (PhIsNullOrEmptyString(cacheDirectory))
-        {
-            PhDereferenceObject(settingsFileName);
-            PhDereferenceObject(fileName);
-            return FileName;
-        }
-    }
+    if (PhIsNullOrEmptyString(cacheDirectory))
+        return NULL;
 
     PhGenerateRandomAlphaString(randomAlphaString, RTL_NUMBER_OF(randomAlphaString));
     randomAlphaStringRef.Buffer = randomAlphaString;
@@ -7055,18 +7291,37 @@ PPH_STRING PhCreateCacheFile(
         &FileName->sr
         ));
 
-    if (!NT_SUCCESS(PhCreateDirectoryFullPathWin32(&cacheFilePath->sr)))
+    if (!NT_SUCCESS(PhCreateDirectoryFullPath(&cacheFilePath->sr)))
     {
-        PhClearReference(&cacheFilePath);
+        PhDereferenceObject(cacheFilePath);
+        PhDereferenceObject(cacheDirectory);
+        return NULL;
+    }
+
+    if (NativeFileName)
+    {
+        PPH_STRING cacheFileName;
+
+        if (cacheFileName = PhDosPathNameToNtPathName(&cacheFilePath->sr))
+        {
+            PhMoveReference(&cacheFilePath, cacheFileName);
+        }
+    }
+    else
+    {
+        PPH_STRING cacheFileName;
+
+        if (cacheFileName = PhResolveDevicePrefix(&cacheFilePath->sr))
+        {
+            PhMoveReference(&cacheFilePath, cacheFileName);
+        }
     }
 
     PhDereferenceObject(cacheDirectory);
-    PhDereferenceObject(settingsFileName);
-    PhDereferenceObject(fileName);
 
     return cacheFilePath;
 }
-//
+
 //VOID PhDeleteCacheFile(
 //    _In_ PPH_STRING FileName
 //    )
@@ -7086,99 +7341,60 @@ PPH_STRING PhCreateCacheFile(
 //}
 
 VOID PhDeleteCacheFile(
-    _In_ PPH_STRING FileName
+    _In_ PPH_STRING FileName,
+    _In_ BOOLEAN NativeFileName
     )
 {
-    PPH_STRING cacheDirectory;
-    PPH_STRING cacheFullFilePath;
-    ULONG indexOfFileName = ULONG_MAX;
-
-    if (PhDoesFileExistWin32(PhGetString(FileName)))
+    if (NativeFileName)
     {
-        PhDeleteFileWin32(PhGetString(FileName));
-    }
-
-    if (cacheFullFilePath = PhGetFullPath(PhGetString(FileName), &indexOfFileName))
-    {
-        if (indexOfFileName != ULONG_MAX && (cacheDirectory = PhSubstring(cacheFullFilePath, 0, indexOfFileName)))
+        if (PhDoesFileExist(&FileName->sr))
         {
-            PhDeleteDirectoryWin32(&cacheDirectory->sr);
+            PhDeleteDirectoryFullPath(&FileName->sr);
+        }
+    }
+    else
+    {
+        PPH_STRING cacheDirectory;
+        PPH_STRING cacheFullFilePath;
+        ULONG indexOfFileName = ULONG_MAX;
 
-            PhDereferenceObject(cacheDirectory);
+        if (PhDoesFileExistWin32(PhGetString(FileName)))
+        {
+            PhDeleteFileWin32(PhGetString(FileName));
         }
 
-        PhDereferenceObject(cacheFullFilePath);
+        if (NT_SUCCESS(PhGetFullPath(PhGetString(FileName), &cacheFullFilePath, &indexOfFileName)))
+        {
+            if (indexOfFileName != ULONG_MAX && (cacheDirectory = PhSubstring(cacheFullFilePath, 0, indexOfFileName)))
+            {
+                PhDeleteDirectoryWin32(&cacheDirectory->sr);
+
+                PhDereferenceObject(cacheDirectory);
+            }
+
+            PhDereferenceObject(cacheFullFilePath);
+        }
     }
 }
 
 VOID PhClearCacheDirectory(
-    VOID
+    _In_ BOOLEAN PortableDirectory
     )
 {
-    static PH_STRINGREF settingsSuffix = PH_STRINGREF_INIT(L".settings.xml");
     static PH_STRINGREF settingsDirectory = PH_STRINGREF_INIT(L"cache");
-    PPH_STRING fileName;
-    PPH_STRING settingsFileName;
     PPH_STRING cacheDirectory;
 
-    fileName = PhGetApplicationFileName();
-    settingsFileName = PhConcatStringRef2(&fileName->sr, &settingsSuffix);
-
-    if (PhDoesFileExist(&settingsFileName->sr))
-    {
-        HANDLE fileHandle;
-        PPH_STRING applicationDirectory;
-        PPH_STRING applicationFileName;
-        PH_STRINGREF randomAlphaStringRef;
-        WCHAR randomAlphaString[32] = L"";
-
-        applicationDirectory = PhGetApplicationDirectoryWin32();
-
-        PhGenerateRandomAlphaString(randomAlphaString, RTL_NUMBER_OF(randomAlphaString));
-        randomAlphaStringRef.Buffer = randomAlphaString;
-        randomAlphaStringRef.Length = sizeof(randomAlphaString) - sizeof(UNICODE_NULL);
-
-        applicationFileName = PhConcatStringRef3(
-            &applicationDirectory->sr,
-            &PhNtPathSeperatorString,
-            &randomAlphaStringRef
-            );
-
-        if (NT_SUCCESS(PhCreateFileWin32(
-            &fileHandle,
-            PhGetString(applicationFileName),
-            FILE_GENERIC_WRITE | DELETE,
-            FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_DELETE,
-            FILE_OPEN_IF,
-            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE
-            )))
-        {
-            cacheDirectory = PhConcatStringRef2(&applicationDirectory->sr, &settingsDirectory);
-            NtClose(fileHandle);
-        }
-        else
-        {
-            cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, FALSE);
-        }
-
-        PhDereferenceObject(applicationFileName);
-        PhDereferenceObject(applicationDirectory);
-    }
+    if (PortableDirectory)
+        cacheDirectory = PhGetApplicationDirectoryFileName(&settingsDirectory, TRUE);
     else
-    {
-        cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, FALSE);
-    }
+        cacheDirectory = PhGetRoamingAppDataDirectory(&settingsDirectory, TRUE);
 
     if (cacheDirectory)
     {
-        PhDeleteDirectoryWin32(&cacheDirectory->sr);
+        PhDeleteDirectory(&cacheDirectory->sr);
 
         PhDereferenceObject(cacheDirectory);
     }
-
-    PhDereferenceObject(settingsFileName);
-    PhDereferenceObject(fileName);
 }
 
 HANDLE PhGetNamespaceHandle(
@@ -7186,13 +7402,13 @@ HANDLE PhGetNamespaceHandle(
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
-    static UNICODE_STRING namespacePathUs = RTL_CONSTANT_STRING(L"\\BaseNamedObjects\\SystemInformer");
-    static HANDLE directory = NULL;
+    static HANDLE directoryHandle = NULL;
 
     if (PhBeginInitOnce(&initOnce))
     {
         UCHAR securityDescriptorBuffer[SECURITY_DESCRIPTOR_MIN_LENGTH + 0x80];
         PSID administratorsSid = PhSeAdministratorsSid();
+        UNICODE_STRING objectName;
         OBJECT_ATTRIBUTES objectAttributes;
         PSECURITY_DESCRIPTOR securityDescriptor;
         ULONG sdAllocationLength;
@@ -7203,35 +7419,32 @@ HANDLE PhGetNamespaceHandle(
         sdAllocationLength = SECURITY_DESCRIPTOR_MIN_LENGTH +
             (ULONG)sizeof(ACL) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-            PhLengthSid(&PhSeLocalSid) +
+            PhLengthSid((PSID)&PhSeLocalSid) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
             PhLengthSid(administratorsSid) +
             (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-            PhLengthSid(&PhSeInteractiveSid);
+            PhLengthSid((PSID)&PhSeInteractiveSid);
 
         securityDescriptor = (PSECURITY_DESCRIPTOR)securityDescriptorBuffer;
         dacl = (PACL)PTR_ADD_OFFSET(securityDescriptor, SECURITY_DESCRIPTOR_MIN_LENGTH);
 
         RtlCreateSecurityDescriptor(securityDescriptor, SECURITY_DESCRIPTOR_REVISION);
         RtlCreateAcl(dacl, sdAllocationLength - SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION);
-        RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_ALL_ACCESS, &PhSeLocalSid);
+        RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_ALL_ACCESS, (PSID)&PhSeLocalSid);
         RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_ALL_ACCESS, administratorsSid);
-        RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT, &PhSeInteractiveSid);
+        RtlAddAccessAllowedAce(dacl, ACL_REVISION, DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT, (PSID)&PhSeInteractiveSid);
         RtlSetDaclSecurityDescriptor(securityDescriptor, TRUE, dacl, FALSE);
 
+        RtlInitUnicodeString(&objectName, L"\\BaseNamedObjects\\SystemInformer");
         InitializeObjectAttributes(
             &objectAttributes,
-            &namespacePathUs,
+            &objectName,
             OBJ_OPENIF | (WindowsVersion < WINDOWS_10 ? 0 : OBJ_DONT_REPARSE),
             NULL,
             securityDescriptor
             );
 
-        NtCreateDirectoryObject(
-            &directory,
-            MAXIMUM_ALLOWED,
-            &objectAttributes
-            );
+        NtCreateDirectoryObject(&directoryHandle, MAXIMUM_ALLOWED, &objectAttributes);
 
 #ifdef DEBUG
         assert(sdAllocationLength < sizeof(securityDescriptorBuffer));
@@ -7240,7 +7453,7 @@ HANDLE PhGetNamespaceHandle(
         PhEndInitOnce(&initOnce);
     }
 
-    return directory;
+    return directoryHandle;
 }
 
 HWND PhHungWindowFromGhostWindow(
@@ -7273,6 +7486,7 @@ NTSTATUS PhGetFileData(
     _Out_ PULONG BufferLength
     )
 {
+    NTSTATUS status;
     PSTR data = NULL;
     ULONG allocatedLength;
     ULONG dataLength;
@@ -7284,7 +7498,7 @@ NTSTATUS PhGetFileData(
     data = PhAllocate(allocatedLength);
     dataLength = 0;
 
-    while (NT_SUCCESS(NtReadFile(
+    while (NT_SUCCESS(status = NtReadFile(
         FileHandle,
         NULL,
         NULL,
@@ -7312,30 +7526,32 @@ NTSTATUS PhGetFileData(
         dataLength += returnLength;
     }
 
+    if (status == STATUS_END_OF_FILE)
+    {
+        status = STATUS_SUCCESS;
+    }
+    else if (!NT_SUCCESS(status))
+    {
+        PhFree(data);
+
+        *Buffer = NULL;
+        *BufferLength = 0;
+
+        return status;
+    }
+
     if (allocatedLength < dataLength + sizeof(ANSI_NULL))
     {
         allocatedLength++;
         data = PhReAllocate(data, allocatedLength);
     }
 
-    if (dataLength > 0)
-    {
-        data[dataLength] = ANSI_NULL;
+    data[dataLength] = ANSI_NULL;
 
-        *Buffer = data;
-        *BufferLength = dataLength;
+    *Buffer = data;
+    *BufferLength = dataLength;
 
-        return STATUS_SUCCESS;
-    }
-    else
-    {
-        *Buffer = NULL;
-        *BufferLength = 0;
-
-        PhFree(data);
-
-        return STATUS_UNSUCCESSFUL;
-    }
+    return status;
 }
 
 PVOID PhGetFileText(
@@ -7349,10 +7565,13 @@ PVOID PhGetFileText(
 
     if (NT_SUCCESS(PhGetFileData(FileHandle, &data, &dataLength)))
     {
-        if (Unicode)
-            string = PhConvertUtf8ToUtf16Ex(data, dataLength);
-        else
-            string = PhCreateBytesEx(data, dataLength);
+        if (dataLength)
+        {
+            if (Unicode)
+                string = PhConvertUtf8ToUtf16Ex(data, dataLength);
+            else
+                string = PhCreateBytesEx(data, dataLength);
+        }
 
         PhFree(data);
     }
@@ -7935,29 +8154,55 @@ ULONGLONG PhReadTimeStampCounter(
 }
 
 // rev from QueryPerformanceCounter (dmex)
+/**
+ * Retrieves the current value of the performance counter, which is a high resolution (<1us) time stamp that can be used for time-interval measurements.
+ *
+ * \param PerformanceCounter A pointer to a variable that receives the current performance-counter value, in counts.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks On systems that run Windows XP or later, the function will always succeed and will thus never return zero.
+ */
 BOOLEAN PhQueryPerformanceCounter(
     _Out_ PLARGE_INTEGER PerformanceCounter
     )
 {
-    if (RtlQueryPerformanceCounter(PerformanceCounter))
-        return TRUE;
-
+#if (PH_WIN32_PERFCOUNTER)
+    return !!QueryPerformanceCounter(PerformanceCounter);
+#elif (PH_NATIVE_PERFCOUNTER)
     return NT_SUCCESS(NtQueryPerformanceCounter(PerformanceCounter, NULL));
+#else
+    return !!RtlQueryPerformanceCounter(PerformanceCounter);
+#endif
 }
 
 // rev from QueryPerformanceFrequency (dmex)
+/**
+ * Retrieves the frequency of the performance counter.
+ * The frequency of the performance counter is fixed at system boot and is consistent across all processors.
+ * Therefore, the frequency need only be queried upon application initialization, and the result can be cached.
+ *
+ * \param PerformanceFrequency A pointer to a variable that receives the current performance-counter frequency, in counts per second.
+ *
+ * \return Successful or errant status.
+ *
+ * \remarks On systems that run Windows XP or later, the function will always succeed and will thus never return zero.
+ */
 BOOLEAN PhQueryPerformanceFrequency(
     _Out_ PLARGE_INTEGER PerformanceFrequency
     )
 {
+#if (PH_WIN32_PERFCOUNTER)
+    return !!QueryPerformanceFrequency(PerformanceFrequency);
+#elif (PH_NATIVE_PERFCOUNTER)
     LARGE_INTEGER performanceCounter;
-
-    if (RtlQueryPerformanceFrequency(PerformanceFrequency))
-        return TRUE;
-
     return NT_SUCCESS(NtQueryPerformanceCounter(&performanceCounter, PerformanceFrequency));
+#else
+    return !!RtlQueryPerformanceFrequency(PerformanceFrequency);
+#endif
 }
 
+// rev from lucasg https://lucasg.github.io/2017/10/15/Api-set-resolution/ (dmex)
 PPH_STRING PhApiSetResolveToHost(
     _In_ PPH_STRINGREF ApiSetName
     )
@@ -8034,10 +8279,7 @@ HRESULT PhCreateProcessAsInteractiveUser(
     {
         PVOID baseAddress;
 
-        if (!(baseAddress = PhGetLoaderEntryDllBaseZ(L"wdc.dll")))
-            baseAddress = PhLoadLibrary(L"wdc.dll");
-
-        if (baseAddress)
+        if (baseAddress = PhLoadLibrary(L"wdc.dll"))
         {
             WdcRunTaskAsInteractiveUser_I = PhGetDllBaseProcedureAddress(baseAddress, "WdcRunTaskAsInteractiveUser", 0);
         }
@@ -8469,4 +8711,197 @@ NTSTATUS PhUpdateProcThreadAttribute(
 
     return STATUS_SUCCESS;
 #endif
+}
+
+PPH_STRING PhGetActiveComputerName(
+    VOID
+    )
+{
+    static PH_STRINGREF keyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Control\\ComputerName\\ActiveComputerName");
+    PPH_STRING computerName = NULL;
+    HANDLE keyHandle;
+
+    if (NT_SUCCESS(PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &keyName,
+        0
+        )))
+    {
+        computerName = PhQueryRegistryStringZ(keyHandle, L"ComputerName");
+        NtClose(keyHandle);
+    }
+
+    //WCHAR computerName[MAX_COMPUTERNAME_LENGTH + 1];
+    //ULONG length = MAX_COMPUTERNAME_LENGTH + 1;
+    //
+    //if (GetComputerNameW(computerName, &length))
+    //{
+    //   return PhCreateStringEx(computerName, length * sizeof(WCHAR));
+    //}
+
+    return computerName;
+}
+
+_Check_return_
+HRESULT PhDevGetObjects(
+    _In_ DEV_OBJECT_TYPE ObjectType,
+    _In_ DEV_QUERY_FLAGS QueryFlags,
+    _In_ ULONG RequestedPropertiesCount,
+    _In_reads_opt_(RequestedPropertiesCount) const DEVPROPCOMPKEY* RequestedProperties,
+    _In_ ULONG FilterExpressionCount,
+    _In_reads_opt_(FilterExpressionCount) const DEVPROP_FILTER_EXPRESSION* FilterExpressions,
+    _Out_ PULONG ObjectCount,
+    _Outptr_result_buffer_maybenull_(*ObjectCount) const DEV_OBJECT** Objects
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HRESULT (WINAPI * DevGetObjects_I)(
+        _In_ DEV_OBJECT_TYPE dwObjectType,
+        _In_ ULONG dwQueryFlags,
+        _In_ ULONG cRequestedProperties,
+        _In_reads_opt_(cRequestedProperties) const DEVPROPCOMPKEY * pRequestedProperties,
+        _In_ ULONG cFilterExpressionCount,
+        _In_reads_opt_(cFilterExpressionCount) const DEVPROP_FILTER_EXPRESSION * pFilter,
+        _Out_ PULONG pcObjectCount,
+        _Outptr_result_buffer_maybenull_(*pcObjectCount) const DEV_OBJECT * *ppObjects
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID cfgmgr32;
+
+        if (cfgmgr32 = PhLoadLibrary(L"cfgmgr32.dll"))
+        {
+            DevGetObjects_I = PhGetDllBaseProcedureAddress(cfgmgr32, "DevGetObjects", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!DevGetObjects_I)
+        return E_FAIL;
+
+    return DevGetObjects_I(
+        ObjectType,
+        QueryFlags,
+        RequestedPropertiesCount,
+        RequestedProperties,
+        FilterExpressionCount,
+        FilterExpressions,
+        ObjectCount,
+        Objects
+        );
+}
+
+VOID PhDevFreeObjects(
+    _In_ ULONG ObjectCount,
+    _In_reads_(ObjectCount) const DEV_OBJECT* Objects
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static VOID (WINAPI *DevFreeObjects_I)(
+        _In_ ULONG cObjectCount,
+        _In_reads_(cObjectCount) const DEV_OBJECT* pObjects
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID cfgmgr32;
+
+        if (cfgmgr32 = PhLoadLibrary(L"cfgmgr32.dll"))
+        {
+            DevFreeObjects_I = PhGetDllBaseProcedureAddress(cfgmgr32, "DevFreeObjects", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (DevFreeObjects_I)
+    {
+        DevFreeObjects_I(ObjectCount, Objects);
+    }
+}
+
+HRESULT PhTaskbarListCreate(
+    _Out_ PHANDLE TaskbarHandle
+    )
+{
+    HRESULT status;
+    ITaskbarList3* taskbarListClass;
+
+    status = PhGetClassObject(
+        L"explorerframe.dll",
+        &CLSID_TaskbarList,
+        &IID_ITaskbarList3,
+        &taskbarListClass
+        );
+
+    if (HR_SUCCESS(status))
+    {
+        status = ITaskbarList3_HrInit(taskbarListClass);
+
+        if (HR_FAILED(status))
+        {
+            ITaskbarList3_Release(taskbarListClass);
+            taskbarListClass = NULL;
+        }
+    }
+
+    if (HR_SUCCESS(status))
+    {
+        *TaskbarHandle = taskbarListClass;
+    }
+
+    return status;
+}
+
+VOID PhTaskbarListDestroy(
+    _In_ HANDLE TaskbarHandle
+    )
+{
+    ITaskbarList3_Release((ITaskbarList3*)TaskbarHandle);
+}
+
+VOID PhTaskbarListSetProgressValue(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_ ULONGLONG Completed,
+    _In_ ULONGLONG Total
+    )
+{
+    ITaskbarList3_SetProgressValue((ITaskbarList3*)TaskbarHandle, WindowHandle, Completed, Total);
+}
+
+VOID PhTaskbarListSetProgressState(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_ ULONG Flags
+    )
+{
+    static CONST PH_FLAG_MAPPING PhTaskbarListFlagMappings[] =
+    {
+        { PH_TBLF_NOPROGRESS, TBPF_NOPROGRESS },
+        { PH_TBLF_INDETERMINATE, TBPF_INDETERMINATE },
+        { PH_TBLF_NORMAL, TBPF_NORMAL },
+        { PH_TBLF_ERROR, TBPF_ERROR },
+        { PH_TBLF_PAUSED, TBPF_PAUSED },
+    };
+    ULONG flags;
+
+    flags = 0;
+    PhMapFlags1(&flags, Flags, PhTaskbarListFlagMappings, RTL_NUMBER_OF(PhTaskbarListFlagMappings));
+
+    ITaskbarList3_SetProgressState((ITaskbarList3*)TaskbarHandle, WindowHandle, flags);
+}
+
+VOID PhTaskbarListSetOverlayIcon(
+    _In_ HANDLE TaskbarHandle,
+    _In_ HWND WindowHandle,
+    _In_opt_ HICON IconHandle,
+    _In_opt_ PCWSTR IconDescription
+    )
+{
+    ITaskbarList3_SetOverlayIcon((ITaskbarList3*)TaskbarHandle, WindowHandle, IconHandle, IconDescription);
 }

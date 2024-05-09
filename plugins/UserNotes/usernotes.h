@@ -28,6 +28,7 @@
 #define INTENT_PROCESS_AFFINITY 0x20
 #define INTENT_PROCESS_PAGEPRIORITY 0x40
 #define INTENT_PROCESS_BOOST 0x80
+#define INTENT_PROCESS_EFFICIENCY 0x100
 
 typedef enum _USERNOTES_COMMAND_ID
 {
@@ -48,6 +49,9 @@ typedef enum _USERNOTES_COMMAND_ID
     PROCESS_BOOST_PRIORITY_ID,
     PROCESS_BOOST_PRIORITY_SAVE_ID,
     PROCESS_BOOST_PRIORITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_EFFICIENCY_ID,
+    PROCESS_EFFICIENCY_SAVE_ID,
+    PROCESS_EFFICIENCY_SAVE_FOR_THIS_COMMAND_LINE_ID,
     FILE_PRIORITY_SAVE_IFEO,
     FILE_IO_PRIORITY_SAVE_IFEO,
     FILE_PAGE_PRIORITY_SAVE_IFEO,
@@ -71,7 +75,8 @@ typedef struct _PROCESS_EXTENSION
             BOOLEAN SkipPagePriority : 1;
             BOOLEAN SkipIoPriority : 1;
             BOOLEAN SkipBoostPriority : 1;
-            BOOLEAN Spare : 2;
+            BOOLEAN SkipEfficiency : 1;
+            BOOLEAN Spare : 1;
         };
     };
 } PROCESS_EXTENSION, *PPROCESS_EXTENSION;
@@ -120,8 +125,8 @@ VOID SearchChangedHandler(
     );
 
 INT_PTR CALLBACK OptionsDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
+    _In_ HWND WindowHandle,
+    _In_ UINT WindowMessage,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     );

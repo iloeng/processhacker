@@ -19,6 +19,10 @@
 #endif
 #endif
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #ifndef INT_ERROR
 #define INT_ERROR (-1)
 #endif
@@ -63,7 +67,7 @@
 #undef WIN32_NO_STATUS
 #include <ntstatus.h>
 #include <winioctl.h>
-#include <wmistr.h>
+#include <evntrace.h>
 
 typedef double DOUBLE;
 typedef GUID *PGUID;
@@ -115,5 +119,10 @@ typedef GUID *PGUID;
 #undef CONTAINING_RECORD
 #define CONTAINING_RECORD(address, type, field) \
     ((type *)((ULONG_PTR)(address) - UFIELD_OFFSET(type, field)))
+
+#ifndef __PCGUID_DEFINED__
+#define __PCGUID_DEFINED__
+typedef const GUID* PCGUID;
+#endif
 
 #endif

@@ -128,6 +128,8 @@ VOID PhInitializeThreadList(
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_IOREADBYTES, FALSE, L"I/O read bytes", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_IOWRITEBYTES, FALSE, L"I/O write bytes", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_IOOTHERBYTES, FALSE, L"I/O other bytes", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_LXSSTID, FALSE, L"TID (LXSS)", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(TreeNewHandle, PH_THREAD_TREELIST_COLUMN_POWERTHROTTLING, FALSE, L"Power throttling", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
 
     TreeNew_SetRedraw(TreeNewHandle, TRUE);
     TreeNew_SetTriState(TreeNewHandle, TRUE);
@@ -1180,6 +1182,18 @@ BEGIN_SORT_FUNCTION(IoOtherBytes)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(LxssTid)
+{
+    sortResult = uintcmp(threadItem1->LxssThreadId, threadItem2->LxssThreadId);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(PowerThrottling)
+{
+    sortResult = uintcmp(threadItem1->PowerThrottling, threadItem2->PowerThrottling);
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI PhpThreadTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -1245,8 +1259,12 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                     SORT_FUNCTION(IoReadBytes),
                     SORT_FUNCTION(IoWriteBytes),
                     SORT_FUNCTION(IoOtherBytes),
+                    SORT_FUNCTION(LxssTid),
+                    SORT_FUNCTION(PowerThrottling),
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
+
+                static_assert(RTL_NUMBER_OF(sortFunctions) == PH_THREAD_TREELIST_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
                 if (!PhCmForwardSort(
                     (PPH_TREENEW_NODE *)context->NodeList->Items,
@@ -1295,10 +1313,12 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
             {
             case PH_THREAD_TREELIST_COLUMN_TID:
                 {
-                    if (threadItem->AlternateThreadIdString)
-                        getCellText->Text = threadItem->AlternateThreadIdString->sr;
-                    else
-                        PhInitializeStringRefLongHint(&getCellText->Text, threadItem->ThreadIdString);
+                    PhInitializeStringRefLongHint(&getCellText->Text, threadItem->ThreadIdString);
+                }
+                break;
+            case PH_THREAD_TREELIST_COLUMN_LXSSTID:
+                {
+                    PhInitializeStringRefLongHint(&getCellText->Text, threadItem->LxssThreadIdString);
                 }
                 break;
             case PH_THREAD_TREELIST_COLUMN_CPU:
@@ -1440,7 +1460,7 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                 break;
             case PH_THREAD_TREELIST_COLUMN_PAGEPRIORITY:
                 {
-                    PWSTR pagePriority = L"N/A";
+                    PH_STRINGREF pagePriority = PH_STRINGREF_INIT(L"N/A");
 
                     PhpUpdateThreadNodePagePriority(node);
 
@@ -1449,12 +1469,13 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                         pagePriority = PhPagePriorityNames[node->PagePriority];
                     }
 
-                    PhInitializeStringRefLongHint(&getCellText->Text, pagePriority);
+                    getCellText->Text.Buffer = pagePriority.Buffer;
+                    getCellText->Text.Length = pagePriority.Length;
                 }
                 break;
             case PH_THREAD_TREELIST_COLUMN_IOPRIORITY:
                 {
-                    PWSTR ioPriority = L"N/A";
+                    PH_STRINGREF ioPriority = PH_STRINGREF_INIT(L"N/A");
 
                     PhpUpdateThreadNodeIoPriority(node);
 
@@ -1463,7 +1484,8 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                         ioPriority = PhIoPriorityHintNames[node->IoPriority];
                     }
 
-                    PhInitializeStringRefLongHint(&getCellText->Text, ioPriority);
+                    getCellText->Text.Buffer = ioPriority.Buffer;
+                    getCellText->Text.Length = ioPriority.Length;
                 }
                 break;
             case PH_THREAD_TREELIST_COLUMN_CYCLES:
@@ -1487,17 +1509,22 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                 {
                     if (threadItem->State != Waiting)
                     {
+                        static const PH_STRINGREF stringUnknown = PH_STRINGREF_INIT(L"Unknown");
+
                         if ((ULONG)threadItem->State < MaximumThreadState)
-                            PhMoveReference(&node->StateText, PhCreateString(PhKThreadStateNames[(ULONG)threadItem->State]));
+                            PhMoveReference(&node->StateText, PhCreateString2((PPH_STRINGREF)&PhKThreadStateNames[(ULONG)threadItem->State]));
                         else
-                            PhMoveReference(&node->StateText, PhCreateString(L"Unknown"));
+                            PhMoveReference(&node->StateText, PhCreateString2((PPH_STRINGREF)&stringUnknown));
                     }
                     else
                     {
+                        static const PH_STRINGREF stringWait = PH_STRINGREF_INIT(L"Wait:");
+                        static const PH_STRINGREF stringWaiting = PH_STRINGREF_INIT(L"Waiting");
+
                         if ((ULONG)threadItem->WaitReason < MaximumWaitReason)
-                            PhMoveReference(&node->StateText, PhConcatStrings2(L"Wait:", PhKWaitReasonNames[(ULONG)threadItem->WaitReason]));
+                            PhMoveReference(&node->StateText, PhConcatStringRef2((PPH_STRINGREF)&stringWait, (PPH_STRINGREF)&PhKWaitReasonNames[(ULONG)threadItem->WaitReason]));
                         else
-                            PhMoveReference(&node->StateText, PhCreateString(L"Waiting"));
+                            PhMoveReference(&node->StateText, PhCreateString2((PPH_STRINGREF)&stringWaiting));
                     }
 
                     if (threadItem->ThreadHandle && threadItem->WaitReason == Suspended)
@@ -2012,6 +2039,14 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                     }
                 }
                 break;
+            case PH_THREAD_TREELIST_COLUMN_POWERTHROTTLING:
+                {
+                    if (threadItem->PowerThrottling)
+                    {
+                        PhInitializeStringRef(&getCellText->Text, L"Yes");
+                    }
+                }
+                break;
             default:
                 return FALSE;
             }
@@ -2062,7 +2097,7 @@ BOOLEAN NTAPI PhpThreadTreeNewCallback(
                     PhCustomDrawTreeTimeLine(
                         customDraw->Dc,
                         customDraw->CellRect,
-                        PhEnableThemeSupport ? PH_DRAW_TIMELINE_OVERFLOW | PH_DRAW_TIMELINE_DARKTHEME : PH_DRAW_TIMELINE_OVERFLOW,
+                        PhEnableThemeSupport ? PH_DRAW_TIMELINE_DARKTHEME : 0,
                         &context->ProcessCreateTime,
                         &threadItem->CreateTime
                         );

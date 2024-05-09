@@ -481,7 +481,7 @@ VOID PhInvalidateAllMemoryBaseAddressNodes(
             PhPrintPointer(memoryNode->MemoryItem->BaseAddressString, memoryNode->MemoryItem->BaseAddress);
 
         memset(memoryNode->TextCache, 0, sizeof(PH_STRINGREF) * PHMMTLC_MAXIMUM);
-        TreeNew_InvalidateNode(Context->TreeNewHandle, &memoryNode->Node);
+        //TreeNew_InvalidateNode(Context->TreeNewHandle, &memoryNode->Node);
     }
 
     for (i = 0; i < Context->RegionNodeList->Count; i++)
@@ -494,7 +494,7 @@ VOID PhInvalidateAllMemoryBaseAddressNodes(
             PhPrintPointer(memoryNode->MemoryItem->BaseAddressString, memoryNode->MemoryItem->BaseAddress);
 
         memset(memoryNode->TextCache, 0, sizeof(PH_STRINGREF) * PHMMTLC_MAXIMUM);
-        TreeNew_InvalidateNode(Context->TreeNewHandle, &memoryNode->Node);
+        //TreeNew_InvalidateNode(Context->TreeNewHandle, &memoryNode->Node);
     }
 
     InvalidateRect(Context->TreeNewHandle, NULL, FALSE);
@@ -597,9 +597,21 @@ PPH_STRING PhGetMemoryRegionUseText(
     case ShimDataRegion:
         return PhFormatString(L"Shim data");
     case ActivationContextDataRegion:
-        return PhFormatString(L"Activation context data");
-    case SystemDefaultActivationContextDataRegion:
-        return PhFormatString(L"Default activation context data");
+        switch (MemoryItem->u.ActivationContextData.Type)
+        {
+        case ProcessActivationContext:
+            return PhFormatString(L"Process activation context data");
+        case SystemActivationContext:
+            return PhFormatString(L"System activation context data");
+        default:
+            return PhFormatString(L"Activation context data");
+        }
+    case WerRegistrationDataRegion:
+        return PhFormatString(L"WER registration data");
+    case SiloSharedDataRegion:
+        return PhFormatString(L"Silo shared data");
+    case TelemetryCoverageRegion:
+        return PhFormatString(L"Telemetry coverage map");
     default:
         return NULL;
     }
@@ -842,6 +854,8 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                     };
                     int (__cdecl *sortFunction)(void *, const void *, const void *);
 
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == PHMMTLC_MAXIMUM, "SortFunctions must equal maximum.");
+
                     if (!PhCmForwardSort(
                         (PPH_TREENEW_NODE *)context->RegionNodeList->Items,
                         context->RegionNodeList->Count,
@@ -896,30 +910,42 @@ BOOLEAN NTAPI PhpMemoryTreeNewCallback(
                 PhInitializeStringRefLongHint(&getCellText->Text, memoryItem->BaseAddressString);
                 break;
             case PHMMTLC_TYPE:
-                if (memoryItem->State & MEM_FREE)
                 {
-                    if (memoryItem->RegionType == UnusableRegion)
-                        PhInitializeStringRef(&getCellText->Text, L"Free (Unusable)");
-                    else
-                        PhInitializeStringRef(&getCellText->Text, L"Free");
-                }
-                else if (node->IsAllocationBase)
-                {
-                    PhInitializeStringRefLongHint(&getCellText->Text, PhGetMemoryTypeString(memoryItem->Type));
-                }
-                else
-                {
-                    PH_FORMAT format[3];
-                    SIZE_T returnLength;
-
-                    PhInitFormatS(&format[0], PhGetMemoryTypeString(memoryItem->Type));
-                    PhInitFormatS(&format[1], L": ");
-                    PhInitFormatS(&format[2], PhGetMemoryStateString(memoryItem->State));
-
-                    if (PhFormatToBuffer(format, 3, node->TypeText, sizeof(node->TypeText), &returnLength))
+                    if (FlagOn(memoryItem->State, MEM_FREE))
                     {
-                        getCellText->Text.Buffer = node->TypeText;
-                        getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
+                        if (memoryItem->RegionType == UnusableRegion)
+                            PhInitializeStringRef(&getCellText->Text, L"Free (Unusable)");
+                        else
+                            PhInitializeStringRef(&getCellText->Text, L"Free");
+                    }
+                    else if (node->IsAllocationBase)
+                    {
+                        PPH_STRINGREF string;
+
+                        if (string = PhGetMemoryTypeString(memoryItem->Type))
+                        {
+                            getCellText->Text.Length = string->Length;
+                            getCellText->Text.Buffer = string->Buffer;
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                        }
+                    }
+                    else
+                    {
+                        PH_FORMAT format[3];
+                        SIZE_T returnLength;
+
+                        PhInitFormatSR(&format[0], *PhGetMemoryTypeString(memoryItem->Type));
+                        PhInitFormatS(&format[1], L": ");
+                        PhInitFormatSR(&format[2], *PhGetMemoryStateString(memoryItem->State));
+
+                        if (PhFormatToBuffer(format, 3, node->TypeText, sizeof(node->TypeText), &returnLength))
+                        {
+                            getCellText->Text.Buffer = node->TypeText;
+                            getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
+                        }
                     }
                 }
                 break;

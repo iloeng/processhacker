@@ -5,12 +5,11 @@
  *
  * Authors:
  *
- *     jxy-s   2022
+ *     jxy-s   2022-2023
  *
  */
 
 #include <kph.h>
-#include <dyndata.h>
 
 #include <trace.h>
 
@@ -34,7 +33,7 @@ NTSTATUS KphpCheckFileHandleForQuery(
     NTSTATUS status;
     PFILE_OBJECT fileObject;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     //
     // We are stack attached and "invading" the process to perform the query.
@@ -59,7 +58,7 @@ NTSTATUS KphpCheckFileHandleForQuery(
                                        NULL);
     if (!NT_SUCCESS(status))
     {
-        KphTracePrint(TRACE_LEVEL_ERROR,
+        KphTracePrint(TRACE_LEVEL_VERBOSE,
                       GENERAL,
                       "ObReferenceObjectByHandle failed %!STATUS!",
                       status);
@@ -106,7 +105,7 @@ NTSTATUS KphQueryInformationFile(
     PVOID buffer;
     BYTE stackBuffer[64];
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     process = NULL;
     buffer = NULL;
@@ -140,7 +139,7 @@ NTSTATUS KphQueryInformationFile(
                                        NULL);
     if (!NT_SUCCESS(status))
     {
-        KphTracePrint(TRACE_LEVEL_ERROR,
+        KphTracePrint(TRACE_LEVEL_VERBOSE,
                       GENERAL,
                       "ObReferenceObjectByHandle failed %!STATUS!",
                       status);
@@ -164,6 +163,7 @@ NTSTATUS KphQueryInformationFile(
 
     if (FileInformationLength <= ARRAYSIZE(stackBuffer))
     {
+        RtlZeroMemory(stackBuffer, ARRAYSIZE(stackBuffer));
         buffer = stackBuffer;
     }
     else
@@ -255,7 +255,7 @@ NTSTATUS KphQueryVolumeInformationFile(
     PVOID buffer;
     BYTE stackBuffer[64];
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     process = NULL;
     buffer = NULL;
@@ -289,7 +289,7 @@ NTSTATUS KphQueryVolumeInformationFile(
                                        NULL);
     if (!NT_SUCCESS(status))
     {
-        KphTracePrint(TRACE_LEVEL_ERROR,
+        KphTracePrint(TRACE_LEVEL_VERBOSE,
                       GENERAL,
                       "ObReferenceObjectByHandle failed %!STATUS!",
                       status);
@@ -313,6 +313,7 @@ NTSTATUS KphQueryVolumeInformationFile(
 
     if (FsInformationLength <= ARRAYSIZE(stackBuffer))
     {
+        RtlZeroMemory(stackBuffer, ARRAYSIZE(stackBuffer));
         buffer = stackBuffer;
     }
     else
@@ -385,7 +386,7 @@ Exit:
  * \param[in] ShareAccess Specifies the type of share access to the file that
  * the caller would like.
  * \param[in] CreateDisposition Value that determines how the file should be
- * handled when the file already exists. 
+ * handled when the file already exists.
  * \param[in] CreateOptions Specifies the options to be applied when creating
  * or opening the file.
  * \param[in] EaBuffer Optional pointer to an EA buffer.
@@ -416,13 +417,13 @@ NTSTATUS KphCreateFile(
 {
     NTSTATUS status;
 
-    PAGED_PASSIVE();
+    PAGED_CODE_PASSIVE();
 
     if (AccessMode != KernelMode)
     {
         if (ExGetPreviousMode() == KernelMode)
         {
-            KphTracePrint(TRACE_LEVEL_ERROR,
+            KphTracePrint(TRACE_LEVEL_VERBOSE,
                           GENERAL,
                           "Unexpected previous mode");
 
@@ -435,7 +436,7 @@ NTSTATUS KphCreateFile(
                         IO_STOP_ON_SYMLINK |
                         IO_IGNORE_SHARE_ACCESS_CHECK))
         {
-            KphTracePrint(TRACE_LEVEL_ERROR,
+            KphTracePrint(TRACE_LEVEL_VERBOSE,
                           GENERAL,
                           "Invalid options 0x%lx",
                           Options);

@@ -20,9 +20,9 @@
 #endif
 
 #ifdef __hstring_h__
-C_ASSERT(sizeof(HSTRING_REFERENCE) == sizeof(HSTRING_HEADER));
+static_assert(sizeof(HSTRING_REFERENCE) == sizeof(HSTRING_HEADER), "HSTRING_REFERENCE must equal WSTRING_HEADER");
 #else
-C_ASSERT(sizeof(HSTRING_REFERENCE) == sizeof(WSTRING_HEADER));
+static_assert(sizeof(HSTRING_REFERENCE) == sizeof(WSTRING_HEADER), "HSTRING_REFERENCE must equal WSTRING_HEADER");
 #endif
 
 PPH_STRING PhCreateStringFromWindowsRuntimeString(
@@ -382,7 +382,7 @@ static PVOID PhDetoursPackageSystemIdentificationContext(
 
     if (PhBeginInitOnce(&initOnce))
     {
-        index = TlsAlloc();
+        index = PhTlsAlloc();
         PhEndInitOnce(&initOnce);
     }
 
@@ -390,12 +390,12 @@ static PVOID PhDetoursPackageSystemIdentificationContext(
     {
         if (Initialize)
         {
-            if (TlsSetValue(index, Buffer))
+            if (NT_SUCCESS(PhTlsSetValue(index, Buffer)))
                 return Buffer;
         }
         else
         {
-            return TlsGetValue(index);
+            return PhTlsGetValue(index);
         }
     }
 
@@ -636,16 +636,20 @@ CleanupExit:
     // Note: Load messages after reverting impersonation otherwise the kernel32.dll message table doesn't get mapped.
     // Errors will be from the process token missing the "userSystemId" capability or limited process token privileges. (dmex)
 
-    if (systemIdPublisherStatus == S_OK)
+    if (HR_SUCCESS(systemIdPublisherStatus))
     {
         *SystemIdForPublisher = systemIdForPublisherString;
     }
     else
     {
-        if (HRESULT_FACILITY(systemIdPublisherStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
+        //if (HRESULT_FACILITY(systemIdPublisherStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
+        //{
+        //    ClearFlag(systemIdPublisherStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
+        //}
+
+        if (HRESULT_NTSTATUS(systemIdForUserStatus))
         {
-            ClearFlag(systemIdPublisherStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
-            *SystemIdForPublisher = PhGetStatusMessage(systemIdPublisherStatus, 0);
+            *SystemIdForPublisher = PhGetStatusMessage(PhNtStatusFromHResult(systemIdPublisherStatus), 0);
         }
 
         if (PhIsNullOrEmptyString(*SystemIdForPublisher))
@@ -654,16 +658,20 @@ CleanupExit:
         }
     }
 
-    if (systemIdForUserStatus == S_OK)
+    if (HR_SUCCESS(systemIdForUserStatus))
     {
         *SystemIdForUser = systemIdForUserString;
     }
     else
     {
-        if (HRESULT_FACILITY(systemIdForUserStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
+        //if (HRESULT_FACILITY(systemIdForUserStatus) == FACILITY_NT_BIT >> NT_FACILITY_SHIFT)
+        //{
+        //    ClearFlag(systemIdForUserStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
+        //}
+
+        if (HRESULT_NTSTATUS(systemIdForUserStatus))
         {
-            ClearFlag(systemIdForUserStatus, FACILITY_NT_BIT); // 0xD0000022 -> 0xC0000022
-            *SystemIdForUser = PhGetStatusMessage(systemIdForUserStatus, 0);
+            *SystemIdForUser = PhGetStatusMessage(PhNtStatusFromHResult(systemIdForUserStatus), 0);
         }
 
         if (PhIsNullOrEmptyString(*SystemIdForUser))
@@ -705,22 +713,23 @@ HRESULT PhGetProcessSystemIdentification(
     {
         PSYSTEM_PROCESS_INFORMATION process;
 
-        process = PhFindProcessInformation(processes, ProcessId);
-
-        for (ULONG i = 0; i < process->NumberOfThreads; i++)
+        if (process = PhFindProcessInformation(processes, ProcessId))
         {
-            HANDLE tempThreadHandle;
-
-            threadId = process->Threads[i].ClientId.UniqueThread;
-
-            if (NT_SUCCESS(PhOpenThread(
-                &tempThreadHandle,
-                THREAD_QUERY_LIMITED_INFORMATION,
-                threadId
-                )))
+            for (ULONG i = 0; i < process->NumberOfThreads; i++)
             {
-                threadHandle = tempThreadHandle;
-                break;
+                HANDLE tempThreadHandle;
+
+                threadId = process->Threads[i].ClientId.UniqueThread;
+
+                if (NT_SUCCESS(PhOpenThread(
+                    &tempThreadHandle,
+                    THREAD_QUERY_LIMITED_INFORMATION,
+                    threadId
+                    )))
+                {
+                    threadHandle = tempThreadHandle;
+                    break;
+                }
             }
         }
 
@@ -1157,7 +1166,7 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
         &packageManager
         );
 
-    if (FAILED(status))
+    if (HR_FAILED(status))
         return NULL;
 
     if (PhGetOwnTokenAttributes().Elevated)
@@ -1165,17 +1174,17 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
     else
         status = __x_ABI_CWindows_CManagement_CDeployment_CIPackageManager_FindPackagesByUserSecurityId(packageManager, NULL, &enumPackages);
 
-    if (FAILED(status))
+    if (HR_FAILED(status))
         goto CleanupExit;
 
     status = __FIIterable_1_Windows__CApplicationModel__CPackage_First(enumPackages, &enumPackage);
 
-    if (FAILED(status))
+    if (HR_FAILED(status))
         goto CleanupExit;
 
     status = __FIIterator_1_Windows__CApplicationModel__CPackage_get_HasCurrent(enumPackage, &haveCurrentPackage);
 
-    if (FAILED(status))
+    if (HR_FAILED(status))
         goto CleanupExit;
 
     list = PhCreateList(10);
@@ -1184,11 +1193,11 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
     {
         status = __FIIterator_1_Windows__CApplicationModel__CPackage_get_Current(enumPackage, &currentPackage);
 
-        if (SUCCEEDED(status))
+        if (HR_SUCCESS(status))
         {
             status = __x_ABI_CWindows_CApplicationModel_CIPackage_QueryInterface(currentPackage, &IID_IPackage2, &currentPackage2);
 
-            if (SUCCEEDED(status))
+            if (HR_SUCCESS(status))
             {
                 PhQueryApplicationModelPackageInformation(
                     list,
@@ -1213,17 +1222,18 @@ PPH_LIST PhEnumPackageApplicationUserModelIds(
             __FIIterator_1_Windows__CApplicationModel__CPackage_Release(currentPackage);
         }
 
-        if (FAILED(status))
+        if (HR_FAILED(status))
             break;
 
         status = __FIIterator_1_Windows__CApplicationModel__CPackage_MoveNext(enumPackage, &haveCurrentPackage);
 
-        if (FAILED(status))
+        if (HR_FAILED(status))
             break;
     }
 
 CleanupExit:
-
+    if (enumPackage)
+        __FIIterator_1_Windows__CApplicationModel__CPackage_Release(enumPackage);
     if (enumPackages)
         __FIIterable_1_Windows__CApplicationModel__CPackage_Release(enumPackages);
     __x_ABI_CWindows_CManagement_CDeployment_CIPackageManager_Release(packageManager);

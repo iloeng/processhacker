@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2016
- *     dmex    2015-2023
+ *     dmex    2015-2024
  *
  */
 
@@ -18,13 +18,13 @@ PPH_PLUGIN PluginInstance = NULL;
 BOOLEAN NetAdapterEnableNdis = FALSE;
 ULONG NetWindowsVersion = WINDOWS_ANCIENT;
 
-PPH_OBJECT_TYPE NetAdapterEntryType = NULL;
-PPH_LIST NetworkAdaptersList = NULL;
-PH_QUEUED_LOCK NetworkAdaptersListLock = PH_QUEUED_LOCK_INIT;
+PPH_OBJECT_TYPE NetworkDeviceEntryType = NULL;
+PPH_LIST NetworkDevicesList = NULL;
+PH_QUEUED_LOCK NetworkDevicesListLock = PH_QUEUED_LOCK_INIT;
 
-PPH_OBJECT_TYPE DiskDriveEntryType = NULL;
-PPH_LIST DiskDrivesList = NULL;
-PH_QUEUED_LOCK DiskDrivesListLock = PH_QUEUED_LOCK_INIT;
+PPH_OBJECT_TYPE DiskDeviceEntryType = NULL;
+PPH_LIST DiskDevicesList = NULL;
+PH_QUEUED_LOCK DiskDevicesListLock = PH_QUEUED_LOCK_INIT;
 
 PPH_OBJECT_TYPE RaplDeviceEntryType = NULL;
 PPH_LIST RaplDevicesList = NULL;
@@ -58,8 +58,8 @@ VOID NTAPI LoadCallback(
     LoadSettings();
 
     GraphicsDeviceInitialize();
-    DiskDrivesInitialize();
-    NetAdaptersInitialize();
+    DiskDevicesInitialize();
+    NetworkDevicesInitialize();
     RaplDeviceInitialize();
 
     GraphicsDevicesLoadList();
@@ -122,7 +122,8 @@ VOID NTAPI MainWindowShowingCallback(
     )
 {
     AddRemoveDeviceChangeCallback();
-    if (NetWindowsVersion >= WINDOWS_10)
+
+    if (PhDeviceProviderInitialization())
         InitializeDevicesTab();
 }
 
@@ -132,8 +133,8 @@ VOID NTAPI ProcessesUpdatedCallback(
     )
 {
     GraphicsDevicesUpdate();
-    DiskDrivesUpdate();
-    NetAdaptersUpdate();
+    DiskDevicesUpdate();
+    NetworkDevicesUpdate();
     RaplDevicesUpdate();
 }
 
@@ -165,47 +166,47 @@ VOID NTAPI SystemInformationInitializingCallback(
 
     PhReleaseQueuedLockShared(&GraphicsDevicesListLock);
 
-    // Disk Drives
+    // Disk Devices
 
-    PhAcquireQueuedLockShared(&DiskDrivesListLock);
+    PhAcquireQueuedLockShared(&DiskDevicesListLock);
 
-    for (ULONG i = 0; i < DiskDrivesList->Count; i++)
+    for (ULONG i = 0; i < DiskDevicesList->Count; i++)
     {
-        PDV_DISK_ENTRY entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
+        PDV_DISK_ENTRY entry = PhReferenceObjectSafe(DiskDevicesList->Items[i]);
 
         if (!entry)
             continue;
 
         if (entry->DevicePresent)
         {
-            DiskDriveSysInfoInitializing(pluginEntry, entry);
+            DiskDeviceSysInfoInitializing(pluginEntry, entry);
         }
 
         PhDereferenceObjectDeferDelete(entry);
     }
 
-    PhReleaseQueuedLockShared(&DiskDrivesListLock);
+    PhReleaseQueuedLockShared(&DiskDevicesListLock);
 
-    // Network Adapters
+    // Network Devices
 
-    PhAcquireQueuedLockShared(&NetworkAdaptersListLock);
+    PhAcquireQueuedLockShared(&NetworkDevicesListLock);
 
-    for (ULONG i = 0; i < NetworkAdaptersList->Count; i++)
+    for (ULONG i = 0; i < NetworkDevicesList->Count; i++)
     {
-        PDV_NETADAPTER_ENTRY entry = PhReferenceObjectSafe(NetworkAdaptersList->Items[i]);
+        PDV_NETADAPTER_ENTRY entry = PhReferenceObjectSafe(NetworkDevicesList->Items[i]);
 
         if (!entry)
             continue;
 
         if (entry->DevicePresent)
         {
-            NetAdapterSysInfoInitializing(pluginEntry, entry);
+            NetworkDeviceSysInfoInitializing(pluginEntry, entry);
         }
 
         PhDereferenceObjectDeferDelete(entry);
     }
 
-    PhReleaseQueuedLockShared(&NetworkAdaptersListLock);
+    PhReleaseQueuedLockShared(&NetworkDevicesListLock);
 
     // RAPL Devices
 
@@ -235,14 +236,6 @@ VOID NTAPI SettingsUpdatedCallback(
     )
 {
     LoadSettings();
-}
-
-PPH_STRING TrimString(
-    _In_ PPH_STRING String
-    )
-{
-    static PH_STRINGREF whitespace = PH_STRINGREF_INIT(L" \t\r\n");
-    return PhCreateString3(&String->sr, 0, &whitespace);
 }
 
 BOOLEAN HardwareDeviceEnableDisable(
@@ -665,12 +658,23 @@ LOGICAL DllMain(
                 { IntegerPairSettingType, SETTING_NAME_DEVICE_TREE_SORT, L"0,0" },
                 { StringSettingType, SETTING_NAME_DEVICE_TREE_COLUMNS, L"" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_PROBLEM_COLOR, L"283cff" },
-                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_COLOR, L"6d6d6d" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_COLOR, L"000000" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_DISCONNECTED_COLOR, L"6d6d6d" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_HIGHLIGHT_COLOR, L"00aaff" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_INTERFACE_COLOR, L"ffccaa" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_DISABLED_INTERFACE_COLOR, L"886644" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SORT_CHILDREN_BY_NAME, L"1" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_ROOT, L"0" },
                 { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_SOFTWARE_COMPONENTS, L"1" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_DEVICE_INTERFACES, L"0" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_SHOW_DISABLED_DEVICE_INTERFACES, L"0" },
+                { IntegerPairSettingType, SETTING_NAME_DEVICE_PROPERTIES_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_DEVICE_PROPERTIES_SIZE, L"@96|300,200" },
+                { StringSettingType, SETTING_NAME_DEVICE_GENERAL_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_DEVICE_PROPERTIES_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_DEVICE_INTERFACES_COLUMNS, L"" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_ARRIVED_COLOR, L"00ff7f" },
+                { IntegerSettingType, SETTING_NAME_DEVICE_HIGHLIGHTING_DURATION, L"bb8" }, // 3000ms
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);

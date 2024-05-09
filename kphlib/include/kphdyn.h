@@ -11,14 +11,16 @@
 
 #include <kphlibbase.h>
 
-#define KPH_DYN_CONFIGURATION_VERSION 10
+#define KPH_DYN_CONFIGURATION_VERSION 12
 
 #define KPH_DYN_CI_INVALID ((SHORT)-1)
 #define KPH_DYN_CI_V1      ((SHORT)1)
 #define KPH_DYN_CI_V2      ((SHORT)2)
-    
+
 #define KPH_DYN_LX_INVALID ((SHORT)-1)
 #define KPH_DYN_LX_V1      ((SHORT)1)
+
+#define KPH_DYN_SESSION_TOKEN_PUBLIC_KEY_LENGTH 72
 
 #include <pshpack1.h>
 
@@ -52,7 +54,7 @@ typedef struct _KPH_DYN_CONFIGURATION
     USHORT AlpcPortContext;              // dt nt!_ALPC_PORT PortContext
     USHORT AlpcPortObjectLock;           // dt nt!_ALPC_PORT PortObjectLock
     USHORT AlpcSequenceNo;               // dt nt!_ALPC_PORT SequenceNo
-    USHORT AlpcState;                    // dt nt!_ALPC_PORT State
+    USHORT AlpcState;                    // dt nt!_ALPC_PORT u1.State
     USHORT KtReadOperationCount;         // dt nt!_KTHREAD ReadOperationCount
     USHORT KtWriteOperationCount;        // dt nt!_KTHREAD WriteOperationCount
     USHORT KtOtherOperationCount;        // dt nt!_KTHREAD OtherOperationCount
@@ -66,24 +68,22 @@ typedef struct _KPH_DYN_CONFIGURATION
     USHORT LxPicoThrdInfo;               // uf lxcore!LxpSyscall_GETTID
     USHORT LxPicoThrdInfoTID;            // uf lxcore!LxpSyscall_GETTID
     USHORT MmSectionControlArea;         // dt nt!_SECTION u1.ControlArea
-    USHORT MmControlAreaListHead;        // dt nt!_CONTROL_AREA ListHead 
+    USHORT MmControlAreaListHead;        // dt nt!_CONTROL_AREA ListHead
     USHORT MmControlAreaLock;            // dt nt!_CONTROL_AREA ControlAreaLock
-
+    USHORT EpSectionObject;              // dt nt!_EPROCESS SectionObject
 } KPH_DYN_CONFIGURATION, *PKPH_DYN_CONFIGURATION;
 
 typedef struct _KPH_DYNDATA
 {
     ULONG Version;
+    BYTE SessionTokenPublicKey[KPH_DYN_SESSION_TOKEN_PUBLIC_KEY_LENGTH];
     ULONG Count;
     KPH_DYN_CONFIGURATION Configs[ANYSIZE_ARRAY];
-
 } KPH_DYNDATA, *PKPH_DYNDATA;
 
 #include <poppack.h>
 
 #ifdef _WIN64
-extern BYTE KphDynData[];
-extern ULONG KphDynDataLength;
-extern BYTE KphDynDataSig[];
-extern ULONG KphDynDataSigLength;
+extern CONST BYTE KphDynData[];
+extern CONST ULONG KphDynDataLength;
 #endif

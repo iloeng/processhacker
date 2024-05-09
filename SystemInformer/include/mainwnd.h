@@ -168,7 +168,7 @@ typedef enum _PH_MAIN_TAB_PAGE_MESSAGE
 {
     MainTabPageCreate,
     MainTabPageDestroy,
-    MainTabPageCreateWindow, // HWND *Parameter1 (WindowHandle)
+    MainTabPageCreateWindow, // HWND *Parameter1 (WindowHandle), HWND Parameter2 (ParentWindow)
     MainTabPageSelected, // BOOLEAN Parameter1 (Selected)
     MainTabPageInitializeSectionMenuItems, // PPH_MAIN_TAB_PAGE_MENU_INFORMATION Parameter1
 
@@ -242,8 +242,10 @@ typedef struct _PH_MAIN_TAB_PAGE
 #define PH_NOTIFY_SERVICE_START 0x10
 #define PH_NOTIFY_SERVICE_STOP 0x20
 #define PH_NOTIFY_SERVICE_MODIFIED 0x40
-#define PH_NOTIFY_MAXIMUM 0x80
-#define PH_NOTIFY_VALID_MASK 0x7f
+#define PH_NOTIFY_DEVICE_ARRIVED 0x80
+#define PH_NOTIFY_DEVICE_REMOVED 0x100
+#define PH_NOTIFY_MAXIMUM 0x200
+#define PH_NOTIFY_VALID_MASK 0x1ff
 // end_phapppub
 
 BOOLEAN PhMainWndInitialization(
@@ -260,6 +262,7 @@ BOOLEAN PhHandleMiniProcessMenuItem(
     );
 
 VOID PhShowIconContextMenu(
+    _In_ HWND WindowHandle,
     _In_ POINT Location
     );
 

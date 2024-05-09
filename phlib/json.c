@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2017-2022
+ *     dmex    2017-2023
  *
  */
 
@@ -17,19 +17,53 @@
 #include "../tools/thirdparty/jsonc/json.h"
 #include "../tools/thirdparty/mxml/mxml.h"
 
-static json_object_ptr json_get_object(
-    _In_ json_object_ptr rootObj,
-    _In_ PSTR key
+static PVOID json_get_object(
+    _In_ PVOID Object,
+    _In_ PSTR Key
     )
 {
-    json_object_ptr returnObj;
+    json_object* returnObj;
 
-    if (json_object_object_get_ex(rootObj, key, &returnObj))
+    if (json_object_object_get_ex(Object, Key, &returnObj))
     {
         return returnObj;
     }
 
     return NULL;
+}
+
+static NTSTATUS PhJsonErrorToNtStatus(
+    _In_ enum json_tokener_error JsonError
+    )
+{
+    switch (JsonError)
+    {
+    case json_tokener_success:
+        return STATUS_SUCCESS;
+    case json_tokener_continue:
+        return STATUS_MORE_ENTRIES;
+    case json_tokener_error_depth:
+        return STATUS_PARTIAL_COPY;
+    case json_tokener_error_parse_eof:
+    case json_tokener_error_parse_unexpected:
+    case json_tokener_error_parse_null:
+    case json_tokener_error_parse_boolean:
+    case json_tokener_error_parse_number:
+    case json_tokener_error_parse_array:
+    case json_tokener_error_parse_object_key_name:
+    case json_tokener_error_parse_object_key_sep:
+    case json_tokener_error_parse_object_value_sep:
+    case json_tokener_error_parse_string:
+    case json_tokener_error_parse_comment:
+    case json_tokener_error_parse_utf8_string:
+        return STATUS_FAIL_CHECK;
+    case json_tokener_error_memory:
+        return STATUS_NO_MEMORY;
+    case json_tokener_error_size:
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    return STATUS_UNSUCCESSFUL;
 }
 
 PVOID PhCreateJsonParser(
@@ -45,7 +79,7 @@ PVOID PhCreateJsonParserEx(
     )
 {
     json_tokener* tokenerObject;
-    json_object_ptr jsonObject;
+    json_object* jsonObject;
 
     if (Unicode)
     {
@@ -53,9 +87,9 @@ PVOID PhCreateJsonParserEx(
         PPH_BYTES jsonStringUtf8;
 
         if (jsonStringUtf16->Length / sizeof(WCHAR) >= INT32_MAX)
-            return NULL;
+            return NULL; // STATUS_INVALID_BUFFER_SIZE
         if (!(tokenerObject = json_tokener_new()))
-            return NULL;
+            return NULL; // STATUS_NO_MEMORY
 
         json_tokener_set_flags(
             tokenerObject,
@@ -69,7 +103,7 @@ PVOID PhCreateJsonParserEx(
         jsonObject = json_tokener_parse_ex(
             tokenerObject,
             jsonStringUtf8->Buffer,
-            (INT)jsonStringUtf8->Length
+            jsonStringUtf8->Length
             );
         PhDereferenceObject(jsonStringUtf8);
     }
@@ -78,9 +112,9 @@ PVOID PhCreateJsonParserEx(
         PPH_BYTES jsonStringUtf8 = JsonString;
 
         if (jsonStringUtf8->Length >= INT32_MAX)
-            return NULL;
+            return NULL; // STATUS_INVALID_BUFFER_SIZE
         if (!(tokenerObject = json_tokener_new()))
-            return NULL;
+            return NULL; // STATUS_NO_MEMORY
 
         json_tokener_set_flags(
             tokenerObject,
@@ -90,14 +124,14 @@ PVOID PhCreateJsonParserEx(
         jsonObject = json_tokener_parse_ex(
             tokenerObject,
             jsonStringUtf8->Buffer,
-            (INT)jsonStringUtf8->Length
+            jsonStringUtf8->Length
             );
     }
 
     if (json_tokener_get_error(tokenerObject) != json_tokener_success)
     {
         json_tokener_free(tokenerObject);
-        return NULL;
+        return NULL; // STATUS_UNSUCCESSFUL
     }
 
     json_tokener_free(tokenerObject);
@@ -167,6 +201,13 @@ ULONGLONG PhGetJsonValueAsUInt64(
     )
 {
     return json_object_get_uint64(json_get_object(Object, Key));
+}
+
+ULONG PhGetJsonUInt32Object(
+    _In_ PVOID Object
+    )
+{
+    return json_object_get_int(Object);
 }
 
 PVOID PhCreateJsonObject(
@@ -297,10 +338,10 @@ PVOID PhCreateJsonArray(
 
 VOID PhAddJsonArrayObject(
     _In_ PVOID Object,
-    _In_ PVOID jsonEntry
+    _In_ PVOID Value
     )
 {
-    json_object_array_add(Object, jsonEntry);
+    json_object_array_add(Object, Value);
 }
 
 PVOID PhGetJsonArrayString(
@@ -345,6 +386,19 @@ PVOID PhGetJsonArrayIndexObject(
     return json_object_array_get_idx(Object, Index);
 }
 
+VOID PhEnumJsonArrayObject(
+    _In_ PVOID Object,
+    _In_ PPH_ENUM_JSON_OBJECT_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    json_object_object_foreach(Object, key, value)
+    {
+        if (!Callback(Object, key, value, Context))
+            break;
+    }
+}
+
 PVOID PhGetJsonObjectAsArrayList(
     _In_ PVOID Object
     )
@@ -372,7 +426,18 @@ PVOID PhLoadJsonObjectFromFile(
     _In_ PPH_STRINGREF FileName
     )
 {
-    return json_object_from_file(FileName->Buffer);
+    PPH_BYTES content;
+    PVOID object;
+
+    if (content = PhFileReadAllText(FileName, FALSE))
+    {
+        object = PhCreateJsonParserEx(content, FALSE);
+
+        PhDereferenceObject(content);
+        return object;
+    }
+
+    return NULL;
 }
 
 NTSTATUS PhSaveJsonObjectToFile(
@@ -380,19 +445,52 @@ NTSTATUS PhSaveJsonObjectToFile(
     _In_ PVOID Object
     )
 {
-#ifdef _DEBUG
-    if (json_object_to_file_ext(FileName->Buffer, Object, JSON_C_TO_STRING_PRETTY) == -1)
-    {
-        return STATUS_UNSUCCESSFUL;
-    }
-#else
-    if (json_object_to_file_ext(FileName->Buffer, Object, 0) == -1)
-    {
-        return STATUS_UNSUCCESSFUL;
-    }
-#endif
+    INT json_flags = JSON_C_TO_STRING_PRETTY;
+    NTSTATUS status;
+    HANDLE fileHandle;
+    IO_STATUS_BLOCK isb;
+    size_t json_length;
+    PCSTR json_string;
 
-    return STATUS_SUCCESS;
+    json_string = json_object_to_json_string_length(
+        Object,
+        json_flags,
+        &json_length
+        );
+
+    if (json_length == 0)
+    {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    status = PhCreateFile(
+        &fileHandle,
+        FileName,
+        FILE_GENERIC_WRITE,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ,
+        FILE_OVERWRITE_IF,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+        );
+
+    if (!NT_SUCCESS(status))
+        return status;
+
+    status = NtWriteFile(
+        fileHandle,
+        NULL,
+        NULL,
+        NULL,
+        &isb,
+        (PVOID)json_string,
+        (ULONG)json_length,
+        NULL,
+        NULL
+        );
+
+    NtClose(fileHandle);
+
+    return status;
 }
 
 // XML support

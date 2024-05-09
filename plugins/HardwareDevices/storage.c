@@ -5,36 +5,40 @@
  *
  * Authors:
  *
- *     dmex    2015-2022
+ *     dmex    2015-2024
  *
  */
 
 #include "devices.h"
 #include <ntdddisk.h>
+#define PHNT_DEVICE_MAP 1
 
 PPH_STRING DiskDriveQueryDosMountPoints(
     _In_ ULONG DeviceNumber
     )
 {
-    ULONG deviceMap = 0;
-    WCHAR deviceNameBuffer[7] = L"\\??\\?:";
+    WCHAR deviceNameBuffer[7] = L"\\??\\ :";
     PH_STRINGREF deviceName;
     PH_STRING_BUILDER stringBuilder;
 
     PhInitializeStringBuilder(&stringBuilder, DOS_MAX_PATH_LENGTH);
 
+#ifdef PHNT_DEVICE_MAP
+    ULONG deviceMap = 0;
     PhGetProcessDeviceMap(NtCurrentProcess(), &deviceMap);
+#endif
 
-    for (INT i = 0; i < 0x1A; i++)
+    for (ULONG i = 0; i < 0x1A; i++)
     {
         HANDLE deviceHandle;
 
+#ifdef PHNT_DEVICE_MAP
         if (deviceMap)
         {
             if (!(deviceMap & (0x1 << i)))
                 continue;
         }
-
+#endif
         deviceNameBuffer[4] = (WCHAR)('A' + i);
         deviceName.Buffer = deviceNameBuffer;
         deviceName.Length = 6 * sizeof(WCHAR);
@@ -94,30 +98,34 @@ PPH_LIST DiskDriveQueryMountPointHandles(
     _In_ ULONG DeviceNumber
     )
 {
-    PH_STRINGREF deviceName;
     WCHAR deviceNameBuffer[7] = L"\\??\\?:";
-    ULONG deviceMap = 0;
+    PH_STRINGREF deviceName;
     PPH_LIST deviceList;
 
+#ifdef PHNT_DEVICE_MAP
+    ULONG deviceMap = 0;
     PhGetProcessDeviceMap(NtCurrentProcess(), &deviceMap);
+#endif
 
     deviceList = PhCreateList(2);
 
-    for (INT i = 0; i < 26; i++)
+    for (ULONG i = 0; i < 26; i++)
     {
-        HANDLE deviceHandle;
+        NTSTATUS status;
+        HANDLE deviceHandle = NULL;
 
+#ifdef PHNT_DEVICE_MAP
         if (deviceMap)
         {
             if (!(deviceMap & (0x1 << i)))
                 continue;
         }
-
+#endif
         deviceNameBuffer[4] = (WCHAR)('A' + i);
         deviceName.Buffer = deviceNameBuffer;
         deviceName.Length = 6 * sizeof(WCHAR);
 
-        if (NT_SUCCESS(PhCreateFile(
+        status = PhCreateFile(
             &deviceHandle,
             &deviceName,
             PhGetOwnTokenAttributes().Elevated ? FILE_GENERIC_READ : FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
@@ -125,7 +133,22 @@ PPH_LIST DiskDriveQueryMountPointHandles(
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             FILE_OPEN,
             FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
-            )))
+            );
+
+        if (status == STATUS_ACCESS_DENIED)
+        {
+            status = PhCreateFile(
+                &deviceHandle,
+                &deviceName,
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+                );
+        }
+
+        if (NT_SUCCESS(status))
         {
             ULONG deviceNumber = ULONG_MAX;
             DEVICE_TYPE deviceType = 0;
@@ -224,7 +247,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
             PPH_STRING string;
 
             string = PhConvertUtf8ToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->VendorIdOffset));
-            *DiskVendor = TrimString(string);
+            *DiskVendor = PhTrimStringZ(&string->sr, 0, L" \t\r\n");
             PhDereferenceObject(string);
         }
         else
@@ -240,7 +263,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
             PPH_STRING string;
 
             string = PhConvertUtf8ToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->ProductIdOffset));
-            *DiskModel = TrimString(string);
+            *DiskModel = PhTrimStringZ(&string->sr, 0, L" \t\r\n");
             PhDereferenceObject(string);
         }
         else
@@ -256,7 +279,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
             PPH_STRING string;
 
             string = PhConvertUtf8ToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->ProductRevisionOffset));
-            *DiskRevision = TrimString(string);
+            *DiskRevision = PhTrimStringZ(&string->sr, 0, L" \t\r\n");
             PhDereferenceObject(string);
         }
         else
@@ -272,7 +295,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
             PPH_STRING string;
 
             string = PhConvertUtf8ToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->SerialNumberOffset));
-            *DiskSerial = TrimString(string);
+            *DiskSerial = PhTrimStringZ(&string->sr, 0, L" \t\r\n");
             PhDereferenceObject(string);
         }
         else
@@ -556,7 +579,7 @@ BOOLEAN DiskDriveQueryFileSystemInfo(
 
     if (NT_SUCCESS(PhDeviceIoControlFile(
         DosDeviceHandle,
-        FSCTL_FILESYSTEM_GET_STATISTICS, // FSCTL_FILESYSTEM_GET_STATISTICS_EX
+        FSCTL_FILESYSTEM_GET_STATISTICS,
         NULL,
         0,
         buffer,
@@ -573,21 +596,21 @@ BOOLEAN DiskDriveQueryFileSystemInfo(
     case FILESYSTEM_STATISTICS_TYPE_NTFS:
     case FILESYSTEM_STATISTICS_TYPE_REFS: // ReFS uses the same statistics as NTFS.
         {
-            bufferLength = sizeof(NTFS_FILESYSTEM_STATISTICS) * 64 * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            bufferLength = sizeof(NTFS_FILESYSTEM_STATISTICS) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
             buffer = PhReAllocate(buffer, bufferLength);
             memset(buffer, 0, bufferLength);
         }
         break;
     case FILESYSTEM_STATISTICS_TYPE_FAT:
         {
-            bufferLength = sizeof(FAT_FILESYSTEM_STATISTICS) * 64 * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            bufferLength = sizeof(FAT_FILESYSTEM_STATISTICS) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
             buffer = PhReAllocate(buffer, bufferLength);
             memset(buffer, 0, bufferLength);
         }
         break;
     case FILESYSTEM_STATISTICS_TYPE_EXFAT:
         {
-            bufferLength = sizeof(EXFAT_FILESYSTEM_STATISTICS) * 64 * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            bufferLength = sizeof(EXFAT_FILESYSTEM_STATISTICS) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
             buffer = PhReAllocate(buffer, bufferLength);
             memset(buffer, 0, bufferLength);
         }
@@ -605,6 +628,84 @@ BOOLEAN DiskDriveQueryFileSystemInfo(
         )))
     {
         *FileSystemType = buffer->FileSystemType;
+        *FileSystemStatistics = buffer;
+        return TRUE;
+    }
+
+    PhFree(buffer);
+    return FALSE;
+}
+
+_Success_(return)
+BOOLEAN DiskDriveQueryFileSystemInfoEx(
+    _In_ HANDLE DosDeviceHandle,
+    _Out_ PUSHORT FileSystemType,
+    _Out_ PVOID* FileSystemStatistics
+    )
+{
+    NTSTATUS status;
+    ULONG bufferLength;
+    PNTFS_FILESYSTEM_STATISTICS_EX buffer;
+
+    bufferLength = sizeof(NTFS_FILESYSTEM_STATISTICS_EX);
+    buffer = PhAllocate(bufferLength);
+    memset(buffer, 0, bufferLength);
+
+    status = PhDeviceIoControlFile(
+        DosDeviceHandle,
+        FSCTL_FILESYSTEM_GET_STATISTICS_EX,
+        NULL,
+        0,
+        buffer,
+        bufferLength,
+        NULL
+        );
+
+    if (status != STATUS_BUFFER_OVERFLOW)
+    {
+        PhFree(buffer);
+        return FALSE;
+    }
+
+    switch (buffer->FileSystemStatistics.FileSystemType)
+    {
+    case FILESYSTEM_STATISTICS_TYPE_NTFS:
+    case FILESYSTEM_STATISTICS_TYPE_REFS:
+        {
+            bufferLength = sizeof(NTFS_FILESYSTEM_STATISTICS_EX) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            buffer = PhReAllocate(buffer, bufferLength);
+            memset(buffer, 0, bufferLength);
+        }
+        break;
+    case FILESYSTEM_STATISTICS_TYPE_FAT:
+        {
+            bufferLength = sizeof(FAT_FILESYSTEM_STATISTICS_EX) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            buffer = PhReAllocate(buffer, bufferLength);
+            memset(buffer, 0, bufferLength);
+        }
+        break;
+    case FILESYSTEM_STATISTICS_TYPE_EXFAT:
+        {
+            bufferLength = sizeof(EXFAT_FILESYSTEM_STATISTICS_EX) * PhGetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+            buffer = PhReAllocate(buffer, bufferLength);
+            memset(buffer, 0, bufferLength);
+        }
+        break;
+    }
+
+    status = PhDeviceIoControlFile(
+        DosDeviceHandle,
+        FSCTL_FILESYSTEM_GET_STATISTICS_EX,
+        NULL,
+        0,
+        buffer,
+        bufferLength,
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *FileSystemType = buffer->FileSystemStatistics.FileSystemType;
         *FileSystemStatistics = buffer;
         return TRUE;
     }
@@ -1529,3 +1630,29 @@ NTSTATUS DiskDriveQueryPartitionInfo(
 //
 //    return TRUE;
 //}
+
+
+NTSTATUS DiskDriveEnableStatistics(
+    VOID
+    )
+{
+    static PH_STRINGREF keyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\Partmgr");
+    NTSTATUS status;
+    HANDLE keyHandle;
+
+    status = PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &keyName,
+        0
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        PhSetValueKeyZ(keyHandle, L"EnableCounterForIoctl", REG_DWORD, &(ULONG){ TRUE }, sizeof(ULONG));
+        NtClose(keyHandle);
+    }
+
+    return status;
+}

@@ -1,4 +1,5 @@
 #include "miniz.h"
+
 /**************************************************************************
  *
  * Copyright 2013-2014 RAD Game Tools and Valve Software
@@ -3061,14 +3062,14 @@ extern "C" {
 
 #if defined(_MSC_VER) || defined(__MINGW64__)
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+//#define WIN32_LEAN_AND_MEAN
+//#include <windows.h>
 
 static WCHAR* mz_utf8z_to_widechar(const char* str)
 {
   int reqChars = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
-  WCHAR* wStr = (WCHAR*)malloc(reqChars * sizeof(WCHAR));
-  MultiByteToWideChar(CP_UTF8, 0, str, -1, wStr, sizeof(WCHAR) * reqChars);
+  WCHAR* wStr = (WCHAR*)PhAllocateSafe(reqChars * sizeof(WCHAR));
+  MultiByteToWideChar(CP_UTF8, 0, str, -1, wStr, reqChars);
   return wStr;
 }
 
@@ -3078,8 +3079,8 @@ static FILE *mz_fopen(const char *pFilename, const char *pMode)
   WCHAR* wMode = mz_utf8z_to_widechar(pMode);
   FILE* pFile = NULL;
   errno_t err = _wfopen_s(&pFile, wFilename, wMode);
-  free(wFilename);
-  free(wMode);
+  PhFree(wFilename);
+  PhFree(wMode);
   return err ? NULL : pFile;
 }
 
@@ -3089,8 +3090,8 @@ static FILE *mz_freopen(const char *pPath, const char *pMode, FILE *pStream)
   WCHAR* wMode = mz_utf8z_to_widechar(pMode);
   FILE* pFile = NULL;
   errno_t err = _wfreopen_s(&pFile, wPath, wMode, pStream);
-  free(wPath);
-  free(wMode);
+  PhFree(wPath);
+  PhFree(wMode);
   return err ? NULL : pFile;
 }
 
@@ -3098,7 +3099,7 @@ static int mz_stat64(const char *path, struct __stat64 *buffer)
 {
   WCHAR* wPath = mz_utf8z_to_widechar(path);
   int res = _wstat64(wPath, buffer);
-  free(wPath);
+  PhFree(wPath);
   return res;
 }
 
@@ -3112,7 +3113,7 @@ static int mz_stat64(const char *path, struct __stat64 *buffer)
 #define MZ_FTELL64 _ftelli64
 #define MZ_FSEEK64 _fseeki64
 #define MZ_FILE_STAT_STRUCT _stat64
-#define MZ_FILE_STAT mz_stat64 
+#define MZ_FILE_STAT mz_stat64
 #define MZ_FFLUSH fflush
 #define MZ_FREOPEN mz_freopen
 #define MZ_DELETE_FILE remove
@@ -6802,7 +6803,7 @@ mz_bool mz_zip_writer_add_read_buf_callback(mz_zip_archive *pZip, const char *pA
 
         if (!mz_zip_writer_create_local_dir_header(pZip, local_dir_header,
                                                    (mz_uint16)archive_name_size, (mz_uint16)(extra_size + user_extra_data_len),
-                                                   (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : uncomp_size, 
+                                                   (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : uncomp_size,
                                                     (max_size >= MZ_UINT32_MAX) ? MZ_UINT32_MAX : comp_size,
                                                    uncomp_crc32, method, gen_flags, dos_time, dos_date))
             return mz_zip_set_error(pZip, MZ_ZIP_INTERNAL_ERROR);

@@ -190,10 +190,7 @@ PhGetProcessPeb(
     NTSTATUS status;
     PROCESS_BASIC_INFORMATION basicInfo;
 
-    status = PhGetProcessBasicInformation(
-        ProcessHandle,
-        &basicInfo
-        );
+    status = PhGetProcessBasicInformation(ProcessHandle, &basicInfo);
 
     if (NT_SUCCESS(status))
     {
@@ -229,6 +226,22 @@ PhGetProcessDebugObject(
         ProcessDebugObjectHandle,
         DebugObjectHandle,
         sizeof(HANDLE),
+        NULL
+        );
+}
+
+FORCEINLINE
+NTSTATUS
+PhGetProcessEnergyValues(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PPROCESS_EXTENDED_ENERGY_VALUES EnergyValues
+    )
+{
+    return NtQueryInformationProcess(
+        ProcessHandle,
+        ProcessEnergyValues,
+        EnergyValues,
+        sizeof(PROCESS_EXTENDED_ENERGY_VALUES),
         NULL
         );
 }
@@ -755,6 +768,32 @@ PhGetProcessPowerThrottlingState(
     return status;
 }
 
+FORCEINLINE
+NTSTATUS
+PhGetThreadPowerThrottlingState(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PPOWER_THROTTLING_THREAD_STATE PowerThrottlingState
+    )
+{
+    NTSTATUS status;
+    POWER_THROTTLING_THREAD_STATE powerThrottlingState = { .Version = POWER_THROTTLING_THREAD_CURRENT_VERSION };
+
+    status = NtQueryInformationThread(
+        ThreadHandle,
+        ThreadPowerThrottlingState,
+        &powerThrottlingState,
+        sizeof(powerThrottlingState),
+        NULL
+    );
+
+    if (NT_SUCCESS(status))
+    {
+        *PowerThrottlingState = powerThrottlingState;
+    }
+
+    return status;
+}
+
 /**
  * Gets basic information for a thread.
  *
@@ -808,16 +847,62 @@ PhGetThreadBasePriority(
 
 FORCEINLINE
 NTSTATUS
+PhGetThreadTeb(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PULONG_PTR TebBaseAddress
+    )
+{
+    NTSTATUS status;
+    THREAD_BASIC_INFORMATION basicInfo;
+
+    status = PhGetThreadBasicInformation(ThreadHandle, &basicInfo);
+
+    if (NT_SUCCESS(status))
+    {
+        if (!basicInfo.TebBaseAddress)
+            return STATUS_UNSUCCESSFUL;
+
+        *TebBaseAddress = (ULONG_PTR)basicInfo.TebBaseAddress;
+    }
+
+    return status;
+}
+
+FORCEINLINE
+NTSTATUS
+PhGetThreadTeb32(
+    _In_ HANDLE ThreadHandle,
+    _Out_ PULONG_PTR TebBaseAddress
+    )
+{
+    NTSTATUS status;
+    THREAD_BASIC_INFORMATION basicInfo;
+
+    status = PhGetThreadBasicInformation(ThreadHandle, &basicInfo);
+
+    if (NT_SUCCESS(status))
+    {
+        if (!basicInfo.TebBaseAddress)
+            return STATUS_UNSUCCESSFUL;
+
+        *TebBaseAddress = (ULONG_PTR)WOW64_GET_TEB32(basicInfo.TebBaseAddress);
+    }
+
+    return status;
+}
+
+FORCEINLINE
+NTSTATUS
 PhGetThreadStartAddress(
     _In_ HANDLE ThreadHandle,
-    _Out_ PVOID *StartAddress
+    _Out_ PULONG_PTR StartAddress
     )
 {
     return NtQueryInformationThread(
         ThreadHandle,
         ThreadQuerySetWin32StartAddress,
         StartAddress,
-        sizeof(PVOID),
+        sizeof(ULONG_PTR),
         NULL
         );
 }
@@ -1237,13 +1322,13 @@ PhGetTokenElevationType(
  * Gets whether a token is elevated.
  *
  * \param TokenHandle A handle to a token. The handle must have TOKEN_QUERY access.
- * \param Elevated A variable which receives a boolean indicating whether the token is elevated.
+ * \param TokenIsElevated A variable which receives a boolean indicating whether the token is elevated.
  */
 FORCEINLINE
 NTSTATUS
-PhGetTokenIsElevated(
+PhGetTokenElevation(
     _In_ HANDLE TokenHandle,
-    _Out_ PBOOLEAN Elevated
+    _Out_ PBOOLEAN TokenIsElevated
     )
 {
     NTSTATUS status;
@@ -1260,7 +1345,7 @@ PhGetTokenIsElevated(
 
     if (NT_SUCCESS(status))
     {
-        *Elevated = !!elevation.TokenIsElevated;
+        *TokenIsElevated = !!elevation.TokenIsElevated;
     }
 
     return status;
@@ -1807,6 +1892,31 @@ PhGetProcessIsCetEnabled(
 
 FORCEINLINE
 NTSTATUS
+NTAPI
+PhGetSystemHypervisorSharedPageInformation(
+    _Out_ PPVOID HypervisorSharedUserVa
+    )
+{
+    NTSTATUS status;
+    SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION HypervisorSharedPageInfo;
+
+    status = NtQuerySystemInformation(
+        SystemHypervisorSharedPageInformation,
+        &HypervisorSharedPageInfo,
+        sizeof(SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *HypervisorSharedUserVa = HypervisorSharedPageInfo.HypervisorSharedUserVa;
+    }
+
+    return status;
+}
+
+FORCEINLINE
+NTSTATUS
 PhGetSystemShadowStackInformation(
     _Out_ PSYSTEM_SHADOW_STACK_INFORMATION ShadowStackInformation
     )
@@ -1879,6 +1989,26 @@ PhGetSystemUptime(
     }
 
     return status;
+}
+
+/**
+ * Waits until the specified object is in the signaled state or the time-out interval elapses.
+ *
+ * \param Handle A handle to the object.
+ * \param Timeout The time-out interval.
+ * If a nonzero value is specified, the function waits until the object is signaled or the interval elapses.
+ * If Timeout is zero, the function does not enter a wait state if the object is not signaled; it always returns immediately.
+ * If Timeout is INFINITE, the function will return only when the object is signaled.
+ *
+ * \return Successful or errant status.
+ */
+FORCEINLINE
+NTSTATUS PhWaitForSingleObject(
+    _In_ HANDLE Handle,
+    _In_opt_ PLARGE_INTEGER Timeout
+    )
+{
+    return NtWaitForSingleObject(Handle, FALSE, Timeout);
 }
 
 #endif

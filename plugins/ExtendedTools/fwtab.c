@@ -5,7 +5,7 @@
  *
  * Authors:
  *
- *     dmex    2015-2023
+ *     dmex    2015-2024
  *
  */
 
@@ -38,7 +38,7 @@ PPH_STRING EtFwStatusText = NULL;
 PPH_LIST FwNodeList = NULL;
 
 BOOLEAN FwTabPageCallback(
-    _In_ struct _PH_MAIN_TAB_PAGE *Page,
+    _In_ PPH_MAIN_TAB_PAGE Page,
     _In_ PH_MAIN_TAB_PAGE_MESSAGE Message,
     _In_opt_ PVOID Parameter1,
     _In_opt_ PVOID Parameter2)
@@ -72,7 +72,7 @@ BOOLEAN FwTabPageCallback(
                 0,
                 3,
                 3,
-                PhMainWndHandle,
+                Parameter2,
                 NULL,
                 PluginInstance->DllBase,
                 &treelistCreateParams
@@ -101,7 +101,11 @@ BOOLEAN FwTabPageCallback(
                     EtFwEnabled = TRUE;
             }
 
-            if (!EtFwEnabled)
+            if (EtFwEnabled)
+            {
+                EtFwMonitorEnumEvents();
+            }
+            else
             {
                 if (EtFwStatus != ERROR_SUCCESS)
                 {
@@ -223,27 +227,20 @@ VOID EtInitializeFirewallTab(
     )
 {
     PH_MAIN_TAB_PAGE page;
-    PPH_PLUGIN toolStatusPlugin;
 
     memset(&page, 0, sizeof(PH_MAIN_TAB_PAGE));
     PhInitializeStringRef(&page.Name, L"Firewall");
     page.Callback = FwTabPageCallback;
-
     EtFwAddedTabPage = PhPluginCreateTabPage(&page);
 
-    if (toolStatusPlugin = PhFindPlugin(TOOLSTATUS_PLUGIN_NAME))
+    if (EtFwToolStatusInterface = PhGetPluginInterfaceZ(TOOLSTATUS_PLUGIN_NAME, TOOLSTATUS_INTERFACE_VERSION))
     {
-        EtFwToolStatusInterface = PhGetPluginInformation(toolStatusPlugin)->Interface;
+        PTOOLSTATUS_TAB_INFO tabInfo;
 
-        if (EtFwToolStatusInterface->Version <= TOOLSTATUS_INTERFACE_VERSION)
-        {
-            PTOOLSTATUS_TAB_INFO tabInfo;
-
-            tabInfo = EtFwToolStatusInterface->RegisterTabInfo(EtFwAddedTabPage->Index);
-            tabInfo->BannerText = L"Search Firewall";
-            tabInfo->ActivateContent = FwToolStatusActivateContent;
-            tabInfo->GetTreeNewHandle = FwToolStatusGetTreeNewHandle;
-        }
+        tabInfo = EtFwToolStatusInterface->RegisterTabInfo(EtFwAddedTabPage->Index);
+        tabInfo->BannerText = L"Search Firewall";
+        tabInfo->ActivateContent = FwToolStatusActivateContent;
+        tabInfo->GetTreeNewHandle = FwToolStatusGetTreeNewHandle;
     }
 }
 
@@ -281,6 +278,9 @@ VOID InitializeFwTreeList(
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTEADDRESSCLASS, FALSE, L"Remote address class", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTEADDRESSCLASS, 0);
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_LOCALADDRESSSSCOPE, FALSE, L"Local address scope", 80, PH_ALIGN_LEFT, FW_COLUMN_LOCALADDRESSSSCOPE, 0);
     PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTEADDRESSSCOPE, FALSE, L"Remote address scope", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTEADDRESSSCOPE, 0);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_ORIGINALNAME, FALSE, L"Original name", 100, PH_ALIGN_LEFT, FW_COLUMN_ORIGINALNAME, DT_PATH_ELLIPSIS);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_LOCALSERVICENAME, FALSE, L"Local port service", 80, PH_ALIGN_LEFT, FW_COLUMN_LOCALSERVICENAME, 0);
+    PhAddTreeNewColumn(FwTreeNewHandle, FW_COLUMN_REMOTESERVICENAME, FALSE, L"Remote port service", 80, PH_ALIGN_LEFT, FW_COLUMN_REMOTESERVICENAME, 0);
 
     TreeNew_SetRedraw(FwTreeNewHandle, TRUE);
     TreeNew_SetSort(FwTreeNewHandle, FW_COLUMN_TIMESTAMP, NoSortOrder);
@@ -401,7 +401,7 @@ VOID FwTickNodes(
         static ULONG64 lastTickCount = 0;
         ULONG64 tickCount = NtGetTickCount64();
 
-        if (tickCount - lastTickCount >= 120 * CLOCKS_PER_SEC)
+        if (tickCount - lastTickCount >= UInt32x32To64(240, CLOCKS_PER_SEC))
         {
             PPH_LIST newList;
             PPH_LIST oldList;
@@ -432,9 +432,69 @@ VOID FwTickNodes(
     TreeNew_NodesStructured(FwTreeNewHandle);
 }
 
+VOID FwUpdateNodeTimeStamp(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    SYSTEMTIME systemTime;
+
+    PhLargeIntegerToLocalSystemTime(&systemTime, &FwNode->TimeStamp);
+
+    PhMoveReference(&FwNode->TimeString, PhFormatDateTime(&systemTime));
+}
+
+VOID FwUpdateNodeUserSid(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (FwNode->UserSid)
+    {
+        PhMoveReference(&FwNode->UserName, EtFwGetSidFullNameCachedSlow(FwNode->UserSid));
+    }
+    else
+    {
+        PhClearReference(&FwNode->UserName);
+    }
+}
+
+VOID FwUpdateNodeLocalPortServiceName(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (!FwNode->LocalPortServiceResolved)
+    {
+        PH_STRINGREF string;
+
+        if (EtFwLookupPortServiceName(FwNode->LocalEndpoint.Port, &string))
+        {
+            FwNode->LocalPortServiceName.Buffer = string.Buffer;
+            FwNode->LocalPortServiceName.Length = string.Length;
+        }
+
+        FwNode->LocalPortServiceResolved = TRUE;
+    }
+}
+
+VOID FwUpdateNodeRemotePortServiceName(
+    _In_ PFW_EVENT_ITEM FwNode
+    )
+{
+    if (!FwNode->RemotePortServiceResolved)
+    {
+        PH_STRINGREF string;
+
+        if (EtFwLookupPortServiceName(FwNode->RemoteEndpoint.Port, &string))
+        {
+            FwNode->RemotePortServiceName.Buffer = string.Buffer;
+            FwNode->RemotePortServiceName.Length = string.Length;
+        }
+
+        FwNode->RemotePortServiceResolved = TRUE;
+    }
+}
+
 #define SORT_FUNCTION(Column) FwTreeNewCompare##Column
 #define BEGIN_SORT_FUNCTION(Column) static int __cdecl FwTreeNewCompare##Column( \
-    _In_ void* _context, \
     _In_ void const* _elem1, \
     _In_ void const* _elem2 \
     ) \
@@ -452,7 +512,7 @@ VOID FwTickNodes(
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringZ(PhGetStringOrDefault(node1->ProcessBaseString, L"System"), PhGetStringOrDefault(node2->ProcessBaseString, L"System"), TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessBaseString, node2->ProcessBaseString, FwTreeNewSortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
@@ -470,35 +530,44 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleName)
 {
-    sortResult = PhCompareStringWithNull(node1->RuleName, node2->RuleName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleName, node2->RuleName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RuleDescription)
 {
-    sortResult = PhCompareStringWithNull(node1->RuleDescription, node2->RuleDescription, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RuleDescription, node2->RuleDescription, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddress)
 {
-    SOCKADDR_IN6 localAddress1 = { 0 };
-    SOCKADDR_IN6 localAddress2 = { 0 };
+    SOCKADDR_IN6 localAddress1;
+    SOCKADDR_IN6 localAddress2;
 
-    if (node1->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    memset(&localAddress1, 0, sizeof(SOCKADDR_IN6)); // memset for zero padding (dmex)
+    memset(&localAddress2, 0, sizeof(SOCKADDR_IN6));
+
+    if (node1->LocalEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&localAddress1, &node1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        localAddress1.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&localAddress1.sin6_addr, &node1->LocalEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node1->LocalEndpoint.Address.InAddr, &localAddress1.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&localAddress1, &node1->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (node1->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    else if (node1->LocalEndpoint.Address.Type == PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&localAddress1, &node1->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
     }
 
-    if (node2->LocalEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    if (node2->LocalEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&localAddress2, &node2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        localAddress2.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&localAddress2.sin6_addr, &node2->LocalEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node2->LocalEndpoint.Address.InAddr, &localAddress2.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&localAddress2, &node2->LocalEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
-    else if (node2->LocalEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
+    else if (node2->LocalEndpoint.Address.Type == PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&localAddress2, &node2->LocalEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node2->ScopeId }, 0);
     }
@@ -515,27 +584,36 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalHostname)
 {
-    sortResult = PhCompareStringWithNull(node1->LocalHostnameString, node2->LocalHostnameString, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->LocalHostnameString, node2->LocalHostnameString, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddress)
 {
-    SOCKADDR_IN6 remoteAddress1 = { 0 };
-    SOCKADDR_IN6 remoteAddress2 = { 0 };
+    SOCKADDR_IN6 remoteAddress1;
+    SOCKADDR_IN6 remoteAddress2;
 
-    if (node1->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    memset(&remoteAddress1, 0, sizeof(SOCKADDR_IN6)); // memset for zero padding (dmex)
+    memset(&remoteAddress2, 0, sizeof(SOCKADDR_IN6));
+
+    if (node1->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&remoteAddress1, &node1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        remoteAddress1.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&remoteAddress1.sin6_addr, &node1->RemoteEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node1->RemoteEndpoint.Address.InAddr, &remoteAddress1.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&remoteAddress1, &node1->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
     else if (node1->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
         IN6ADDR_SETSOCKADDR(&remoteAddress1, &node1->RemoteEndpoint.Address.In6Addr, (SCOPE_ID){ .Value = node1->ScopeId }, 0);
     }
 
-    if (node2->RemoteEndpoint.Address.Type & PH_IPV4_NETWORK_TYPE)
+    if (node2->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
     {
-        IN6ADDR_SETV4MAPPED(&remoteAddress2, &node2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
+        remoteAddress2.sin6_family = AF_INET6;
+        IN6_SET_ADDR_V4COMPAT(&remoteAddress2.sin6_addr, &node2->RemoteEndpoint.Address.InAddr);
+        IN4_UNCANONICALIZE_SCOPE_ID(&node2->RemoteEndpoint.Address.InAddr, &remoteAddress2.sin6_scope_struct);
+        //IN6ADDR_SETV4MAPPED(&remoteAddress2, &node2->RemoteEndpoint.Address.InAddr, (SCOPE_ID)SCOPEID_UNSPECIFIED_INIT, 0);
     }
     else if (node2->RemoteEndpoint.Address.Type & PH_IPV6_NETWORK_TYPE)
     {
@@ -554,7 +632,7 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteHostname)
 {
-    sortResult = PhCompareStringWithNull(node1->RemoteHostnameString, node2->RemoteHostnameString, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteHostnameString, node2->RemoteHostnameString, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -566,19 +644,25 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Timestamp)
 {
+    FwUpdateNodeTimeStamp(node1);
+    FwUpdateNodeTimeStamp(node2);
+
     sortResult = uint64cmp(node1->Index, node2->Index);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Filename)
 {
-    sortResult = PhCompareStringWithNull(node1->ProcessFileName, node2->ProcessFileName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->ProcessFileName, node2->ProcessFileName, FwTreeNewSortOrder, FALSE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(User)
 {
-    sortResult = PhCompareStringWithNull(node1->UserName, node2->UserName, TRUE);
+    FwUpdateNodeUserSid(node1);
+    FwUpdateNodeUserSid(node2);
+
+    sortResult = PhCompareStringWithNullSortOrder(node1->UserName, node2->UserName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -590,43 +674,60 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Country)
 {
-    sortResult = PhCompareStringWithNull(node1->RemoteCountryName, node2->RemoteCountryName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(node1->RemoteCountryName, node2->RemoteCountryName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddressClass)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddressClass)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(LocalAddressScope)
 {
-
+    NOTHING;
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(RemoteAddressScope)
 {
+    NOTHING;
+}
+END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(LocalPortServiceName)
+{
+    FwUpdateNodeLocalPortServiceName(node1);
+    FwUpdateNodeLocalPortServiceName(node2);
+
+    sortResult = PhCompareStringRefWithNullSortOrder(&node1->LocalPortServiceName, &node2->LocalPortServiceName, FwTreeNewSortOrder, TRUE);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(RemotePortServiceName)
+{
+    FwUpdateNodeRemotePortServiceName(node1);
+    FwUpdateNodeRemotePortServiceName(node2);
+
+    sortResult = PhCompareStringRefWithNullSortOrder(&node1->RemotePortServiceName, &node2->RemotePortServiceName, FwTreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 int __cdecl EtFwNodeNoOrderSortFunction(
-    _In_ void* _context,
     _In_ void const* _elem1,
     _In_ void const* _elem2
     )
 {
     PFW_EVENT_ITEM node1 = *(PFW_EVENT_ITEM*)_elem1;
     PFW_EVENT_ITEM node2 = *(PFW_EVENT_ITEM*)_elem2;
-    int sortResult = 0;
+    int sortResult;
 
     sortResult = uint64cmp(node1->Index, node2->Index);
 
@@ -654,7 +755,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
                 if (!node)
                 {
-                    qsort_s(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), EtFwNodeNoOrderSortFunction, NULL);
+                    qsort(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), EtFwNodeNoOrderSortFunction);
 
                     getChildren->Children = (PPH_TREENEW_NODE*)FwNodeList->Items;
                     getChildren->NumberOfChildren = FwNodeList->Count;
@@ -687,8 +788,13 @@ BOOLEAN NTAPI FwTreeNewCallback(
                         SORT_FUNCTION(RemoteAddressClass),
                         SORT_FUNCTION(LocalAddressScope),
                         SORT_FUNCTION(RemoteAddressScope),
+                        SORT_FUNCTION(Filename),
+                        SORT_FUNCTION(LocalPortServiceName),
+                        SORT_FUNCTION(RemotePortServiceName),
                     };
-                    int (__cdecl* sortFunction)(void*, void const*, void const*);
+                    int (__cdecl* sortFunction)(void const*, void const*);
+
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == FW_COLUMN_MAXIMUM, "SortFunctions must equal maximum.");
 
                     if (FwTreeNewSortColumn < FW_COLUMN_MAXIMUM)
                         sortFunction = sortFunctions[FwTreeNewSortColumn];
@@ -697,7 +803,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
 
                     if (sortFunction)
                     {
-                        qsort_s(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), sortFunction, NULL);
+                        qsort(FwNodeList->Items, FwNodeList->Count, sizeof(PVOID), sortFunction);
                     }
 
                     getChildren->Children = (PPH_TREENEW_NODE*)FwNodeList->Items;
@@ -722,10 +828,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             {
             case FW_COLUMN_NAME:
                 {
-                    if (PhIsNullOrEmptyString(node->ProcessBaseString))
-                        PhInitializeStringRef(&getCellText->Text, L"System");
-                    else
-                        getCellText->Text = PhGetStringRef(node->ProcessBaseString);
+                    getCellText->Text = PhGetStringRef(node->ProcessBaseString);
                 }
                 break;
             case FW_COLUMN_ACTION:
@@ -765,17 +868,37 @@ BOOLEAN NTAPI FwTreeNewCallback(
                 {
                     if (node->Loopback)
                     {
-                        PhInitializeStringRef(&getCellText->Text, L"Loopback");
+                        switch (node->Direction)
+                        {
+                        case FW_EVENT_DIRECTION_INBOUND:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [In]");
+                            break;
+                        case FW_EVENT_DIRECTION_OUTBOUND:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Out]");
+                            break;
+                        case FW_EVENT_DIRECTION_FORWARD:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Fwd]");
+                            break;
+                        case FW_EVENT_DIRECTION_BIDIRECTIONAL:
+                            PhInitializeStringRef(&getCellText->Text, L"Loopback [Bi]");
+                            break;
+                        }
                     }
                     else
                     {
                         switch (node->Direction)
                         {
-                        case FWP_DIRECTION_INBOUND:
+                        case FW_EVENT_DIRECTION_INBOUND:
                             PhInitializeStringRef(&getCellText->Text, L"In");
                             break;
-                        case FWP_DIRECTION_OUTBOUND:
+                        case FW_EVENT_DIRECTION_OUTBOUND:
                             PhInitializeStringRef(&getCellText->Text, L"Out");
+                            break;
+                        case FW_EVENT_DIRECTION_FORWARD:
+                            PhInitializeStringRef(&getCellText->Text, L"Fwd");
+                            break;
+                        case FW_EVENT_DIRECTION_BIDIRECTIONAL:
+                            PhInitializeStringRef(&getCellText->Text, L"Bi");
                             break;
                         }
                     }
@@ -804,6 +927,11 @@ BOOLEAN NTAPI FwTreeNewCallback(
                                 getCellText->Text.Buffer = node->LocalAddressString;
                                 getCellText->Text.Length = (node->LocalAddressStringLength = (ipv4AddressStringLength - 1)) * sizeof(WCHAR);
                             }
+                            else
+                            {
+                                PhInitializeEmptyStringRef(&getCellText->Text);
+                                node->LocalAddressStringLength = 0;
+                            }
                         }
                         break;
                     case PH_IPV6_NETWORK_TYPE:
@@ -814,6 +942,11 @@ BOOLEAN NTAPI FwTreeNewCallback(
                             {
                                 getCellText->Text.Buffer = node->LocalAddressString;
                                 getCellText->Text.Length = (node->LocalAddressStringLength = (ipv6AddressStringLength - 1)) * sizeof(WCHAR);
+                            }
+                            else
+                            {
+                                PhInitializeEmptyStringRef(&getCellText->Text);
+                                node->LocalAddressStringLength = 0;
                             }
                         }
                         break;
@@ -832,7 +965,12 @@ BOOLEAN NTAPI FwTreeNewCallback(
                         if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), node->LocalPortString, sizeof(node->LocalPortString), &returnLength))
                         {
                             getCellText->Text.Buffer = node->LocalPortString;
-                            getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
+                            getCellText->Text.Length = (node->LocalPortStringLength = (ULONG)(returnLength - sizeof(UNICODE_NULL)));
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                            node->LocalPortStringLength = 0;
                         }
                     }
                 }
@@ -866,6 +1004,11 @@ BOOLEAN NTAPI FwTreeNewCallback(
                                 getCellText->Text.Buffer = node->RemoteAddressString;
                                 getCellText->Text.Length = (node->RemoteAddressStringLength = (ipv4AddressStringLength - 1)) * sizeof(WCHAR);
                             }
+                            else
+                            {
+                                PhInitializeEmptyStringRef(&getCellText->Text);
+                                node->RemoteAddressStringLength = 0;
+                            }
                         }
                         break;
                     case PH_IPV6_NETWORK_TYPE:
@@ -876,6 +1019,11 @@ BOOLEAN NTAPI FwTreeNewCallback(
                             {
                                 getCellText->Text.Buffer = node->RemoteAddressString;
                                 getCellText->Text.Length = (node->RemoteAddressStringLength = (ipv6AddressStringLength - 1)) * sizeof(WCHAR);
+                            }
+                            else
+                            {
+                                PhInitializeEmptyStringRef(&getCellText->Text);
+                                node->RemoteAddressStringLength = 0;
                             }
                         }
                         break;
@@ -894,7 +1042,12 @@ BOOLEAN NTAPI FwTreeNewCallback(
                         if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), node->RemotePortString, sizeof(node->RemotePortString), &returnLength))
                         {
                             getCellText->Text.Buffer = node->RemotePortString;
-                            getCellText->Text.Length = returnLength - sizeof(UNICODE_NULL);
+                            getCellText->Text.Length = (node->RemotePortStringLength = (ULONG)(returnLength - sizeof(UNICODE_NULL)));
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                            node->RemotePortStringLength = 0;
                         }
                     }
                 }
@@ -1018,11 +1171,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                 break;
            case FW_COLUMN_TIMESTAMP:
                {
-                   SYSTEMTIME systemTime;
-
-                   PhLargeIntegerToLocalSystemTime(&systemTime, &node->TimeStamp);
-                   PhMoveReference(&node->TimeString, PhFormatDateTime(&systemTime));
-
+                   FwUpdateNodeTimeStamp(node);
                    getCellText->Text = PhGetStringRef(node->TimeString);
                }
                break;
@@ -1033,11 +1182,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
                break;
            case FW_COLUMN_USER:
                {
-                   if (node->UserSid)
-                   {
-                       PhMoveReference(&node->UserName, EtFwGetSidFullNameCachedSlow(node->UserSid));
-                   }
-
+                   FwUpdateNodeUserSid(node);
                    getCellText->Text = PhGetStringRef(node->UserName);
                }
                break;
@@ -1113,6 +1258,23 @@ BOOLEAN NTAPI FwTreeNewCallback(
                    {
                        PhInitializeEmptyStringRef(&getCellText->Text);
                    }
+               }
+               break;
+           case FW_COLUMN_ORIGINALNAME:
+               {
+                   getCellText->Text = PhGetStringRef(node->ProcessFileName);
+               }
+               break;
+           case FW_COLUMN_LOCALSERVICENAME:
+               {
+                   FwUpdateNodeLocalPortServiceName(node);
+                   getCellText->Text = node->LocalPortServiceName;
+               }
+               break;
+           case FW_COLUMN_REMOTESERVICENAME:
+               {
+                   FwUpdateNodeRemotePortServiceName(node);
+                   getCellText->Text = node->RemotePortServiceName;
                }
                break;
             default:
@@ -1265,17 +1427,7 @@ BOOLEAN NTAPI FwTreeNewCallback(
             // Padding
             rect.left += FwTreeRightMarginPadding;
 
-            if (PhIsNullOrEmptyString(node->ProcessBaseString))
-            {
-                DrawText(
-                    hdc,
-                    L"System",
-                    (UINT)sizeof(L"System") / sizeof(WCHAR),
-                    &rect,
-                    DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE
-                    );
-            }
-            else
+            if (!PhIsNullOrEmptyString(node->ProcessBaseString))
             {
                 DrawText(
                     hdc,
@@ -1395,6 +1547,7 @@ VOID EtFwWriteFwList(
 
     PhDereferenceObject(lines);
 }
+
 typedef enum _FW_ITEM_COMMAND_ID
 {
     FW_ITEM_COMMAND_ID_PING = 1,
@@ -1705,7 +1858,7 @@ BOOLEAN NTAPI FwSearchFilterCallback(
     PFW_EVENT_ITEM fwNode = (PFW_EVENT_ITEM)Node;
     PTOOLSTATUS_WORD_MATCH wordMatch = EtFwToolStatusInterface->WordMatch;
 
-    if (PhIsNullOrEmptyString(EtFwToolStatusInterface->GetSearchboxText()))
+    if (!EtFwToolStatusInterface->GetSearchMatchHandle())
         return TRUE;
 
     if (fwNode->ProcessBaseString)
@@ -1718,6 +1871,104 @@ BOOLEAN NTAPI FwSearchFilterCallback(
         static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"System");
 
         if (wordMatch(&stringSr))
+            return TRUE;
+    }
+
+    if (fwNode->ProcessFileName)
+    {
+        if (wordMatch(&fwNode->ProcessFileName->sr))
+            return TRUE;
+    }
+
+    if (fwNode->ProcessFileName)
+    {
+        if (wordMatch(&fwNode->ProcessFileName->sr))
+            return TRUE;
+    }
+
+    if (fwNode->LocalAddressStringLength)
+    {
+        PH_STRINGREF localAddressSr;
+
+        localAddressSr.Buffer = fwNode->LocalAddressString;
+        localAddressSr.Length = fwNode->LocalAddressStringLength * sizeof(WCHAR);
+
+        if (wordMatch(&localAddressSr))
+            return TRUE;
+    }
+
+    if (fwNode->LocalHostnameString)
+    {
+        if (wordMatch(&fwNode->LocalHostnameString->sr))
+            return TRUE;
+    }
+
+    if (fwNode->LocalPortStringLength)
+    {
+        PH_STRINGREF localPortSr;
+
+        localPortSr.Buffer = fwNode->LocalPortString;
+        localPortSr.Length = fwNode->LocalPortStringLength * sizeof(WCHAR);
+
+        if (wordMatch(&localPortSr))
+            return TRUE;
+    }
+
+    if (fwNode->RemoteAddressStringLength)
+    {
+        PH_STRINGREF remoteAddressSr;
+
+        remoteAddressSr.Buffer = fwNode->RemoteAddressString;
+        remoteAddressSr.Length = fwNode->RemoteAddressStringLength * sizeof(WCHAR);
+
+        if (wordMatch(&remoteAddressSr))
+            return TRUE;
+    }
+
+    if (fwNode->RemoteHostnameString)
+    {
+        if (wordMatch(&fwNode->RemoteHostnameString->sr))
+            return TRUE;
+    }
+
+    if (fwNode->RemotePortStringLength)
+    {
+        PH_STRINGREF remotePortSr;
+
+        remotePortSr.Buffer = fwNode->RemotePortString;
+        remotePortSr.Length = fwNode->RemotePortStringLength * sizeof(WCHAR);
+
+        if (wordMatch(&remotePortSr))
+            return TRUE;
+    }
+
+    if (fwNode->RuleName)
+    {
+        if (wordMatch(&fwNode->RuleName->sr))
+            return TRUE;
+    }
+
+    if (fwNode->RuleDescription)
+    {
+        if (wordMatch(&fwNode->RuleDescription->sr))
+            return TRUE;
+    }
+
+    if (fwNode->ProcessFileNameWin32)
+    {
+        if (wordMatch(&fwNode->ProcessFileNameWin32->sr))
+            return TRUE;
+    }
+
+    if (fwNode->UserName)
+    {
+        if (wordMatch(&fwNode->UserName->sr))
+            return TRUE;
+    }
+
+    if (fwNode->RemoteCountryName)
+    {
+        if (wordMatch(&fwNode->RemoteCountryName->sr))
             return TRUE;
     }
 
@@ -1791,62 +2042,257 @@ BOOLEAN NTAPI FwSearchFilterCallback(
         break;
     }
 
-    if (fwNode->ProcessFileName)
+    switch (fwNode->IpProtocol)
     {
-        if (wordMatch(&fwNode->ProcessFileName->sr))
-            return TRUE;
-    }
+    case IPPROTO_HOPOPTS:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"HOPOPTS");
 
-    if (fwNode->LocalAddressString[0] && fwNode->LocalAddressStringLength)
-    {
-        PH_STRINGREF localAddressSr;
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ICMP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ICMP");
 
-        localAddressSr.Buffer = fwNode->LocalAddressString;
-        localAddressSr.Length = fwNode->LocalAddressStringLength * sizeof(WCHAR);
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_IGMP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IGMP");
 
-        if (wordMatch(&localAddressSr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_GGP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"GGP");
 
-    if (fwNode->LocalHostnameString)
-    {
-        if (wordMatch(&fwNode->LocalHostnameString->sr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_IPV4:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IPv4");
 
-    if (fwNode->RemoteAddressString[0] && fwNode->RemoteAddressStringLength)
-    {
-        PH_STRINGREF remoteAddressSr;
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ST:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ST");
 
-        remoteAddressSr.Buffer = fwNode->RemoteAddressString;
-        remoteAddressSr.Length = fwNode->RemoteAddressStringLength * sizeof(WCHAR);
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_TCP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"TCP");
 
-        if (wordMatch(&remoteAddressSr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_CBT:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"CBT");
 
-    if (fwNode->RemoteHostnameString)
-    {
-        if (wordMatch(&fwNode->RemoteHostnameString->sr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_EGP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"EGP");
 
-    if (fwNode->RuleName)
-    {
-        if (wordMatch(&fwNode->RuleName->sr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_IGP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IGP");
 
-    if (fwNode->RuleDescription)
-    {
-        if (wordMatch(&fwNode->RuleDescription->sr))
-            return TRUE;
-    }
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_PUP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"PUP");
 
-    if (fwNode->RemoteCountryName)
-    {
-        if (wordMatch(&fwNode->RemoteCountryName->sr))
-            return TRUE;
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_UDP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"UDP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_IDP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IDP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_RDP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"RDP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_IPV6:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IPv6");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ROUTING:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ROUTING");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_FRAGMENT:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"FRAGMENT");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ESP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ESP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_AH:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"AH");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ICMPV6:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ICMPv6");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_DSTOPTS:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"DSTOPTS");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ND:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ND");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_ICLFXBM:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"ICLFXBM");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_PIM:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"PIM");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_PGM:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"PGM");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_L2TP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"L2TP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_SCTP:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"SCTP");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_RESERVED_IPSEC:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IPSEC");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_RESERVED_IPSECOFFLOAD:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"IPSECOFFLOAD");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_RESERVED_WNV:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"WNV");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
+    case IPPROTO_RAW:
+    case IPPROTO_RESERVED_RAW:
+        {
+            static PH_STRINGREF stringSr = PH_STRINGREF_INIT(L"RAW");
+
+            if (wordMatch(&stringSr))
+                return TRUE;
+        }
+        break;
     }
 
     return FALSE;

@@ -32,11 +32,7 @@
 #include <phapp.h>
 #include <apiimport.h>
 #include <hidnproc.h>
-
-#include <evntcons.h>
-
 #include <kphuser.h>
-
 #include <mainwnd.h>
 #include <procprv.h>
 #include <settings.h>
@@ -349,7 +345,7 @@ INT_PTR CALLBACK PhpHiddenProcessesDlgProc(
                             0
                             )))
                         {
-                            PhWriteStringAsUtf8FileStream(fileStream, &PhUnicodeByteOrderMark);
+                            PhWriteStringAsUtf8FileStream(fileStream, (PPH_STRINGREF)&PhUnicodeByteOrderMark);
                             PhWritePhTextHeader(fileStream);
                             PhWriteStringAsUtf8FileStream2(fileStream, L"Method: ");
                             PhWriteStringAsUtf8FileStream2(fileStream,
@@ -985,90 +981,91 @@ NTSTATUS PhpEnumHiddenProcessesCsrHandles(
     return status;
 }
 
+typedef struct _PH_ENUM_NEXT_PROCESS_CONTEXT
+{
+    PPH_ENUM_HIDDEN_PROCESSES_CALLBACK Callback;
+    PVOID Context;
+} PH_ENUM_NEXT_PROCESS_CONTEXT, *PPH_ENUM_NEXT_PROCESS_CONTEXT;
+
+NTSTATUS NTAPI PhpEnumNextProcessHandles(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID Context
+    )
+{
+    PPH_ENUM_NEXT_PROCESS_CONTEXT context = Context;
+    PROCESS_EXTENDED_BASIC_INFORMATION basicInfo;
+    NTSTATUS status;
+    PVOID processes = NULL;
+
+    status = PhGetProcessExtendedBasicInformation(ProcessHandle, &basicInfo);
+
+    if (NT_SUCCESS(status))
+    {
+        status = PhEnumProcesses(&processes);
+
+        if (NT_SUCCESS(status))
+        {
+            if (!PhFindProcessInformation(processes, basicInfo.BasicInfo.UniqueProcessId))
+            {
+                PH_HIDDEN_PROCESS_ENTRY entry;
+                PPH_STRING fileName;
+
+                entry.ProcessId = basicInfo.BasicInfo.UniqueProcessId;
+
+                if (NT_SUCCESS(PhGetProcessImageFileName(ProcessHandle, &fileName)))
+                {
+                    entry.FileName = fileName;
+                    entry.FileNameWin32 = PhGetFileName(fileName);
+                    entry.Type = HiddenProcess;
+
+                    if (basicInfo.IsProcessDeleting)
+                        entry.Type = TerminatedProcess;
+
+                    if (!context->Callback(&entry, Context))
+                        goto CleanupExit;
+
+                    PhDereferenceObject(entry.FileNameWin32);
+                    PhDereferenceObject(entry.FileName);
+                }
+                else
+                {
+                    entry.FileName = NULL;
+                    entry.FileNameWin32 = NULL;
+                    entry.Type = UnknownProcess;
+
+                    if (!context->Callback(&entry, Context))
+                        goto CleanupExit;
+                }
+            }
+        }
+    }
+
+CleanupExit:
+    if (processes)
+    {
+        PhFree(processes);
+    }
+
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS PhpEnumHiddenProcessHandles(
     _In_ PPH_ENUM_HIDDEN_PROCESSES_CALLBACK Callback,
     _In_opt_ PVOID Context
     )
 {
     NTSTATUS status;
-    HANDLE processHandle;
+    PH_ENUM_NEXT_PROCESS_CONTEXT context;
 
-    if (!NT_SUCCESS(status = NtGetNextProcess(
+    context.Callback = Callback;
+    context.Context = Context;
+
+    status = PhEnumNextProcess(
         NULL,
         PROCESS_QUERY_LIMITED_INFORMATION,
-        0,
-        0,
-        &processHandle
-        )))
-        return status;
-
-    while (TRUE)
-    {
-        PVOID processes;
-        HANDLE enumProcessHandle;
-        PROCESS_EXTENDED_BASIC_INFORMATION basicInfo;
-
-        if (NT_SUCCESS(PhGetProcessExtendedBasicInformation(processHandle, &basicInfo)))
-        {
-            if (NT_SUCCESS(PhEnumProcesses(&processes)))
-            {
-                if (!PhFindProcessInformation(processes, basicInfo.BasicInfo.UniqueProcessId))
-                {
-                    PH_HIDDEN_PROCESS_ENTRY entry;
-                    PPH_STRING fileName;
-
-                    entry.ProcessId = basicInfo.BasicInfo.UniqueProcessId;
-
-                    if (NT_SUCCESS(PhGetProcessImageFileName(processHandle, &fileName)))
-                    {
-                        entry.FileName = fileName;
-                        entry.FileNameWin32 = PhGetFileName(fileName);
-                        entry.Type = HiddenProcess;
-
-                        if (basicInfo.IsProcessDeleting)
-                            entry.Type = TerminatedProcess;
-
-                        if (!Callback(&entry, Context))
-                            break;
-
-                        PhDereferenceObject(entry.FileNameWin32);
-                        PhDereferenceObject(entry.FileName);
-                    }
-                    else
-                    {
-                        entry.FileName = NULL;
-                        entry.FileNameWin32 = NULL;
-                        entry.Type = UnknownProcess;
-
-                        if (!Callback(&entry, Context))
-                            break;
-                    }
-                }
-
-                PhFree(processes);
-            }
-        }
-
-        if (NT_SUCCESS(status = NtGetNextProcess(
-            processHandle,
-            PROCESS_QUERY_LIMITED_INFORMATION,
-            0,
-            0,
-            &enumProcessHandle
-            )))
-        {
-            NtClose(processHandle);
-            processHandle = enumProcessHandle;
-        }
-        else
-        {
-            NtClose(processHandle);
-            break;
-        }
-    }
-
-    if (status == STATUS_NO_MORE_ENTRIES)
-        status = STATUS_SUCCESS; // HACK
+        PhpEnumNextProcessHandles,
+        &context
+        );
 
     return status;
 }
@@ -1084,24 +1081,21 @@ NTSTATUS PhpEnumHiddenSubKeyHandles(
     UNICODE_STRING subkeyName;
     OBJECT_ATTRIBUTES objectAttributes;
 
-    if (!NtQueryOpenSubKeysEx_Import())
-        return STATUS_UNSUCCESSFUL;
-
     bufferSize = 0x200;
     buffer = PhAllocate(bufferSize);
 
+    RtlInitUnicodeString(&subkeyName, L"\\REGISTRY");
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &subkeyName,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL
+        );
+
     while (TRUE)
     {
-        RtlInitUnicodeString(&subkeyName, L"\\REGISTRY");
-        InitializeObjectAttributes(
-            &objectAttributes,
-            &subkeyName,
-            OBJ_CASE_INSENSITIVE,
-            NULL,
-            NULL
-            );
-
-        status = NtQueryOpenSubKeysEx_Import()(
+        status = NtQueryOpenSubKeysEx(
             &objectAttributes,
             bufferSize,
             buffer,
@@ -1216,13 +1210,13 @@ NTSTATUS PhpEnumHiddenSubKeyHandles(
 }
 
 #define PH_FIRST_ETW_GUID(TraceGuid) \
-    (((PTRACE_GUID_INFO)(TraceGuid))->InstanceCount ? \
-    ((PTRACE_PROVIDER_INSTANCE_INFO)PTR_ADD_OFFSET(TraceGuid, \
-    sizeof(TRACE_GUID_INFO))) : NULL)
+    (((PETW_TRACE_GUID_INFO)(TraceGuid))->InstanceCount ? \
+    ((PETW_TRACE_PROVIDER_INSTANCE_INFO)PTR_ADD_OFFSET(TraceGuid, \
+    sizeof(ETW_TRACE_GUID_INFO))) : NULL)
 #define PH_NEXT_ETW_GUID(TraceGuid) \
-    (((PTRACE_PROVIDER_INSTANCE_INFO)(TraceGuid))->NextOffset ? \
-    (PTRACE_PROVIDER_INSTANCE_INFO)PTR_ADD_OFFSET((TraceGuid), \
-    ((PTRACE_PROVIDER_INSTANCE_INFO)(TraceGuid))->NextOffset) : NULL)
+    (((PETW_TRACE_PROVIDER_INSTANCE_INFO)(TraceGuid))->NextOffset ? \
+    (PETW_TRACE_PROVIDER_INSTANCE_INFO)PTR_ADD_OFFSET((TraceGuid), \
+    ((PETW_TRACE_PROVIDER_INSTANCE_INFO)(TraceGuid))->NextOffset) : NULL)
 
 NTSTATUS PhpEnumEtwGuidHandles(
     _In_ PPH_ENUM_HIDDEN_PROCESSES_CALLBACK Callback,
@@ -1234,7 +1228,7 @@ NTSTATUS PhpEnumEtwGuidHandles(
     ULONG traceGuidListLength = 0;
 
     status = PhTraceControl(
-        TraceControlEnumTraceGuidList,
+        EtwEnumTraceGuidList,
         NULL,
         0,
         &traceGuidList,
@@ -1246,10 +1240,10 @@ NTSTATUS PhpEnumEtwGuidHandles(
         for (ULONG i = 0; i < traceGuidListLength / sizeof(GUID); i++)
         {
             GUID providerGuid = traceGuidList[i];
-            PTRACE_GUID_INFO traceGuidInfo;
+            PETW_TRACE_GUID_INFO traceGuidInfo;
 
             status = PhTraceControl(
-                TraceControlGetTraceGuidInfo,
+                EtwGetTraceGuidInfo,
                 &providerGuid,
                 sizeof(GUID),
                 &traceGuidInfo,
@@ -1258,7 +1252,7 @@ NTSTATUS PhpEnumEtwGuidHandles(
 
             if (NT_SUCCESS(status))
             {
-                PTRACE_PROVIDER_INSTANCE_INFO instance;
+                PETW_TRACE_PROVIDER_INSTANCE_INFO instance;
                 HANDLE processHandle;
                 PVOID processes;
 

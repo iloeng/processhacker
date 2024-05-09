@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2015
- *     dmex    2017-2023
+ *     dmex    2017-2024
  *
  */
 
@@ -77,6 +77,8 @@ typedef enum _PH_GENERAL_CALLBACK
     GeneralCallbackProcessStatsNotifyEvent,
     GeneralCallbackSettingsUpdated,
 
+    GeneralCallbackDeviceNotificationEvent, // [device provider thread]
+
     GeneralCallbackMaximum
 } PH_GENERAL_CALLBACK, *PPH_GENERAL_CALLBACK;
 
@@ -125,6 +127,7 @@ typedef struct _PH_PLUGIN_NOTIFY_EVENT
     // Parameter is:
     // PPH_PROCESS_ITEM for Type = PH_NOTIFY_PROCESS_*
     // PPH_SERVICE_ITEM for Type = PH_NOTIFY_SERVICE_*
+    // PPH_DEVICE_ITEM for type = PH_NOTIFY_DEVICE_*
 
     ULONG Type;
     BOOLEAN Handled;
@@ -458,15 +461,13 @@ typedef struct _PH_PLUGIN_TREENEW_MESSAGE
     PVOID Context;
 } PH_PLUGIN_TREENEW_MESSAGE, *PPH_PLUGIN_TREENEW_MESSAGE;
 
-_Function_class_(PH_PLUGIN_TREENEW_SORT_FUNCTION)
-typedef LONG (NTAPI PH_PLUGIN_TREENEW_SORT_FUNCTION)(
+typedef LONG (NTAPI *PPH_PLUGIN_TREENEW_SORT_FUNCTION)(
     _In_ PVOID Node1,
     _In_ PVOID Node2,
     _In_ ULONG SubId,
     _In_ PH_SORT_ORDER SortOrder,
     _In_ PVOID Context
     );
-typedef PH_PLUGIN_TREENEW_SORT_FUNCTION *PPH_PLUGIN_TREENEW_SORT_FUNCTION;
 
 _Function_class_(PHSVC_SERVER_PROBE_BUFFER)
 typedef NTSTATUS (NTAPI PHSVC_SERVER_PROBE_BUFFER)(
@@ -508,20 +509,15 @@ typedef struct _PH_PLUGIN_PHSVC_REQUEST
     PPHSVC_SERVER_CAPTURE_STRING CaptureString;
 } PH_PLUGIN_PHSVC_REQUEST, *PPH_PLUGIN_PHSVC_REQUEST;
 
-_Function_class_(PHSVC_CLIENT_FREE_HEAP)
-typedef VOID (NTAPI PHSVC_CLIENT_FREE_HEAP)(
+typedef VOID (NTAPI *PPHSVC_CLIENT_FREE_HEAP)(
     _In_ PVOID Memory
     );
 
-_Function_class_(PHSVC_CLIENT_CREATE_STRING)
-typedef PVOID (NTAPI PHSVC_CLIENT_CREATE_STRING)(
+typedef PVOID (NTAPI *PPHSVC_CLIENT_CREATE_STRING)(
     _In_opt_ PVOID String,
     _In_ SIZE_T Length,
     _Out_ PPH_RELATIVE_STRINGREF StringRef
     );
-
-typedef PHSVC_CLIENT_FREE_HEAP *PPHSVC_CLIENT_FREE_HEAP;
-typedef PHSVC_CLIENT_CREATE_STRING *PPHSVC_CLIENT_CREATE_STRING;
 
 typedef struct _PH_PLUGIN_PHSVC_CLIENT
 {
@@ -583,9 +579,53 @@ PhRegisterPlugin(
 PHAPPAPI
 PPH_PLUGIN
 NTAPI
+PhFindPlugin2(
+    _In_ PPH_STRINGREF Name
+    );
+
+/**
+ * Locates a plugin instance structure.
+ *
+ * \param Name The name of the plugin.
+ *
+ * \return A plugin instance structure, or NULL if the plugin was not found.
+ */
+FORCEINLINE
+PPH_PLUGIN
+NTAPI
 PhFindPlugin(
     _In_ PWSTR Name
+    )
+{
+    PH_STRINGREF name;
+
+    PhInitializeStringRef(&name, Name);
+
+    return PhFindPlugin2(&name);
+}
+
+PHAPPAPI
+PVOID
+NTAPI
+PhGetPluginInterface(
+    _In_ PPH_STRINGREF Name,
+    _In_opt_ ULONG Version
     );
+
+FORCEINLINE
+PVOID
+NTAPI
+PhGetPluginInterfaceZ(
+    _In_ PWSTR Name,
+    _In_opt_ ULONG Version
+    )
+{
+    PH_STRINGREF name;
+
+    PhInitializeStringRef(&name, Name);
+
+    return PhGetPluginInterface(&name, Version);
+}
 
 PHAPPAPI
 PPH_PLUGIN_INFORMATION

@@ -17,7 +17,9 @@
 extern "C" {
 #endif
 
+PHLIBAPI
 BOOLEAN
+NTAPI
 PhBaseInitialization(
     VOID
     );
@@ -25,7 +27,6 @@ PhBaseInitialization(
 // Threads
 
 #ifdef DEBUG
-struct _PH_AUTO_POOL;
 typedef struct _PH_AUTO_POOL *PPH_AUTO_POOL;
 
 typedef struct _PHP_BASE_THREAD_DBG
@@ -85,7 +86,22 @@ PhCreateThread2(
     _In_opt_ PVOID Parameter
     );
 
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhQueueUserWorkItem(
+    _In_ PUSER_THREAD_START_ROUTINE StartRoutine,
+    _In_opt_ PVOID Argument
+    );
+
 // Misc. system
+
+PHLIBAPI
+VOID
+NTAPI
+PhQueryInterruptTime(
+    _Out_ PULARGE_INTEGER InterruptTime
+    );
 
 PHLIBAPI
 VOID
@@ -116,9 +132,6 @@ PhLocalTimeToSystemTime(
     _In_ PLARGE_INTEGER LocalTime,
     _Out_ PLARGE_INTEGER SystemTime
     );
-
-#define SecondsToStartOf1980 11960006400
-#define SecondsToStartOf1970 11644473600
 
 PHLIBAPI
 BOOLEAN
@@ -231,6 +244,26 @@ PhFreePage(
     _In_ _Post_invalid_ PVOID Memory
     );
 
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhAllocateVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PVOID* BaseAddress,
+    _In_ SIZE_T RegionSize,
+    _In_ ULONG AllocationType,
+    _In_ ULONG Protection
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhFreeVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _In_ ULONG FreeType
+    );
+
 FORCEINLINE
 PVOID
 PhAllocateCopy(
@@ -275,6 +308,47 @@ PhAllocateZeroSafe(
     }
 
     return NULL;
+}
+
+// Singly linked list
+
+// rev from RtlInitializeSListHead (dmex)
+FORCEINLINE
+VOID
+NTAPI
+PhInitializeSListHead(
+    _Out_ PSLIST_HEADER ListHead
+    )
+{
+#if (PHNT_NATIVE_SLIST)
+    RtlInitializeSListHead(ListHead);
+#else
+    if (IS_ALIGNED(ListHead, MEMORY_ALLOCATION_ALIGNMENT))
+        memset(ListHead, 0, sizeof(SLIST_HEADER));
+    else
+        PhRaiseStatus(STATUS_DATATYPE_MISALIGNMENT);
+#endif
+}
+
+// rev from RtlQueryDepthSList (dmex)
+FORCEINLINE
+USHORT
+NTAPI
+PhQueryDepthSList(
+    _In_ PSLIST_HEADER ListHead
+    )
+{
+#if (PHNT_NATIVE_SLIST)
+    return RtlQueryDepthSList(ListHead);
+#else
+#ifdef _M_X64
+    return (USHORT)ListHead->HeaderX64.Depth;
+#elif _M_ARM64
+    return (USHORT)ListHead->HeaderArm64.Depth;
+#else
+    return ListHead->Depth;
+#endif
+#endif
 }
 
 // Event
@@ -878,6 +952,20 @@ PhInitializeEmptyStringRef(
 }
 
 FORCEINLINE
+VOID
+NTAPI
+PhInitializeBufferStringRef(
+    _Out_ PPH_STRINGREF String,
+    _Writable_bytes_(Length) _When_(Length != 0, _Notnull_) PWCHAR Buffer,
+    _In_ SIZE_T Length
+    )
+{
+    memset(String, 0, sizeof(PH_STRINGREF));
+    String->Length = Length;
+    String->Buffer = Buffer;
+}
+
+FORCEINLINE
 BOOLEAN
 PhStringRefToUnicodeString(
     _In_ PPH_STRINGREF String,
@@ -1224,6 +1312,22 @@ PhCreateString2(
     return PhCreateStringEx(String->Buffer, String->Length);
 }
 
+FORCEINLINE
+PPH_STRING
+NTAPI
+PhCreateStringZ(
+    _In_ PCWSTR String
+    )
+{
+    PH_STRINGREF string;
+
+    string.Length = wcslen(String) * sizeof(WCHAR);
+    string.Buffer = (PWSTR)String;
+    //PhInitializeStringRef(&string, (PWSTR)String);
+
+    return PhCreateString2(&string);
+}
+
 #define PH_STRING_TRIM_START_ONLY PH_TRIM_START_ONLY
 #define PH_STRING_TRIM_END_ONLY   PH_TRIM_END_ONLY
 #define PH_STRING_TRIM_MASK       (PH_STRING_TRIM_START_ONLY | PH_STRING_TRIM_END_ONLY)
@@ -1239,6 +1343,22 @@ PhCreateString3(
     _In_ ULONG Flags,
     _In_opt_ PPH_STRINGREF TrimCharSet
     );
+
+FORCEINLINE
+PPH_STRING
+NTAPI
+PhTrimStringZ(
+    _In_ PPH_STRINGREF String,
+    _In_ ULONG Flags,
+    _In_ PWSTR TrimCharSet
+    )
+{
+    PH_STRINGREF string;
+
+    PhInitializeStringRef(&string, TrimCharSet);
+
+    return PhCreateString3(String, Flags, &string);
+}
 
 FORCEINLINE
 WCHAR
@@ -1622,6 +1742,29 @@ PhCompareStringWithNullSortOrder(
     if (String1 && String2)
     {
         return PhCompareString(String1, String2, IgnoreCase);
+    }
+    else if (!String1)
+    {
+        return !String2 ? 0 : (Order == AscendingSortOrder ? 1 : -1);
+    }
+    else
+    {
+        return (Order == AscendingSortOrder ? -1 : 1);
+    }
+}
+
+FORCEINLINE
+LONG
+PhCompareStringRefWithNullSortOrder(
+    _In_opt_ PPH_STRINGREF String1,
+    _In_opt_ PPH_STRINGREF String2,
+    _In_ PH_SORT_ORDER Order,
+    _In_ BOOLEAN IgnoreCase
+    )
+{
+    if (String1 && String2)
+    {
+        return PhCompareStringRef(String1, String2, IgnoreCase);
     }
     else if (!String1)
     {
@@ -2530,6 +2673,15 @@ PhFinalArrayItems(
     _Inout_ PPH_ARRAY Array
     );
 
+FORCEINLINE
+SIZE_T
+PhFinalArrayCount(
+    _In_ PPH_ARRAY Array
+    )
+{
+    return Array->Count;
+}
+
 PHLIBAPI
 VOID
 NTAPI
@@ -3302,6 +3454,9 @@ PhHashIntPtr(
 
 // Simple hashtable
 
+#define SIP(String, Integer) { (String), (PVOID)(Integer) }
+#define SREF(String) ((PVOID)&(PH_STRINGREF)PH_STRINGREF_INIT((String)))
+
 typedef struct _PH_KEY_VALUE_PAIR
 {
     PVOID Key;
@@ -3585,7 +3740,7 @@ PhBufferToHexStringBuffer(
     _In_reads_bytes_(InputLength) PUCHAR InputBuffer,
     _In_ SIZE_T InputLength,
     _In_ BOOLEAN UpperCase,
-    _Out_writes_bytes_to_opt_(OutputLength, *ReturnLength) PWSTR OutputBuffer,
+    _Out_writes_bytes_to_(OutputLength, *ReturnLength) PWSTR OutputBuffer,
     _In_ SIZE_T OutputLength,
     _Out_opt_ PSIZE_T ReturnLength
     );
@@ -3742,6 +3897,44 @@ ULONG
 NTAPI
 PhCountBitsUlongPtr(
     _In_ ULONG_PTR Value
+    );
+
+// Thread Local Storage (TLS)
+
+PHLIBAPI
+ULONG
+NTAPI
+PhTlsAlloc(
+    VOID
+    );
+
+PHLIBAPI
+PVOID
+NTAPI
+PhTlsGetValue(
+    _In_ ULONG Index
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhTlsSetValue(
+    _In_ ULONG Index,
+    _In_opt_ PVOID Value
+    );
+
+PHLIBAPI
+ULONG
+NTAPI
+PhGetLastError(
+    VOID
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhSetLastError(
+    _In_ ULONG ErrorValue
     );
 
 // Auto-dereference convenience functions
@@ -3966,28 +4159,253 @@ typedef struct _PH_FORMAT
     } u;
 } PH_FORMAT, *PPH_FORMAT;
 
-// Convenience macros
-#define PhInitFormatC(f, v) do { (f)->Type = CharFormatType; (f)->u.Char = (v); } while (0)
-#define PhInitFormatS(f, v) do { (f)->Type = StringFormatType; PhInitializeStringRef(&(f)->u.String, (v)); } while (0)
-#define PhInitFormatSR(f, v) do { (f)->Type = StringFormatType; (f)->u.String = (v); } while (0)
-#define PhInitFormatUCS(f, v) do { (f)->Type = StringFormatType; PhUnicodeStringToStringRef((v), &(f)->u.String); } while (0)
-#define PhInitFormatMultiByteS(f, v) do { (f)->Type = MultiByteStringFormatType; PhInitializeBytesRef(&(f)->u.MultiByteString, (v)); } while (0)
-#define PhInitFormatD(f, v) do { (f)->Type = Int32FormatType; (f)->u.Int32 = (v); } while (0)
-#define PhInitFormatU(f, v) do { (f)->Type = UInt32FormatType; (f)->u.UInt32 = (v); } while (0)
-#define PhInitFormatX(f, v) do { (f)->Type = UInt32FormatType | FormatUseRadix; (f)->u.UInt32 = (v); (f)->Radix = 16; } while (0)
-#define PhInitFormatI64D(f, v) do { (f)->Type = Int64FormatType; (f)->u.Int64 = (v); } while (0)
-#define PhInitFormatI64U(f, v) do { (f)->Type = UInt64FormatType; (f)->u.UInt64 = (v); } while (0)
-#define PhInitFormatI64UGroupDigits(f, v) do { (f)->Type = UInt64FormatType | FormatGroupDigits; (f)->u.UInt64 = (v); } while (0)
-#define PhInitFormatI64UWithWidth(f, v, w) do { (f)->Type = UInt64FormatType | FormatPadZeros; (f)->u.UInt64 = (v); (f)->Width = (w); } while (0)
-#define PhInitFormatI64X(f, v) do { (f)->Type = UInt64FormatType | FormatUseRadix; (f)->u.UInt64 = (v); (f)->Radix = 16; } while (0)
-#define PhInitFormatIU(f, v) do { (f)->Type = UIntPtrFormatType; (f)->u.UIntPtr = (v); } while (0)
-#define PhInitFormatIX(f, v) do { (f)->Type = UIntPtrFormatType | FormatUseRadix; (f)->u.UIntPtr = (v); (f)->Radix = 16; } while (0)
-#define PhInitFormatIXPadZeros(f, v) do { (f)->Type = UIntPtrFormatType | FormatUseRadix | FormatPadZeros; (f)->u.UIntPtr = (v); (f)->Radix = 16; (f)->Width = sizeof(ULONG_PTR) * 2; } while (0)
-#define PhInitFormatF(f, v, p) do { (f)->Type = DoubleFormatType | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)
-#define PhInitFormatE(f, v, p) do { (f)->Type = DoubleFormatType | FormatStandardForm | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)
-#define PhInitFormatA(f, v, p) do { (f)->Type = DoubleFormatType | FormatHexadecimalForm | FormatUsePrecision; (f)->u.Double = (v); (f)->Precision = (p); } while (0)
-#define PhInitFormatSize(f, v) do { (f)->Type = SizeFormatType; (f)->u.Size = (v); } while (0)
-#define PhInitFormatSizeWithPrecision(f, v, p) do { (f)->Type = SizeFormatType | FormatUsePrecision; (f)->u.Size = (v); (f)->Precision = (p); } while (0)
+// Convenience functions
+
+FORCEINLINE
+VOID
+PhInitFormatC(
+    _Out_ PPH_FORMAT Format,
+    _In_ WCHAR Char
+    )
+{
+    Format->Type = CharFormatType;
+    Format->u.Char = Char;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatS(
+    _Out_ PPH_FORMAT Format,
+    _In_ PWSTR String
+    )
+{
+    Format->Type = StringFormatType;
+    PhInitializeStringRef(&Format->u.String, String);
+}
+
+FORCEINLINE
+VOID
+PhInitFormatSR(
+    _Out_ PPH_FORMAT Format,
+    _In_ PH_STRINGREF String
+    )
+{
+    Format->Type = StringFormatType;
+    Format->u.String = String;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatUCS(
+    _Out_ PPH_FORMAT Format,
+    _In_ PUNICODE_STRING String
+    )
+{
+    Format->Type = StringFormatType;
+    PhUnicodeStringToStringRef(String, &Format->u.String);
+}
+
+FORCEINLINE
+VOID
+PhInitFormatMultiByteS(
+    _Out_ PPH_FORMAT Format,
+    _In_ PSTR String
+    )
+{
+    Format->Type = MultiByteStringFormatType;
+    PhInitializeBytesRef(&Format->u.MultiByteString, String);
+}
+
+FORCEINLINE
+VOID
+PhInitFormatD(
+    _Out_ PPH_FORMAT Format,
+    _In_ LONG Int32
+    )
+{
+    Format->Type = Int32FormatType;
+    Format->u.Int32 = Int32;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatU(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG UInt32
+    )
+{
+    Format->Type = UInt32FormatType;
+    Format->u.UInt32 = UInt32;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatX(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG UInt32
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UInt32FormatType | FormatUseRadix);
+    Format->u.UInt32 = UInt32;
+    Format->Radix = 16;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatI64D(
+    _Out_ PPH_FORMAT Format,
+    _In_ LONG64 Int64
+    )
+{
+    Format->Type = Int64FormatType;
+    Format->u.Int64 = Int64;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatI64U(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 UInt64
+    )
+{
+    Format->Type = UInt64FormatType;
+    Format->u.UInt64 = UInt64;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatI64UGroupDigits(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 UInt64
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UInt64FormatType | FormatGroupDigits);
+    Format->u.UInt64 = UInt64;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatI64UWithWidth(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 UInt64,
+    _In_ USHORT Width
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UInt64FormatType | FormatPadZeros);
+    Format->u.UInt64 = UInt64;
+    Format->Width = Width;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatI64X(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 UInt64
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UInt64FormatType | FormatUseRadix);
+    Format->u.UInt64 = UInt64;
+    Format->Radix = 16;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatIU(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG_PTR UIntPtr
+    )
+{
+    Format->Type = UIntPtrFormatType;
+    Format->u.UIntPtr = UIntPtr;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatIX(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG_PTR UIntPtr
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UIntPtrFormatType | FormatUseRadix);
+    Format->u.UIntPtr = UIntPtr;
+    Format->Radix = 16;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatIXPadZeros(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG_PTR UIntPtr
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(UIntPtrFormatType | FormatUseRadix | FormatPadZeros);
+    Format->u.UIntPtr = UIntPtr;
+    Format->Radix = 16;
+    Format->Width = sizeof(ULONG_PTR) * 2;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatF(
+    _Out_ PPH_FORMAT Format,
+    _In_ DOUBLE Double,
+    _In_ USHORT Precision
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(DoubleFormatType | FormatUsePrecision);
+    Format->u.Double = Double;
+    Format->Precision = Precision;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatE(
+    _Out_ PPH_FORMAT Format,
+    _In_ DOUBLE Double,
+    _In_ USHORT Precision
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(DoubleFormatType | FormatStandardForm | FormatUsePrecision);
+    Format->u.Double = Double;
+    Format->Precision = Precision;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatA(
+    _Out_ PPH_FORMAT Format,
+    _In_ DOUBLE Double,
+    _In_ USHORT Precision
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(DoubleFormatType | FormatHexadecimalForm | FormatUsePrecision);
+    Format->u.Double = Double;
+    Format->Precision = Precision;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatSize(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 Size
+    )
+{
+    Format->Type = SizeFormatType;
+    Format->u.Size = Size;
+}
+
+FORCEINLINE
+VOID
+PhInitFormatSizeWithPrecision(
+    _Out_ PPH_FORMAT Format,
+    _In_ ULONG64 Size,
+    _In_ USHORT Precision
+    )
+{
+    Format->Type = (PH_FORMAT_TYPE)(SizeFormatType | FormatUsePrecision);
+    Format->u.Size = Size;
+    Format->Precision = Precision;
+}
 
 PHLIBAPI
 PPH_STRING
@@ -4024,10 +4442,20 @@ PhFormatDoubleToUtf8(
 
 // error
 
+#define HRESULT_CUSTOMER(hr) (((ULONG)(hr) >> 29) & 0x1)
+#define HRESULT_NTSTATUS(hr) (((ULONG)(hr) >> 28) & 0x1)
+
 PHLIBAPI
 ULONG
 NTAPI
 PhNtStatusToDosError(
+    _In_ NTSTATUS Status
+    );
+
+PHLIBAPI
+ULONG
+NTAPI
+PhNtStatusToServiceStatus(
     _In_ NTSTATUS Status
     );
 
@@ -4044,6 +4472,23 @@ NTAPI
 PhNtStatusFileNotFound(
     _In_ NTSTATUS Status
     );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhNtStatusFromHResult(
+    _In_ HRESULT Result
+    );
+
+FORCEINLINE
+NTSTATUS
+NTAPI
+PhGetLastWin32ErrorAsNtStatus(
+    VOID
+    )
+{
+    return PhDosErrorToNtStatus(GetLastError());
+}
 
 // Generic tree definitions
 

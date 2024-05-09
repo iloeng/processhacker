@@ -55,8 +55,6 @@
 #include <phplug.h>
 #include <srvprv.h>
 
-#include <mapimg.h>
-
 #define PROCESS_ID_BUCKETS 64
 #define PROCESS_ID_TO_BUCKET_INDEX(ProcessId) ((HandleToUlong(ProcessId) / 4) & (PROCESS_ID_BUCKETS - 1))
 
@@ -244,7 +242,7 @@ BOOLEAN PhProcessProviderInitialization(
 
     PhEnableProcessExtension = WindowsVersion >= WINDOWS_10_RS3 && !PhIsExecutingInWow64();
 
-    RtlInitializeSListHead(&PhProcessQueryDataListHead);
+    PhInitializeSListHead(&PhProcessQueryDataListHead);
 
     RtlInitUnicodeString(&PhDpcsProcessInformation->ImageName, L"DPCs");
     PhDpcsProcessInformation->UniqueProcessId = DPCS_PROCESS_ID;
@@ -415,8 +413,6 @@ VOID PhpProcessItemDeleteProcedure(
     if (processItem->Record) PhDereferenceProcessRecord(processItem->Record);
 
     if (processItem->IconEntry) PhDereferenceObject(processItem->IconEntry);
-
-    if (processItem->AlternateProcessIdString) PhDereferenceObject(processItem->AlternateProcessIdString);
 }
 
 FORCEINLINE BOOLEAN PhCompareProcessItem(
@@ -923,6 +919,9 @@ VOID PhpProcessQueryStage2(
             default:
                 type = PhImageCoherencyFull;
                 break;
+            case 4:
+                type = PhImageCoherencySharedOriginal;
+                break;
             }
 
             Data->ImageCoherencyStatus = PhGetProcessImageCoherency(
@@ -1138,23 +1137,9 @@ VOID PhpFillProcessItem(
             ProcessItem->IsPackagedProcess = basicInfo.IsStronglyNamed;
         }
 
-        if (ProcessItem->IsSubsystemProcess && KphLevel() >= KphLevelMed)
+        if (NT_SUCCESS(PhGetProcessStartKey(ProcessItem->QueryHandle, &ProcessItem->ProcessStartKey)))
         {
-            ULONG wslProcessId;
-            if (NT_SUCCESS(KphQueryInformationProcess(
-                ProcessItem->QueryHandle,
-                KphProcessWSLProcessId,
-                &wslProcessId,
-                sizeof(ULONG),
-                NULL
-                )))
-            {
-                ProcessItem->AlternateProcessIdString = PhFormatString(
-                    L"%lu (%lu)", 
-                    HandleToUlong(ProcessItem->ProcessId), 
-                    wslProcessId
-                    );
-            }
+            PhPrintPointer(ProcessItem->ProcessStartKeyString, (PVOID)ProcessItem->ProcessStartKey);
         }
     }
 
@@ -1231,7 +1216,7 @@ VOID PhpFillProcessItem(
                 ProcessItem->ElevationType = elevationType;
             }
 
-            if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+            if (NT_SUCCESS(PhGetTokenElevation(tokenHandle, &isElevated)))
             {
                 ProcessItem->IsElevated = isElevated;
             }
@@ -1263,9 +1248,9 @@ VOID PhpFillProcessItem(
         ProcessItem->ProcessId == SYSTEM_PROCESS_ID)
     {
         if (!ProcessItem->Sid)
-            ProcessItem->Sid = PhAllocateCopy(&PhSeLocalSystemSid, PhLengthSid(&PhSeLocalSystemSid));
+            ProcessItem->Sid = PhAllocateCopy((PSID)&PhSeLocalSystemSid, PhLengthSid((PSID)&PhSeLocalSystemSid));
         if (!ProcessItem->UserName)
-            ProcessItem->UserName = PhpGetSidFullNameCached(&PhSeLocalSystemSid);
+            ProcessItem->UserName = PhpGetSidFullNameCached((PSID)&PhSeLocalSystemSid);
     }
 
     // Known Process Type
@@ -1348,6 +1333,27 @@ VOID PhpFillProcessItem(
                 {
                     ProcessItem->IsCetEnabled = cetEnabled;
                 }
+            }
+        }
+    }
+
+    // WSL
+    if (WindowsVersion >= WINDOWS_10_22H2 && ProcessItem->QueryHandle)
+    {
+        if (ProcessItem->IsSubsystemProcess && KphLevel() >= KphLevelMed)
+        {
+            ULONG lxssProcessId;
+
+            if (NT_SUCCESS(KphQueryInformationProcess(
+                ProcessItem->QueryHandle,
+                KphProcessWSLProcessId,
+                &lxssProcessId,
+                sizeof(ULONG),
+                NULL
+                )))
+            {
+                ProcessItem->LxssProcessId = lxssProcessId;
+                PhPrintUInt32(ProcessItem->LxssProcessIdString, lxssProcessId);
             }
         }
     }
@@ -1861,8 +1867,8 @@ VOID PhFlushProcessQueryData(
     PSLIST_ENTRY entry;
     PPH_PROCESS_QUERY_DATA data;
 
-    if (!RtlFirstEntrySList(&PhProcessQueryDataListHead))
-        return;
+    //if (!RtlFirstEntrySList(&PhProcessQueryDataListHead))
+    //    return;
 
     entry = RtlInterlockedFlushSList(&PhProcessQueryDataListHead);
 
@@ -1881,7 +1887,7 @@ VOID PhFlushProcessQueryData(
             PhpFillProcessItemStage2((PPH_PROCESS_QUERY_S2_DATA)data);
         }
 
-        data->ProcessItem->JustProcessed = TRUE;
+        InterlockedExchange(&data->ProcessItem->JustProcessed, TRUE);
 
         PhDereferenceObject(data->ProcessItem);
         PhFree(data);
@@ -2577,7 +2583,7 @@ VOID PhProcessProviderUpdate(
 
                     // Elevation
 
-                    //if (NT_SUCCESS(PhGetTokenIsElevated(tokenHandle, &isElevated)))
+                    //if (NT_SUCCESS(PhGetTokenElevation(tokenHandle, &isElevated)))
                     //{
                     //    if (processItem->IsElevated != isElevated)
                     //    {
@@ -2618,7 +2624,7 @@ VOID PhProcessProviderUpdate(
                     {
                         if (PhIsNullOrEmptyString(processItem->UserName))
                         {
-                            PhMoveReference(&processItem->UserName, PhpGetSidFullNameCachedSlow(&PhSeLocalSystemSid));
+                            PhMoveReference(&processItem->UserName, PhpGetSidFullNameCachedSlow((PSID)&PhSeLocalSystemSid));
                             modified = TRUE;
                         }
                     }
@@ -3787,4 +3793,22 @@ HIMAGELIST PhGetProcessSmallImageList(
     VOID)
 {
     return PhProcessSmallImageList;
+}
+
+BOOLEAN PhDuplicateProcessInformation(
+    _Out_ PPVOID ProcessInformation
+    )
+{
+    SIZE_T infoLength;
+
+    if (!PhProcessInformation)
+        return FALSE;
+
+    infoLength = RtlSizeHeap(PhHeapHandle, 0, PhProcessInformation);
+
+    if (!infoLength)
+        return FALSE;
+
+    *ProcessInformation = PhAllocateCopy(PhProcessInformation, infoLength);
+    return TRUE;
 }

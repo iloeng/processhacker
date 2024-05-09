@@ -121,7 +121,6 @@ static PPH_LIST SectionList = NULL;
 static PPH_OPTIONS_SECTION CurrentSection = NULL;
 static HWND OptionsTreeControl = NULL;
 static HWND ContainerControl = NULL;
-static HIMAGELIST OptionsTreeImageList = NULL;
 
 // All
 static BOOLEAN RestartRequired = FALSE;
@@ -133,7 +132,6 @@ static HFONT CurrentFontInstance = NULL;
 static HFONT CurrentFontMonospaceInstance = NULL;
 static PPH_STRING NewFontSelection = NULL;
 static PPH_STRING NewFontMonospaceSelection = NULL;
-static HIMAGELIST GeneralListviewImageList = NULL;
 
 // Advanced
 static PH_STRINGREF TaskMgrImageOptionsKeyName = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe");
@@ -252,20 +250,36 @@ static PPH_OPTIONS_SECTION PhpTreeViewGetSelectedSection(
 
 static VOID PhpOptionsSetImageList(
     _In_ HWND WindowHandle,
-    _Inout_ HIMAGELIST* Imagelist,
     _In_ BOOLEAN Treeview
     )
 {
-    LONG dpiValue;
-
-    dpiValue = PhGetWindowDpi(WindowHandle);
-
-    *Imagelist = PhImageListCreate(2, PhGetDpi(22, dpiValue), ILC_MASK | ILC_COLOR32, 1, 1);
+    HIMAGELIST imageListHandle;
+    LONG dpiValue = PhGetWindowDpi(WindowHandle);
 
     if (Treeview)
-        TreeView_SetImageList(WindowHandle, *Imagelist, TVSIL_NORMAL);
+        imageListHandle = TreeView_GetImageList(WindowHandle, TVSIL_NORMAL);
     else
-        ListView_SetImageList(WindowHandle, *Imagelist, LVSIL_SMALL);
+        imageListHandle = ListView_GetImageList(WindowHandle, LVSIL_SMALL);
+
+    if (imageListHandle)
+    {
+        PhImageListSetIconSize(imageListHandle, 2, PhGetDpi(24, dpiValue));
+
+        if (Treeview)
+            TreeView_SetImageList(WindowHandle, imageListHandle, TVSIL_NORMAL);
+        else
+            ListView_SetImageList(WindowHandle, imageListHandle, LVSIL_SMALL);
+    }
+    else
+    {
+        if (imageListHandle = PhImageListCreate(2, PhGetDpi(24, dpiValue), ILC_MASK | ILC_COLOR32, 1, 1))
+        {
+            if (Treeview)
+                TreeView_SetImageList(WindowHandle, imageListHandle, TVSIL_NORMAL);
+            else
+                ListView_SetImageList(WindowHandle, imageListHandle, LVSIL_SMALL);
+        }
+    }
 }
 
 INT_PTR CALLBACK PhOptionsDialogProc(
@@ -284,7 +298,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
 
             PhSetApplicationWindowIcon(hwndDlg);
 
-            PhpOptionsSetImageList(OptionsTreeControl, &OptionsTreeImageList, TRUE);
+            PhpOptionsSetImageList(OptionsTreeControl, TRUE);
 
             //PhSetWindowStyle(GetDlgItem(hwndDlg, IDC_SEPARATOR), SS_OWNERDRAW, SS_OWNERDRAW);
             PhSetControlTheme(OptionsTreeControl, L"explorer");
@@ -367,7 +381,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
         break;
     case WM_DPICHANGED:
         {
-            PhpOptionsSetImageList(OptionsTreeControl, &OptionsTreeImageList, TRUE);
+            PhpOptionsSetImageList(OptionsTreeControl, TRUE);
         }
         break;
     case WM_SIZE:
@@ -397,12 +411,12 @@ INT_PTR CALLBACK PhOptionsDialogProc(
                     {
                         ProcessHacker_PrepareForEarlyShutdown();
 
-                        PhResetSettings(hwndDlg);
+                        PhResetSettings(PhMainWndHandle);
 
                         if (!PhIsNullOrEmptyString(PhSettingsFileName))
                             PhSaveSettings(&PhSettingsFileName->sr);
 
-                        if (PhShellProcessHacker(
+                        if (NT_SUCCESS(PhShellProcessHacker(
                             PhMainWndHandle,
                             L"-v -newinstance",
                             SW_SHOW,
@@ -410,7 +424,7 @@ INT_PTR CALLBACK PhOptionsDialogProc(
                             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
                             0,
                             NULL
-                            ))
+                            )))
                         {
                             ProcessHacker_Destroy();
                         }
@@ -1456,7 +1470,7 @@ static VOID PhpAdvancedPageLoad(
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_START_HIDDEN, L"StartHidden");
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_MINIINFO_WINDOW, L"MiniInfoWindowEnabled");
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_LASTTAB_SUPPORT, L"MainWindowTabRestoreEnabled");
-    SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_DRIVER, L"EnableKph");
+    SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_DRIVER, L"KsiEnable");
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_WARNINGS, L"EnableWarnings");
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_PLUGINS, L"EnablePlugins");
     SetLvItemCheckForSetting(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_UNDECORATE_SYMBOLS, L"DbgHelpUndecorate");
@@ -1543,7 +1557,7 @@ VOID PhShowOptionsRestartRequired(
     {
         ProcessHacker_PrepareForEarlyShutdown();
 
-        if (PhShellProcessHacker(
+        if (NT_SUCCESS(PhShellProcessHacker(
             WindowHandle,
             L"-v -newinstance",
             SW_SHOW,
@@ -1551,7 +1565,7 @@ VOID PhShowOptionsRestartRequired(
             PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
             0,
             NULL
-            ))
+            )))
         {
             ProcessHacker_Destroy();
         }
@@ -1642,7 +1656,7 @@ static VOID PhpAdvancedPageSave(
     SetSettingForLvItemCheck(listViewHandle, PHP_OPTIONS_INDEX_START_HIDDEN, L"StartHidden");
     SetSettingForLvItemCheckRestartRequired(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_MINIINFO_WINDOW, L"MiniInfoWindowEnabled");
     SetSettingForLvItemCheck(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_LASTTAB_SUPPORT, L"MainWindowTabRestoreEnabled");
-    SetSettingForLvItemCheckRestartRequired(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_DRIVER, L"EnableKph");
+    SetSettingForLvItemCheckRestartRequired(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_DRIVER, L"KsiEnable");
     SetSettingForLvItemCheck(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_WARNINGS, L"EnableWarnings");
     SetSettingForLvItemCheckRestartRequired(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_PLUGINS, L"EnablePlugins");
     SetSettingForLvItemCheck(listViewHandle, PHP_OPTIONS_INDEX_ENABLE_UNDECORATE_SYMBOLS, L"DbgHelpUndecorate");
@@ -1755,7 +1769,7 @@ INT_PTR CALLBACK PhpOptionsGeneralDlgProc(
             comboBoxHandle = GetDlgItem(hwndDlg, IDC_MAXSIZEUNIT);
             ListViewHandle = GetDlgItem(hwndDlg, IDC_SETTINGS);
 
-            PhpOptionsSetImageList(ListViewHandle, &GeneralListviewImageList, FALSE);
+            PhpOptionsSetImageList(ListViewHandle, FALSE);
 
             PhInitializeLayoutManager(&LayoutManager, hwndDlg);
             PhAddLayoutItem(&LayoutManager, GetDlgItem(hwndDlg, IDC_SEARCHENGINE), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
@@ -1844,7 +1858,7 @@ INT_PTR CALLBACK PhpOptionsGeneralDlgProc(
         break;
     case WM_DPICHANGED:
         {
-            PhpOptionsSetImageList(ListViewHandle, &GeneralListviewImageList, FALSE);
+            PhpOptionsSetImageList(ListViewHandle, FALSE);
         }
         break;
     case WM_COMMAND:
@@ -2348,7 +2362,7 @@ typedef struct _PH_OPTIONS_ADVANCED_CONTEXT
     PPH_TN_FILTER_ENTRY TreeFilterEntry;
     PPH_HASHTABLE NodeHashtable;
     PPH_LIST NodeList;
-    PPH_STRING SearchBoxText;
+    ULONG_PTR SearchMatchHandle;
 } PH_OPTIONS_ADVANCED_CONTEXT, *PPH_OPTIONS_ADVANCED_CONTEXT;
 
 typedef enum _PH_OPTIONS_ADVANCED_TREE_ITEM_MENU
@@ -3019,17 +3033,36 @@ BOOLEAN PhpOptionsAdvancedTreeFilterCallback(
         }
     }
 
-    if (PhIsNullOrEmptyString(context->SearchBoxText))
+    if (!context->SearchMatchHandle)
         return TRUE;
 
-    if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->Name->sr))
+    if (PhSearchControlMatch(context->SearchMatchHandle, &node->Name->sr))
         return TRUE;
-    if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->DefaultString->sr))
+    if (PhSearchControlMatch(context->SearchMatchHandle, &node->DefaultString->sr))
         return TRUE;
-    if (PhWordMatchStringRef(&context->SearchBoxText->sr, &node->ValueString->sr))
+    if (PhSearchControlMatch(context->SearchMatchHandle, &node->ValueString->sr))
         return TRUE;
 
     return FALSE;
+}
+
+VOID NTAPI PhpOptionsAdvancedSearchControlCallback(
+    _In_ ULONG_PTR MatchHandle,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_OPTIONS_ADVANCED_CONTEXT context = Context;
+
+    assert(context);
+
+    context->SearchMatchHandle = MatchHandle;
+
+    if (!context->SearchMatchHandle)
+    {
+        // Expand the nodes?
+    }
+
+    PhApplyTreeNewFilters(&context->TreeFilterSupport);
 }
 
 INT_PTR CALLBACK PhpOptionsAdvancedDlgProc(
@@ -3062,9 +3095,15 @@ INT_PTR CALLBACK PhpOptionsAdvancedDlgProc(
             context->TreeNewHandle = GetDlgItem(hwndDlg, IDC_SETTINGS);
             context->SearchBoxHandle = GetDlgItem(hwndDlg, IDC_SEARCH);
 
-            PhCreateSearchControl(hwndDlg, context->SearchBoxHandle, L"Search settings...");
+            PhCreateSearchControl(
+                hwndDlg,
+                context->SearchBoxHandle,
+                L"Search settings...",
+                PhpOptionsAdvancedSearchControlCallback,
+                context
+                );
+
             InitializeOptionsAdvancedTree(context);
-            context->SearchBoxText = PhReferenceEmptyString();
             context->TreeFilterEntry = PhAddTreeNewFilter(&context->TreeFilterSupport, PhpOptionsAdvancedTreeFilterCallback, context);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
@@ -3077,9 +3116,6 @@ INT_PTR CALLBACK PhpOptionsAdvancedDlgProc(
         break;
     case WM_DESTROY:
         {
-            if (context->SearchBoxText)
-                PhDereferenceObject(context->SearchBoxText);
-
             PhDeleteLayoutManager(&context->LayoutManager);
 
             PhRemoveTreeNewFilter(&context->TreeFilterSupport, context->TreeFilterEntry);
@@ -3189,35 +3225,6 @@ INT_PTR CALLBACK PhpOptionsAdvancedDlgProc(
                     text = PhGetTreeNewText(context->TreeNewHandle, 0);
                     PhSetClipboardString(context->TreeNewHandle, &text->sr);
                     PhDereferenceObject(text);
-                }
-                break;
-            }
-
-            switch (GET_WM_COMMAND_CMD(wParam, lParam))
-            {
-            case EN_CHANGE:
-                {
-                    PPH_STRING newSearchboxText;
-
-                    if (!context->SearchBoxHandle)
-                        break;
-
-                    if (GET_WM_COMMAND_HWND(wParam, lParam) != context->SearchBoxHandle)
-                        break;
-
-                    newSearchboxText = PH_AUTO(PhGetWindowText(context->SearchBoxHandle));
-
-                    if (!PhEqualString(context->SearchBoxText, newSearchboxText, FALSE))
-                    {
-                        PhSwapReference(&context->SearchBoxText, newSearchboxText);
-
-                        if (!PhIsNullOrEmptyString(context->SearchBoxText))
-                        {
-                            // Expand the nodes?
-                        }
-
-                        PhApplyTreeNewFilters(&context->TreeFilterSupport);
-                    }
                 }
                 break;
             }

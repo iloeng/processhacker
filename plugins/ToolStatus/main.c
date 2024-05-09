@@ -27,7 +27,6 @@ BOOLEAN IsWindowMinimized = FALSE;
 BOOLEAN IsWindowMaximized = FALSE;
 BOOLEAN IconSingleClick = FALSE;
 BOOLEAN RestoreRowAfterSearch = FALSE;
-BOOLEAN EnableChildWildcardSearch = FALSE;
 TOOLBAR_DISPLAY_STYLE DisplayStyle = TOOLBAR_DISPLAY_STYLE_SELECTIVETEXT;
 SEARCHBOX_DISPLAY_MODE SearchBoxDisplayMode = SEARCHBOX_DISPLAY_MODE_ALWAYSSHOW;
 REBAR_DISPLAY_LOCATION RebarDisplayLocation = REBAR_DISPLAY_LOCATION_TOP;
@@ -37,7 +36,7 @@ HWND SearchboxHandle = NULL;
 WNDPROC MainWindowHookProc = NULL;
 HMENU MainMenu = NULL;
 HACCEL AcceleratorTable = NULL;
-PPH_STRING SearchboxText = NULL;
+ULONG_PTR SearchMatchHandle = 0;
 ULONG RestoreSearchSelectedProcessId = ULONG_MAX;
 PH_PLUGIN_SYSTEM_STATISTICS SystemStatistics = { 0 };
 PH_CALLBACK_DECLARE(SearchChangedEvent);
@@ -49,7 +48,7 @@ PPH_PLUGIN PluginInstance = NULL;
 TOOLSTATUS_INTERFACE PluginInterface =
 {
     TOOLSTATUS_INTERFACE_VERSION,
-    GetSearchboxText,
+    GetSearchMatchHandle,
     WordMatchStringRef,
     RegisterTabSearch,
     &SearchChangedEvent,
@@ -75,11 +74,11 @@ static PH_CALLBACK_REGISTRATION ProcessTreeNewInitializingCallbackRegistration;
 static PH_CALLBACK_REGISTRATION ServiceTreeNewInitializingCallbackRegistration;
 static PH_CALLBACK_REGISTRATION NetworkTreeNewInitializingCallbackRegistration;
 
-PPH_STRING GetSearchboxText(
+ULONG_PTR GetSearchMatchHandle(
     VOID
     )
 {
-    return SearchboxText;
+    return SearchMatchHandle;
 }
 
 VOID NTAPI ProcessesUpdatedCallback(
@@ -695,6 +694,86 @@ VOID DrawWindowBorderForTargeting(
     }
 }
 
+VOID NTAPI SearchControlCallback(
+    _In_ ULONG_PTR MatchHandle,
+    _In_opt_ PVOID Context
+    )
+{
+    SearchMatchHandle = MatchHandle;
+
+    // Expand the nodes to ensure that they will be visible to the user.
+    PhExpandAllProcessNodes(TRUE);
+    PhDeselectAllProcessNodes();
+    PhDeselectAllServiceNodes();
+
+    PhApplyTreeNewFilters(PhGetFilterSupportProcessTreeList());
+    PhApplyTreeNewFilters(PhGetFilterSupportServiceTreeList());
+    PhApplyTreeNewFilters(PhGetFilterSupportNetworkTreeList());
+
+    PhInvokeCallback(&SearchChangedEvent, (PVOID)SearchMatchHandle);
+}
+
+VOID SetSearchFocus(
+    _In_ HWND hWnd,
+    _In_ BOOLEAN Focus
+    )
+{
+    if (SearchboxHandle && ToolStatusConfig.SearchBoxEnabled)
+    {
+        if (Focus)
+        {
+            if (SearchBoxDisplayMode == SEARCHBOX_DISPLAY_MODE_HIDEINACTIVE)
+            {
+                LONG dpiValue;
+
+                dpiValue = PhGetWindowDpi(hWnd);
+
+                if (!RebarBandExists(REBAR_BAND_ID_SEARCHBOX))
+                    RebarBandInsert(REBAR_BAND_ID_SEARCHBOX, SearchboxHandle, PhGetDpi(180, dpiValue), 22);
+
+                if (!IsWindowVisible(SearchboxHandle))
+                    ShowWindow(SearchboxHandle, SW_SHOW);
+            }
+
+            SetFocus(SearchboxHandle);
+            Edit_SetSel(SearchboxHandle, 0, -1);
+        }
+        else
+        {
+            HWND tnHandle;
+
+            // Return focus to the treelist.
+            if (tnHandle = GetCurrentTreeNewHandle())
+            {
+                ULONG tnCount = TreeNew_GetFlatNodeCount(tnHandle);
+
+                for (ULONG i = 0; i < tnCount; i++)
+                {
+                    PPH_TREENEW_NODE node = TreeNew_GetFlatNode(tnHandle, i);
+
+                    // Select the first visible node.
+                    if (node->Visible)
+                    {
+                        SetFocus(tnHandle);
+                        TreeNew_SetFocusNode(tnHandle, node);
+                        TreeNew_SetMarkNode(tnHandle, node);
+                        TreeNew_SelectRange(tnHandle, i, i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+VOID ToggleSearchFocus(
+    _In_ HWND hWnd
+    )
+{
+    // Check if the searchbox is already focused.
+    SetSearchFocus(hWnd, GetFocus() != SearchboxHandle);
+}
+
 LRESULT CALLBACK MainWndSubclassProc(
     _In_ HWND hWnd,
     _In_ UINT uMsg,
@@ -730,36 +809,6 @@ LRESULT CALLBACK MainWndSubclassProc(
         {
             switch (GET_WM_COMMAND_CMD(wParam, lParam))
             {
-            case EN_CHANGE:
-                {
-                    PPH_STRING newSearchboxText;
-
-                    if (!SearchboxHandle)
-                        break;
-
-                    if (GET_WM_COMMAND_HWND(wParam, lParam) != SearchboxHandle)
-                        break;
-
-                    newSearchboxText = PH_AUTO(PhGetWindowText(SearchboxHandle));
-
-                    if (!PhEqualString(SearchboxText, newSearchboxText, FALSE))
-                    {
-                        // Cache the current search text for our callback.
-                        PhSwapReference(&SearchboxText, newSearchboxText);
-
-                        // Expand the nodes to ensure that they will be visible to the user.
-                        PhExpandAllProcessNodes(TRUE);
-                        PhDeselectAllProcessNodes();
-                        PhDeselectAllServiceNodes();
-
-                        PhApplyTreeNewFilters(PhGetFilterSupportProcessTreeList());
-                        PhApplyTreeNewFilters(PhGetFilterSupportServiceTreeList());
-                        PhApplyTreeNewFilters(PhGetFilterSupportNetworkTreeList());
-
-                        PhInvokeCallback(&SearchChangedEvent, SearchboxText);
-                    }
-                }
-                goto DefaultWndProc;
             case EN_SETFOCUS:
                 {
                     if (!SearchboxHandle)
@@ -787,7 +836,7 @@ LRESULT CALLBACK MainWndSubclassProc(
                     if (GET_WM_COMMAND_HWND(wParam, lParam) != SearchboxHandle)
                         break;
 
-                    if (RestoreRowAfterSearch && SearchboxText->Length == 0)
+                    if (RestoreRowAfterSearch && !SearchMatchHandle)
                     {
                         if (RestoreSearchSelectedProcessId != ULONG_MAX)
                         {
@@ -802,7 +851,7 @@ LRESULT CALLBACK MainWndSubclassProc(
                         }
                     }
 
-                    if (SearchBoxDisplayMode == SEARCHBOX_DISPLAY_MODE_HIDEINACTIVE && SearchboxText->Length == 0)
+                    if (SearchBoxDisplayMode == SEARCHBOX_DISPLAY_MODE_HIDEINACTIVE && !SearchMatchHandle)
                     {
                         if (RebarBandExists(REBAR_BAND_ID_SEARCHBOX))
                             RebarBandRemove(REBAR_BAND_ID_SEARCHBOX);
@@ -827,56 +876,13 @@ LRESULT CALLBACK MainWndSubclassProc(
                 }
                 break;
             case ID_SEARCH:
-                {
-                    // handle keybind Ctrl + K
-                    if (SearchboxHandle && ToolStatusConfig.SearchBoxEnabled)
-                    {
-                        // Check if the searchbox is already focused.
-                        if (GetFocus() == SearchboxHandle)
-                        {
-                            HWND tnHandle;
-
-                            // Return focus to the treelist.
-                            if (tnHandle = GetCurrentTreeNewHandle())
-                            {
-                                ULONG tnCount = TreeNew_GetFlatNodeCount(tnHandle);
-
-                                for (ULONG i = 0; i < tnCount; i++)
-                                {
-                                    PPH_TREENEW_NODE node = TreeNew_GetFlatNode(tnHandle, i);
-
-                                    // Select the first visible node.
-                                    if (node->Visible)
-                                    {
-                                        SetFocus(tnHandle);
-                                        TreeNew_SetFocusNode(tnHandle, node);
-                                        TreeNew_SetMarkNode(tnHandle, node);
-                                        TreeNew_SelectRange(tnHandle, i, i);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (SearchBoxDisplayMode == SEARCHBOX_DISPLAY_MODE_HIDEINACTIVE)
-                            {
-                                LONG dpiValue;
-
-                                dpiValue = PhGetWindowDpi(hWnd);
-
-                                if (!RebarBandExists(REBAR_BAND_ID_SEARCHBOX))
-                                    RebarBandInsert(REBAR_BAND_ID_SEARCHBOX, SearchboxHandle, PhGetDpi(180, dpiValue), 22);
-
-                                if (!IsWindowVisible(SearchboxHandle))
-                                    ShowWindow(SearchboxHandle, SW_SHOW);
-                            }
-
-                            SetFocus(SearchboxHandle);
-                            Edit_SetSel(SearchboxHandle, 0, -1);
-                        }
-                    }
-                }
+                // handle keybind Ctrl + K
+                ToggleSearchFocus(hWnd);
+                goto DefaultWndProc;
+            case ID_SEARCH_TAB:
+                // handle tab when the searchbox is focused
+                if (GetFocus() == SearchboxHandle)
+                    SetSearchFocus(hWnd, FALSE);
                 goto DefaultWndProc;
             case PHAPP_ID_VIEW_ALWAYSONTOP:
                 {
@@ -1732,7 +1738,6 @@ VOID NTAPI LoadCallback(
     SearchBoxDisplayMode = PhGetIntegerSetting(SETTING_NAME_SEARCHBOXDISPLAYMODE);
     TaskbarListIconType = PhGetIntegerSetting(SETTING_NAME_TASKBARDISPLAYSTYLE);
     RestoreRowAfterSearch = !!PhGetIntegerSetting(SETTING_NAME_RESTOREROWAFTERSEARCH);
-    EnableChildWildcardSearch = !!PhGetIntegerSetting(SETTING_NAME_CHILDWILDCARDSEARCH);
     EnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
     UpdateGraphs = !PhGetIntegerSetting(L"StartHidden");
     TabInfoHashtable = PhCreateSimpleHashtable(3);
@@ -1908,7 +1913,6 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_STATUSBAR_CONFIG, L"" },
                 { StringSettingType, SETTING_NAME_TOOLBAR_GRAPH_CONFIG, L"" },
                 { IntegerSettingType, SETTING_NAME_RESTOREROWAFTERSEARCH, L"0" },
-                { IntegerSettingType, SETTING_NAME_CHILDWILDCARDSEARCH, L"0" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);

@@ -24,6 +24,8 @@ extern _User_set_ PWSTR PhApplicationName;
 extern PVOID PhHeapHandle;
 extern RTL_OSVERSIONINFOEXW PhOsVersion;
 extern ULONG WindowsVersion;
+extern PWSTR WindowsVersionString;
+extern PWSTR WindowsVersionName;
 
 #define WINDOWS_ANCIENT 0
 #define WINDOWS_XP 51 // August, 2001
@@ -47,7 +49,9 @@ extern ULONG WindowsVersion;
 #define WINDOWS_10_21H2 112 // November, 2021
 #define WINDOWS_10_22H2 113 // October, 2022
 #define WINDOWS_11 114 // October, 2021
-#define WINDOWS_11_22H1 115 // February, 2022
+#define WINDOWS_11_22H2 115 // September, 2022
+#define WINDOWS_11_23H2 116 // October, 2023
+#define WINDOWS_11_24H2 117 // TBA
 #define WINDOWS_NEW ULONG_MAX
 
 #ifdef DEBUG

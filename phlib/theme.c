@@ -424,7 +424,7 @@ VOID PhInitializeThemeWindowFrame(
             }
         }
 
-        if (WindowsVersion >= WINDOWS_11_22H1)
+        if (WindowsVersion >= WINDOWS_11_22H2)
         {
             PhSetWindowThemeAttribute(WindowHandle, DWMWA_SYSTEMBACKDROP_TYPE, &(ULONG){ 1 }, sizeof(ULONG));
         }
@@ -523,7 +523,44 @@ HBRUSH PhWindowThemeControlColor(
         break;
     }
 
-    return NULL;
+    return (HBRUSH)DefWindowProc(WindowHandle, Type, (WPARAM)Hdc, (LPARAM)ChildWindowHandle);
+}
+
+VOID PhWindowThemeMainMenuBorder(
+    _In_ HWND WindowHandle
+    )
+{
+    if (GetMenu(WindowHandle))
+    {
+        RECT clientRect;
+        RECT windowRect;
+        HDC hdc;
+
+        GetClientRect(WindowHandle, &clientRect);
+        GetWindowRect(WindowHandle, &windowRect);
+
+        MapWindowPoints(WindowHandle, NULL, (PPOINT)&clientRect, 2);
+        PhOffsetRect(&clientRect, -windowRect.left, -windowRect.top);
+
+        // the rcBar is offset by the window rect (thanks to adzm) (dmex)
+        RECT rcAnnoyingLine = clientRect;
+        rcAnnoyingLine.bottom = rcAnnoyingLine.top;
+        rcAnnoyingLine.top--;
+
+        if (hdc = GetWindowDC(WindowHandle))
+        {
+            if (PhEnableThemeSupport)
+            {
+                FillRect(hdc, &rcAnnoyingLine, PhThemeWindowBackgroundBrush);
+            }
+            else
+            {
+                FillRect(hdc, &rcAnnoyingLine, GetSysColorBrush(COLOR_WINDOW));
+            }
+
+            ReleaseDC(WindowHandle, hdc);
+        }
+    }
 }
 
 VOID PhInitializeThemeWindowTabControl(
@@ -2164,29 +2201,7 @@ LRESULT CALLBACK PhpThemeWindowSubclassProc(
         {
             LRESULT result = CallWindowProc(oldWndProc, hWnd, uMsg, wParam, lParam);
 
-            if (GetMenu(hWnd))
-            {
-                RECT clientRect;
-                RECT windowRect;
-                HDC hdc;
-
-                GetClientRect(hWnd, &clientRect);
-                GetWindowRect(hWnd, &windowRect);
-
-                MapWindowPoints(hWnd, NULL, (PPOINT)&clientRect, 2);
-                PhOffsetRect(&clientRect, -windowRect.left, -windowRect.top);
-
-                // the rcBar is offset by the window rect (thanks to adzm) (dmex)
-                RECT rcAnnoyingLine = clientRect;
-                rcAnnoyingLine.bottom = rcAnnoyingLine.top;
-                rcAnnoyingLine.top--;
-
-                if (hdc = GetWindowDC(hWnd))
-                {
-                    FillRect(hdc, &rcAnnoyingLine, PhThemeWindowBackgroundBrush);
-                    ReleaseDC(hWnd, hdc);
-                }
-            }
+            PhWindowThemeMainMenuBorder(hWnd);
 
             return result;
         }
@@ -2214,7 +2229,7 @@ VOID ThemeWindowRenderGroupBoxControl(
 
     dpiValue = PhGetWindowDpi(WindowHandle);
 
-    if (PhGetWindowTextToBuffer(WindowHandle, PH_GET_WINDOW_TEXT_INTERNAL, text, RTL_NUMBER_OF(text), &returnLength) == ERROR_SUCCESS)
+    if (NT_SUCCESS(PhGetWindowTextToBuffer(WindowHandle, PH_GET_WINDOW_TEXT_INTERNAL, text, RTL_NUMBER_OF(text), &returnLength)))
     {
         SIZE nameSize = { 0 };
         RECT bufferRect;

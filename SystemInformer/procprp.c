@@ -21,6 +21,7 @@
 #include <phplug.h>
 #include <phsettings.h>
 #include <procprv.h>
+#include <mainwnd.h>
 
 PPH_OBJECT_TYPE PhpProcessPropContextType = NULL;
 PPH_OBJECT_TYPE PhpProcessPropPageContextType = NULL;
@@ -43,7 +44,7 @@ PPH_PROCESS_PROPCONTEXT PhCreateProcessPropContext(
         PhpProcessPropContextType = PhCreateObjectType(L"ProcessPropContext", 0, PhpProcessPropContextDeleteProcedure);
         PhpProcessPropPageContextType = PhCreateObjectType(L"ProcessPropPageContext", 0, PhpProcessPropPageContextDeleteProcedure);
         PhpProcessPropPageWaitContextType = PhCreateObjectType(L"ProcessPropPageWaitContext", 0, PhpProcessPropPageWaitContextDeleteProcedure);
-        RtlInitializeSListHead(&WaitContextQueryListHead);
+        PhInitializeSListHead(&WaitContextQueryListHead);
         PhEndInitOnce(&initOnce);
     }
 
@@ -247,6 +248,8 @@ LRESULT CALLBACK PhpPropSheetWndProc(
             PhRemoveWindowContext(hwnd, 0xF);
 
             PhDeleteLayoutManager(&propSheetContext->LayoutManager);
+            PhRemoveWindowContext(hwnd, PH_WINDOW_CONTEXT_DEFAULT);
+
             PhFree(propSheetContext);
         }
         break;
@@ -303,6 +306,14 @@ LRESULT CALLBACK PhpPropSheetWndProc(
                 if (SendMessage(pageWindowHandle, uMsg, wParam, lParam))
                 {
                     return TRUE;
+                }
+            }
+
+            if (PhCsForceNoParent)
+            {
+                if (wParam == VK_F5)
+                {
+                    ProcessHacker_Refresh();
                 }
             }
         }
@@ -580,7 +591,7 @@ VOID PhpFlushProcessPropSheetWaitContextData(
     PPH_PROCESS_WAITPROPCONTEXT data;
     PROCESS_BASIC_INFORMATION basicInfo;
 
-    //if (!RtlQueryDepthSList(&WaitContextQueryListHead))
+    //if (!PhQueryDepthSList(&WaitContextQueryListHead))
     //    return;
     //if (!RtlFirstEntrySList(&WaitContextQueryListHead))
     //    return;
@@ -633,7 +644,7 @@ VOID PhpFlushProcessPropSheetWaitContextData(
     }
 }
 
-VOID CALLBACK PhpProcessPropertiesWaitCallback(
+VOID NTAPI PhpProcessPropertiesWaitCallback(
     _In_ PVOID Context,
     _In_ BOOLEAN TimerOrWaitFired
     )

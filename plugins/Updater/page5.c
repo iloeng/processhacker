@@ -55,8 +55,10 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
             }
             else if (buttonId == IDYES)
             {
-                if (!UpdateShellExecute(context, hwndDlg))
+                if (!NT_SUCCESS(UpdateShellExecute(context, hwndDlg)))
+                {
                     return S_FALSE;
+                }
             }
         }
         break;
@@ -93,8 +95,34 @@ VOID ShowUpdateInstallDialog(
     config.cButtons = RTL_NUMBER_OF(TaskDialogButtonArray);
 
     config.pszWindowTitle = L"System Informer - Updater";
-    config.pszMainInstruction = L"Ready to install update?";
-    config.pszContent = L"The update has been successfully downloaded and verified.\r\n\r\nClick Install to continue.";
+    if (Context->SwitchingChannel)
+    {
+        switch (Context->Channel)
+        {
+        case PhReleaseChannel:
+            config.pszMainInstruction = L"Ready to switch to the release channel?";
+            break;
+        //case PhPreviewChannel:
+        //    config.pszMainInstruction = L"Ready to switch to the preview channel?";
+        //    break;
+        case PhCanaryChannel:
+            config.pszMainInstruction = L"Ready to switch to the canary channel?";
+            break;
+        //case PhDeveloperChannel:
+        //    config.pszMainInstruction = L"Ready to switch to the developer channel?";
+        //    break;
+        default:
+            config.pszMainInstruction = L"Ready to switch the channel?";
+            break;
+        }
+
+        config.pszContent = L"The channel has been successfully downloaded and verified.\r\n\r\nClick Install to continue.";
+    }
+    else
+    {
+        config.pszMainInstruction = L"Ready to install update?";
+        config.pszContent = L"The update has been successfully downloaded and verified.\r\n\r\nClick Install to continue.";
+    }
 
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
@@ -179,7 +207,7 @@ VOID ShowNewerVersionDialog(
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
-    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED;
+    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
     config.hMainIcon = PhGetApplicationIcon(FALSE);
     config.cxWidth = 200;
@@ -189,7 +217,7 @@ VOID ShowNewerVersionDialog(
     config.pszWindowTitle = L"System Informer - Updater";
     config.pszMainInstruction = L"You're running a pre-release build.";
     config.pszContent = PhaFormatString(
-        L"Pre-release build: v%s\r\n",
+        L"Pre-release build: v%s\r\n\r\n<A HREF=\"changelog.txt\">View changelog</A>",
         PhGetStringOrEmpty(Context->CurrentVersionString)
         )->Buffer;
 
@@ -212,15 +240,24 @@ VOID ShowUpdateFailedDialog(
     config.hMainIcon = PhGetApplicationIcon(FALSE);
 
     config.pszWindowTitle = L"System Informer - Updater";
-    config.pszMainInstruction = L"Error downloading the update.";
+    if (Context->SwitchingChannel)
+        config.pszMainInstruction = L"Error downloading the channel.";
+    else
+        config.pszMainInstruction = L"Error downloading the update.";
 
     if (SignatureFailed)
     {
-        config.pszContent = L"Signature check failed. Click Retry to download the update again.";
+        if (Context->SwitchingChannel)
+            config.pszContent = L"Signature check failed. Click Retry to download the channel again.";
+        else
+            config.pszContent = L"Signature check failed. Click Retry to download the update again.";
     }
     else if (HashFailed)
     {
-        config.pszContent = L"Hash check failed. Click Retry to download the update again.";
+        if (Context->SwitchingChannel)
+            config.pszContent = L"Hash check failed. Click Retry to download the channel again.";
+        else
+            config.pszContent = L"Hash check failed. Click Retry to download the update again.";
     }
     else
     {
@@ -233,14 +270,25 @@ VOID ShowUpdateFailedDialog(
                 config.pszContent = PhaFormatString(L"[%lu] %s", Context->ErrorCode, errorMessage->Buffer)->Buffer;
                 PhDereferenceObject(errorMessage);
             }
+            else if (errorMessage = PhGetStatusMessage(0, Context->ErrorCode))
+            {
+                config.pszContent = PhaFormatString(L"[%lu] %s", Context->ErrorCode, errorMessage->Buffer)->Buffer;
+                PhDereferenceObject(errorMessage);
+            }
             else
             {
-                config.pszContent = L"Click Retry to download the update again.";
+                if (Context->SwitchingChannel)
+                    config.pszContent = L"Click Retry to download the channel again.";
+                else
+                    config.pszContent = L"Click Retry to download the update again.";
             }
         }
         else
         {
-            config.pszContent = L"Click Retry to download the update again.";
+            if (Context->SwitchingChannel)
+                config.pszContent = L"Click Retry to download the channel again.";
+            else
+                config.pszContent = L"Click Retry to download the update again.";
         }
     }
 

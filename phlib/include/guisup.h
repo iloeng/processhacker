@@ -232,6 +232,13 @@ PhGetSystemMetrics(
     );
 
 PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetSystemSafeBootMode(
+    VOID
+    );
+
+PHLIBAPI
 BOOL
 NTAPI
 PhGetSystemParametersInfo(
@@ -325,6 +332,8 @@ FORCEINLINE WNDPROC PhSetWindowProcedure(
     return (WNDPROC)SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)SubclassProcedure);
 }
 
+#define PH_WINDOW_TIMER_DEFAULT 0xF
+
 FORCEINLINE UINT_PTR PhSetTimer(
     _In_ HWND WindowHandle,
     _In_ UINT_PTR TimerID,
@@ -377,6 +386,16 @@ PhSetCursor(
     )
 {
     return SetCursor(CursorHandle);
+}
+
+FORCEINLINE
+BOOLEAN
+NTAPI
+PhGetKeyState(
+    _In_ INT VirtualKey
+    )
+{
+    return GetKeyState(VirtualKey) < 0;
 }
 
 #ifndef WM_REFLECT
@@ -532,6 +551,13 @@ VOID PhSetListViewSubItem(
     );
 
 PHLIBAPI
+VOID
+NTAPI
+PhRedrawListViewItems(
+    _In_ HWND ListViewHandle
+    );
+
+PHLIBAPI
 INT
 NTAPI
 PhAddListViewGroup(
@@ -562,7 +588,7 @@ INT PhAddTabControlTab(
 
 PHLIBAPI
 PPH_STRING PhGetWindowText(
-    _In_ HWND hwnd
+    _In_ HWND WindowHandle
     );
 
 #define PH_GET_WINDOW_TEXT_INTERNAL 0x1
@@ -572,63 +598,82 @@ PHLIBAPI
 ULONG
 NTAPI
 PhGetWindowTextEx(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG Flags,
     _Out_opt_ PPH_STRING *Text
     );
 
 PHLIBAPI
-ULONG
+NTSTATUS
 NTAPI
 PhGetWindowTextToBuffer(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG Flags,
     _Out_writes_bytes_(BufferLength) PWSTR Buffer,
     _In_opt_ ULONG BufferLength,
     _Out_opt_ PULONG ReturnLength
     );
 
-PHLIBAPI
-VOID PhAddComboBoxStrings(
-    _In_ HWND hWnd,
-    _In_ PWSTR *Strings,
+FORCEINLINE
+VOID
+NTAPI
+PhAddComboBoxStrings(
+    _In_ HWND WindowHandle,
+    _In_ PWSTR* Strings,
     _In_ ULONG NumberOfStrings
-    );
+    )
+{
+    for (ULONG i = 0; i < NumberOfStrings; i++)
+        ComboBox_AddString(WindowHandle, Strings[i]);
+}
+
+FORCEINLINE
+VOID
+NTAPI
+PhAddComboBoxStringRefs(
+    _In_ HWND WindowHandle,
+    _In_ CONST PPH_STRINGREF* Strings,
+    _In_ ULONG NumberOfStrings
+    )
+{
+    for (ULONG i = 0; i < NumberOfStrings; i++)
+        ComboBox_AddString(WindowHandle, Strings[i]->Buffer);
+}
 
 PHLIBAPI
 PPH_STRING PhGetComboBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ INT Index
     );
 
 PHLIBAPI
 INT PhSelectComboBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ PWSTR String,
     _In_ BOOLEAN Partial
     );
 
 PHLIBAPI
 PPH_STRING PhGetListBoxString(
-    _In_ HWND hwnd,
+    _In_ HWND WindowHandle,
     _In_ INT Index
     );
 
 PHLIBAPI
 VOID PhSetStateAllListViewItems(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ ULONG State,
     _In_ ULONG Mask
     );
 
 PHLIBAPI
 PVOID PhGetSelectedListViewItemParam(
-    _In_ HWND hWnd
+    _In_ HWND WindowHandle
     );
 
 PHLIBAPI
 VOID PhGetSelectedListViewItemParams(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _Out_ PVOID **Items,
     _Out_ PULONG NumberOfItems
     );
@@ -671,8 +716,13 @@ VOID PhGetStockApplicationIcon(
 
 PHLIBAPI
 VOID PhSetClipboardString(
-    _In_ HWND hWnd,
+    _In_ HWND WindowHandle,
     _In_ PPH_STRINGREF String
+    );
+
+PHLIBAPI
+PPH_STRING PhGetClipboardString(
+    _In_ HWND WindowHandle
     );
 
 #include <pshpack1.h>
@@ -1105,7 +1155,7 @@ PHLIBAPI
 VOID
 NTAPI
 PhSetExtendedListView(
-    _In_ HWND hWnd
+    _In_ HWND WindowHandle
     );
 
 PHLIBAPI
@@ -1396,6 +1446,31 @@ PhGetPhysicallyInstalledSystemMemory(
     _Out_ PULONGLONG ReservedMemory
     );
 
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetSessionGuiResources(
+    _In_ ULONG Flags,
+    _Out_ PULONG Total
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhGetProcessGuiResources(
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG Flags,
+    _Out_ PULONG Total
+    );
+
+_Success_(return)
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhGetThreadWin32Thread(
+    _In_ HANDLE ThreadId
+    );
+
 _Success_(return)
 PHLIBAPI
 BOOLEAN
@@ -1577,6 +1652,14 @@ PHLIBAPI
 ULONG
 NTAPI
 PhInitiateShutdown(
+    _In_ ULONG Flags
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhSetProcessShutdownParameters(
+    _In_ ULONG Level,
     _In_ ULONG Flags
     );
 
@@ -1797,6 +1880,61 @@ PhLoadDividerCursor(
     VOID
     );
 
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhIsInteractiveUserSession(
+    VOID
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetCurrentWindowStationName(
+    VOID
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetCurrentThreadDesktopName(
+    VOID
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhRecentListCreate(
+    _Out_ PHANDLE RecentHandle
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhRecentListDestroy(
+    _In_ HANDLE RecentHandle
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhRecentListAddCommand(
+    _In_ PPH_STRINGREF Command
+    );
+
+typedef BOOLEAN (NTAPI* PPH_ENUM_MRULIST_CALLBACK)(
+    _In_ PPH_STRINGREF Command,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhEnumerateRecentList(
+    _In_ PPH_ENUM_MRULIST_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
 #ifndef DBT_DEVICEARRIVAL
 #define DBT_DEVICEARRIVAL        0x8000  // system detected a new device
 #define DBT_DEVICEREMOVECOMPLETE 0x8004  // device is gone
@@ -1813,10 +1951,10 @@ typedef struct _DEV_BROADCAST_HDR
 
 // theme support (theme.c)
 
-PHLIBAPI extern HFONT PhApplicationFont; // phapppub
-PHLIBAPI extern HFONT PhTreeWindowFont; // phapppub
-PHLIBAPI extern HFONT PhMonospaceFont; // phapppub
-PHLIBAPI extern HBRUSH PhThemeWindowBackgroundBrush;
+extern HFONT PhApplicationFont;
+extern HFONT PhTreeWindowFont;
+extern HFONT PhMonospaceFont;
+extern HBRUSH PhThemeWindowBackgroundBrush;
 extern BOOLEAN PhEnableThemeSupport;
 extern BOOLEAN PhEnableThemeAcrylicSupport;
 extern BOOLEAN PhEnableThemeListviewBorder;
@@ -2121,6 +2259,10 @@ PhPtInRect(
         Point.y >= Rect->top && Point.y < Rect->bottom;
 #endif
 }
+
+VOID PhWindowThemeMainMenuBorder(
+    _In_ HWND WindowHandle
+    );
 
 // directdraw.cpp
 

@@ -131,6 +131,20 @@ PhGetAccountPrivileges(
     _Out_ PTOKEN_PRIVILEGES* Privileges
     );
 
+typedef NTSTATUS (NTAPI* PPH_ENUM_PRIVILEGES)(
+    _In_ PPOLICY_PRIVILEGE_DEFINITION Privileges,
+    _In_ ULONG NumberOfPrivileges,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumeratePrivileges(
+    _In_ PPH_ENUM_PRIVILEGES Callback,
+    _In_opt_ PVOID Context
+    );
+
 typedef enum _LSA_USER_ACCOUNT_TYPE
 {
     UnknownUserAccountType,
@@ -178,6 +192,50 @@ NTAPI
 PhBuildTrusteeWithSid(
     _Out_ PVOID Trustee,
     _In_opt_ PSID Sid
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhMapGenericMask(
+    _Inout_ PACCESS_MASK AccessMask,
+    _In_ PGENERIC_MAPPING GenericMapping
+    );
+
+typedef NTSTATUS (NTAPI *PPH_ENUM_ACCOUNT_CALLBACK)(
+    _In_ PPH_STRING AccountName,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhEnumerateAccounts(
+    _In_ PPH_ENUM_ACCOUNT_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhCreateServiceSidToBuffer(
+    _In_ PPH_STRINGREF ServiceName,
+    _Out_writes_bytes_opt_(*ServiceSidLength) PSID ServiceSid,
+    _Inout_ PULONG ServiceSidLength
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhCreateServiceSidToStringSid(
+    _In_ PPH_STRINGREF ServiceName
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetAzureDirectoryObjectSid(
+    _In_ PSID ActiveDirectorySid
     );
 
 #ifdef __cplusplus

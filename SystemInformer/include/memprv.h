@@ -42,8 +42,17 @@ typedef enum _PH_MEMORY_REGION_TYPE
     GdiSharedHandleTableRegion,
     ShimDataRegion,
     ActivationContextDataRegion,
-    SystemDefaultActivationContextDataRegion
+    WerRegistrationDataRegion,
+    SiloSharedDataRegion,
+    TelemetryCoverageRegion
 } PH_MEMORY_REGION_TYPE;
+
+typedef enum _PH_ACTIVATION_CONTEXT_DATA_TYPE
+{
+    CustomActivationContext,
+    ProcessActivationContext,
+    SystemActivationContext
+} PH_ACTIVATION_CONTEXT_DATA_TYPE;
 
 typedef struct _PH_MEMORY_ITEM
 {
@@ -146,6 +155,10 @@ typedef struct _PH_MEMORY_ITEM
         {
             struct _PH_MEMORY_ITEM *HeapItem;
         } HeapSegment;
+        struct
+        {
+            PH_ACTIVATION_CONTEXT_DATA_TYPE Type;
+        } ActivationContextData;
     } u;
 } PH_MEMORY_ITEM, *PPH_MEMORY_ITEM;
 
@@ -162,11 +175,11 @@ VOID PhGetMemoryProtectionString(
     _Inout_z_ PWSTR String
     );
 
-PWSTR PhGetMemoryStateString(
+PPH_STRINGREF PhGetMemoryStateString(
     _In_ ULONG State
     );
 
-PWSTR PhGetMemoryTypeString(
+PPH_STRINGREF PhGetMemoryTypeString(
     _In_ ULONG Type
     );
 
@@ -178,7 +191,6 @@ PPH_STRING PhGetMemoryRegionTypeExString(
     _In_ PPH_MEMORY_ITEM MemoryItem
     );
 
-_Ret_notnull_
 PPH_MEMORY_ITEM PhCreateMemoryItem(
     VOID
     );

@@ -137,7 +137,7 @@ VOID PvPeProperties(
             PhDereferenceObject(fileName);
         }
 
-        PhLoadModulesForVirtualSymbolProvider(PvSymbolProvider, NtCurrentProcessId());
+        PhLoadModulesForVirtualSymbolProvider(PvSymbolProvider, NtCurrentProcessId(), NtCurrentProcess());
     }
 
     if (propContext = PvCreatePropContext(PvFileName))
@@ -216,13 +216,13 @@ VOID PvPeProperties(
             PvAddPropPage(propContext, newPage);
         }
 
-        if (NT_SUCCESS(PhGetMappedImageExportsEx(&exports, &PvMappedImage, PH_GET_IMAGE_EXPORTS_ARM64EC)) && exports.NumberOfEntries != 0)
+        if (NT_SUCCESS(PhGetMappedImageExportsEx(&exports, &PvMappedImage, PH_GET_IMAGE_EXPORTS_ARM64X)) && exports.NumberOfEntries != 0)
         {
             PV_EXPORTS_PAGECONTEXT exportsPageContext;
 
             memset(&exportsPageContext, 0, sizeof(PV_EXPORTS_PAGECONTEXT));
             exportsPageContext.FreePropPageContext = FALSE;
-            exportsPageContext.Context = ULongToPtr(PH_GET_IMAGE_EXPORTS_ARM64EC);
+            exportsPageContext.Context = ULongToPtr(PH_GET_IMAGE_EXPORTS_ARM64X);
 
             newPage = PvCreatePropPageContext(
                 MAKEINTRESOURCE(IDD_PEEXPORTS),
@@ -255,7 +255,7 @@ VOID PvPeProperties(
                     PvImageCor20Header,
                     sizeof(IMAGE_COR20_HEADER),
                     PvMappedImage.ViewBase,
-                    PvMappedImage.Size,
+                    PvMappedImage.ViewSize,
                     4
                     );
             }
@@ -326,9 +326,9 @@ VOID PvPeProperties(
             }
         }
 
-        // Exceptions page
         {
-            BOOLEAN has_exceptions = FALSE;
+            BOOLEAN hasExceptions = FALSE;
+            BOOLEAN hasExceptionsArm64X = FALSE;
 
             if (PvMappedImage.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
             {
@@ -336,23 +336,52 @@ VOID PvPeProperties(
                     RTL_CONTAINS_FIELD(config32, config32->Size, SEHandlerCount))
                 {
                     if (config32->SEHandlerCount && config32->SEHandlerTable)
-                        has_exceptions = TRUE;
+                        hasExceptions = TRUE;
                 }
             }
             else
             {
                 if (NT_SUCCESS(PhGetMappedImageDataEntry(&PvMappedImage, IMAGE_DIRECTORY_ENTRY_EXCEPTION, &entry)))
                 {
-                    has_exceptions = TRUE;
+                    IMAGE_DATA_DIRECTORY entryArm64X;
+
+                    hasExceptions = TRUE;
+
+                    if (NT_SUCCESS(PhRelocateMappedImageDataEntryARM64X(&PvMappedImage, entry, &entryArm64X)))
+                        hasExceptionsArm64X = TRUE;
                 }
             }
 
-            if (has_exceptions)
+            // Exceptions page
+            if (hasExceptions)
             {
+                PV_EXCEPTIONS_PAGECONTEXT exceptionsPageContext;
+
+                memset(&exceptionsPageContext, 0, sizeof(PV_EXPORTS_PAGECONTEXT));
+                exceptionsPageContext.FreePropPageContext = FALSE;
+                exceptionsPageContext.Context = ULongToPtr(0); // PhGetMappedImageExceptionsEx with no flags
+
                 newPage = PvCreatePropPageContext(
                     MAKEINTRESOURCE(IDD_PEEXCEPTIONS),
                     PvpPeExceptionDlgProc,
-                    NULL
+                    &exceptionsPageContext
+                    );
+                PvAddPropPage(propContext, newPage);
+            }
+
+            // Exceptions ARM64X page
+            if (hasExceptionsArm64X)
+            {
+                PV_EXCEPTIONS_PAGECONTEXT exceptionsPageContext;
+
+                memset(&exceptionsPageContext, 0, sizeof(PV_EXPORTS_PAGECONTEXT));
+                exceptionsPageContext.FreePropPageContext = FALSE;
+                exceptionsPageContext.Context = ULongToPtr(PH_GET_IMAGE_EXCEPTIONS_ARM64X);
+
+                newPage = PvCreatePropPageContext(
+                    MAKEINTRESOURCE(IDD_PEEXCEPTIONS),
+                    PvpPeExceptionDlgProc,
+                    &exceptionsPageContext
                     );
                 PvAddPropPage(propContext, newPage);
             }
@@ -876,10 +905,10 @@ VOID PvpSetPeImageMachineType(
     switch (machine)
     {
     case IMAGE_FILE_MACHINE_I386:
-        type = L"i386";
+        type = PhGetMappedImageCHPEVersion(&PvMappedImage) ? L"i386 (CHPE)" : L"i386";
         break;
     case IMAGE_FILE_MACHINE_AMD64:
-        type = L"AMD64";
+        type = PhGetMappedImageCHPEVersion(&PvMappedImage) ? L"AMD64 (ARM64X)" : L"AMD64";
         break;
     case IMAGE_FILE_MACHINE_IA64:
         type = L"IA64";
@@ -888,10 +917,7 @@ VOID PvpSetPeImageMachineType(
         type = L"ARM Thumb-2";
         break;
     case IMAGE_FILE_MACHINE_ARM64:
-        type = L"ARM64";
-        break;
-    case IMAGE_FILE_MACHINE_CHPE_X86:
-        type = L"Hybrid PE";
+        type = PhGetMappedImageCHPEVersion(&PvMappedImage) ? L"ARM64 (ARM64X)" : L"ARM64";
         break;
     default:
         type = L"Unknown";
@@ -982,29 +1008,29 @@ VOID PvpSetPeImageSize(
         }
     }
 
-    if (PvMappedImage.Size != lastRawDataOffset)
+    if (PvMappedImage.ViewSize != lastRawDataOffset)
     {
-        BOOLEAN success = FALSE;
-        PIMAGE_DATA_DIRECTORY dataDirectory;
-
-        if (NT_SUCCESS(PhGetMappedImageDataEntry(
-            &PvMappedImage,
-            IMAGE_DIRECTORY_ENTRY_SECURITY,
-            &dataDirectory
-            )))
-        {
-            if ((lastRawDataOffset + dataDirectory->Size == PvMappedImage.Size) &&
-                (lastRawDataOffset == dataDirectory->VirtualAddress))
-            {
-                success = TRUE;
-            }
-        }
-
-        if (success)
-        {
-            string = PhFormatSize(PvMappedImage.Size, ULONG_MAX);
-        }
-        else
+        //BOOLEAN success = FALSE;
+        //PIMAGE_DATA_DIRECTORY dataDirectory;
+        //
+        //if (NT_SUCCESS(PhGetMappedImageDataEntry(
+        //    &PvMappedImage,
+        //    IMAGE_DIRECTORY_ENTRY_SECURITY,
+        //    &dataDirectory
+        //    )))
+        //{
+        //    if ((lastRawDataOffset + dataDirectory->Size == PvMappedImage.Size) &&
+        //        (lastRawDataOffset == dataDirectory->VirtualAddress))
+        //    {
+        //        success = TRUE;
+        //    }
+        //}
+        //
+        //if (success)
+        //{
+        //    string = PhFormatSize(PvMappedImage.Size, ULONG_MAX);
+        //}
+        //else
         {
             WCHAR pointer[PH_PTR_STR_LEN_1];
 
@@ -1013,15 +1039,15 @@ VOID PvpSetPeImageSize(
             string = PhFormatString(
                 L"%s (incorrect, %s) (overlay, %s - %s)",
                 PhaFormatSize(lastRawDataOffset, ULONG_MAX)->Buffer,
-                PhaFormatSize(PvMappedImage.Size, ULONG_MAX)->Buffer,
+                PhaFormatSize(PvMappedImage.ViewSize, ULONG_MAX)->Buffer,
                 pointer,
-                PhaFormatSize(PvMappedImage.Size - lastRawDataOffset, ULONG_MAX)->Buffer
+                PhaFormatSize(PvMappedImage.ViewSize - lastRawDataOffset, ULONG_MAX)->Buffer
                 );
         }
     }
     else
     {
-        string = PhFormatSize(PvMappedImage.Size, ULONG_MAX);
+        string = PhFormatSize(PvMappedImage.ViewSize, ULONG_MAX);
     }
 
     PhSetListViewSubItem(ListViewHandle, PVP_IMAGE_GENERAL_INDEX_IMAGESIZE, 1, string->Buffer);
@@ -1042,7 +1068,7 @@ VOID PvCalculateImageEntropy(
 
     memset(counts, 0, sizeof(counts));
 
-    while (offset < PvMappedImage.Size)
+    while (offset < PvMappedImage.ViewSize)
     {
         BYTE value = *(PBYTE)PTR_ADD_OFFSET(PvMappedImage.ViewBase, offset++);
 
@@ -1052,13 +1078,13 @@ VOID PvCalculateImageEntropy(
 
     for (ULONG i = 0; i < RTL_NUMBER_OF(counts); i++)
     {
-        DOUBLE value = (DOUBLE)counts[i] / (DOUBLE)PvMappedImage.Size;
+        DOUBLE value = (DOUBLE)counts[i] / (DOUBLE)PvMappedImage.ViewSize;
 
         if (value > 0.0)
             imageEntropy -= value * log2(value);
     }
 
-    imageMeanValue = (DOUBLE)imageSumValue / (DOUBLE)PvMappedImage.Size; // 127.5 = random
+    imageMeanValue = (DOUBLE)imageSumValue / (DOUBLE)PvMappedImage.ViewSize; // 127.5 = random
 
     //offset = 0;
     //while (offset < PvMappedImage.Size)
@@ -2041,12 +2067,12 @@ INT_PTR CALLBACK PvPeGeneralDlgProc(
             if (PhEnableThemeSupport)
                 PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
 
-            PhSetTimer(hwndDlg, 1, 1000, NULL);
+            PhSetTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT, 1000, NULL);
         }
         break;
     case WM_DESTROY:
         {
-            PhKillTimer(hwndDlg, 1);
+            PhKillTimer(hwndDlg, PH_WINDOW_TIMER_DEFAULT);
 
             PhSaveListViewGroupStatesToSetting(L"ImageGeneralPropertiesListViewGroupStates", context->ListViewHandle);
             //PhSaveListViewSortColumnsToSetting(L"ImageGeneralPropertiesListViewSort", context->ListViewHandle);
@@ -2181,9 +2207,16 @@ INT_PTR CALLBACK PvPeGeneralDlgProc(
         break;
     case WM_TIMER:
         {
-            ExtendedListView_SetRedraw(context->ListViewHandle, FALSE);
-            PvUpdatePeFileTimes(context->ListViewHandle);
-            ExtendedListView_SetRedraw(context->ListViewHandle, TRUE);
+            switch (wParam)
+            {
+            case PH_WINDOW_TIMER_DEFAULT:
+                {
+                    ExtendedListView_SetRedraw(context->ListViewHandle, FALSE);
+                    PvUpdatePeFileTimes(context->ListViewHandle);
+                    ExtendedListView_SetRedraw(context->ListViewHandle, TRUE);
+                }
+                break;
+            }
         }
         break;
     case WM_CONTEXTMENU:

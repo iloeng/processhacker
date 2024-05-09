@@ -45,7 +45,7 @@ NTSTATUS PhSvcApiPortInitialization(
         (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
         PhLengthSid(administratorsSid) +
         (ULONG)sizeof(ACCESS_ALLOWED_ACE) +
-        PhLengthSid(&PhSeEveryoneSid);
+        PhLengthSid((PSID)&PhSeEveryoneSid);
 
     securityDescriptor = PhAllocate(sdAllocationLength);
     dacl = (PACL)PTR_ADD_OFFSET(securityDescriptor, SECURITY_DESCRIPTOR_MIN_LENGTH);
@@ -53,7 +53,7 @@ NTSTATUS PhSvcApiPortInitialization(
     RtlCreateSecurityDescriptor(securityDescriptor, SECURITY_DESCRIPTOR_REVISION);
     RtlCreateAcl(dacl, sdAllocationLength - SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION);
     RtlAddAccessAllowedAce(dacl, ACL_REVISION, PORT_ALL_ACCESS, administratorsSid);
-    RtlAddAccessAllowedAce(dacl, ACL_REVISION, PORT_CONNECT, &PhSeEveryoneSid);
+    RtlAddAccessAllowedAce(dacl, ACL_REVISION, PORT_CONNECT, (PSID)&PhSeEveryoneSid);
     RtlSetDaclSecurityDescriptor(securityDescriptor, TRUE, dacl, FALSE);
 
     InitializeObjectAttributes(
@@ -78,7 +78,7 @@ NTSTATUS PhSvcApiPortInitialization(
 
     // Start the API threads.
 
-    PhSvcApiThreadContextTlsIndex = TlsAlloc();
+    PhSvcApiThreadContextTlsIndex = PhTlsAlloc();
 
     for (i = 0; i < 2; i++)
     {
@@ -92,7 +92,7 @@ PPHSVC_THREAD_CONTEXT PhSvcGetCurrentThreadContext(
     VOID
     )
 {
-    return (PPHSVC_THREAD_CONTEXT)TlsGetValue(PhSvcApiThreadContextTlsIndex);
+    return (PPHSVC_THREAD_CONTEXT)PhTlsGetValue(PhSvcApiThreadContextTlsIndex);
 }
 
 NTSTATUS PhSvcApiRequestThreadStart(
@@ -116,7 +116,7 @@ NTSTATUS PhSvcApiRequestThreadStart(
     threadContext.CurrentClient = NULL;
     threadContext.OldClient = NULL;
 
-    TlsSetValue(PhSvcApiThreadContextTlsIndex, &threadContext);
+    PhTlsSetValue(PhSvcApiThreadContextTlsIndex, &threadContext);
 
     portHandle = PhSvcApiPortHandle;
     messageSize = PhIsExecutingInWow64() ? sizeof(PHSVC_API_MSG64) : sizeof(PHSVC_API_MSG);

@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2015-2016
- *     dmex    2017-2023
+ *     dmex    2017-2024
  *
  */
 
@@ -47,37 +47,12 @@ typedef NTSTATUS (NTAPI *_NtQueryInformationTransactionManager)(
     _Out_opt_ PULONG ReturnLength
     );
 
-typedef NTSTATUS (NTAPI *_NtQueryDefaultLocale)(
-    _In_ BOOLEAN UserProfile,
-    _Out_ PLCID DefaultLocaleId
-    );
-
-typedef NTSTATUS (NTAPI *_NtQueryDefaultUILanguage)(
-    _Out_ LANGID* DefaultUILanguageId
-    );
-
-typedef NTSTATUS (NTAPI *_NtTraceControl)(
-    _In_ TRACE_CONTROL_INFORMATION_CLASS TraceInformationClass,
-    _In_reads_bytes_opt_(InputBufferLength) PVOID InputBuffer,
-    _In_ ULONG InputBufferLength,
-    _Out_writes_bytes_opt_(TraceInformationLength) PVOID TraceInformation,
-    _In_ ULONG TraceInformationLength,
-    _Out_ PULONG ReturnLength
-    );
-
-typedef NTSTATUS (NTAPI *_NtQueryOpenSubKeysEx)(
-    _In_ POBJECT_ATTRIBUTES TargetKey,
-    _In_ ULONG BufferLength,
-    _Out_writes_bytes_opt_(BufferLength) PVOID Buffer,
-    _Out_ PULONG RequiredSize
-    );
-
 typedef NTSTATUS (NTAPI* _NtSetInformationVirtualMemory)(
     _In_ HANDLE ProcessHandle,
     _In_ VIRTUAL_MEMORY_INFORMATION_CLASS VmInformationClass,
     _In_ ULONG_PTR NumberOfEntries,
-    _In_reads_ (NumberOfEntries) PMEMORY_RANGE_ENTRY VirtualAddresses,
-    _In_reads_bytes_ (VmInformationLength) PVOID VmInformation,
+    _In_reads_(NumberOfEntries) PMEMORY_RANGE_ENTRY VirtualAddresses,
+    _In_reads_bytes_(VmInformationLength) PVOID VmInformation,
     _In_ ULONG VmInformationLength
     );
 
@@ -189,14 +164,26 @@ typedef LONG (WINAPI* _DnsQuery_W)(
     _Outptr_opt_result_maybenull_ PVOID* Reserved
     );
 
+typedef LONG (WINAPI* _DnsQueryEx)(
+    _In_ PVOID pQueryRequest,
+    _Inout_ PVOID pQueryResults,
+    _Inout_opt_ PVOID pCancelHandle
+    );
+
+typedef LONG (WINAPI* _DnsCancelQuery)(
+    _In_ PVOID pCancelHandle
+    );
+
+typedef struct _DNS_MESSAGE_BUFFER* PDNS_MESSAGE_BUFFER;
+
 typedef LONG (WINAPI* _DnsExtractRecordsFromMessage_W)(
-    _In_ struct _DNS_MESSAGE_BUFFER* DnsBuffer,
+    _In_ PDNS_MESSAGE_BUFFER DnsBuffer,
     _In_ USHORT MessageLength,
     _Out_ PVOID* DnsRecordList
     );
 
 typedef BOOL (WINAPI* _DnsWriteQuestionToBuffer_W)(
-    _Inout_ struct _DNS_MESSAGE_BUFFER* DnsBuffer,
+    _Inout_ PDNS_MESSAGE_BUFFER DnsBuffer,
     _Inout_ PULONG BufferSize,
     _In_ PWSTR Name,
     _In_ USHORT Type,
@@ -219,29 +206,27 @@ typedef BOOL (WINAPI* _DestroyEnvironmentBlock)(
     _In_ PVOID Environment
     );
 
-typedef int (WINAPI* _MessageBoxW)(
-    _In_opt_ HWND hWnd,
-    _In_opt_ LPCWSTR lpText,
-    _In_opt_ LPCWSTR lpCaption,
-    _In_ UINT uType
-    );
-
-typedef BOOL (WINAPI* _MessageBeep)(
-    _In_ UINT uType
-    );
-
 typedef BOOL (WINAPI* _SetWindowDisplayAffinity)(
     _In_ HWND WindowHandle,
     _In_ ULONG Affinity
     );
 
-typedef BOOLEAN (WINAPI* _WinStationQueryInformationW)(
-    _In_opt_ HANDLE ServerHandle,
-    _In_ ULONG SessionId,
-    _In_ ULONG WinStationInformationClass,
-    _Out_writes_bytes_(WinStationInformationLength) PVOID pWinStationInformation,
-    _In_ ULONG WinStationInformationLength,
-    _Out_ PULONG pReturnLength
+typedef ULONG (WINAPI *_NotifyServiceStatusChangeW)(
+    _In_ SC_HANDLE hService,
+    _In_ DWORD dwNotifyMask,
+    _In_ PSERVICE_NOTIFYW pNotifyBuffer
+    );
+
+typedef ULONG (WINAPI* _SubscribeServiceChangeNotifications)(
+    _In_ SC_HANDLE hService,
+    _In_ SC_EVENT_TYPE eEventType,
+    _In_ PSC_NOTIFICATION_CALLBACK pCallback,
+    _In_opt_ PVOID pCallbackContext,
+    _Out_ PSC_NOTIFICATION_REGISTRATION* pSubscription
+    );
+
+typedef VOID (WINAPI* _UnsubscribeServiceChangeNotifications)(
+    _In_ PSC_NOTIFICATION_REGISTRATION pSubscription
     );
 
 #define PH_DECLARE_IMPORT(Name) _##Name Name##_Import(VOID)
@@ -250,10 +235,6 @@ PH_DECLARE_IMPORT(NtQueryInformationEnlistment);
 PH_DECLARE_IMPORT(NtQueryInformationResourceManager);
 PH_DECLARE_IMPORT(NtQueryInformationTransaction);
 PH_DECLARE_IMPORT(NtQueryInformationTransactionManager);
-PH_DECLARE_IMPORT(NtQueryDefaultLocale);
-PH_DECLARE_IMPORT(NtQueryDefaultUILanguage);
-PH_DECLARE_IMPORT(NtTraceControl);
-PH_DECLARE_IMPORT(NtQueryOpenSubKeysEx);
 PH_DECLARE_IMPORT(NtSetInformationVirtualMemory);
 PH_DECLARE_IMPORT(NtCreateProcessStateChange);
 PH_DECLARE_IMPORT(NtChangeProcessState);
@@ -268,11 +249,6 @@ PH_DECLARE_IMPORT(RtlDeriveCapabilitySidsFromName);
 PH_DECLARE_IMPORT(ConvertSecurityDescriptorToStringSecurityDescriptorW);
 PH_DECLARE_IMPORT(ConvertStringSecurityDescriptorToSecurityDescriptorW);
 
-PH_DECLARE_IMPORT(DnsQuery_W);
-PH_DECLARE_IMPORT(DnsExtractRecordsFromMessage_W);
-PH_DECLARE_IMPORT(DnsWriteQuestionToBuffer_W);
-PH_DECLARE_IMPORT(DnsFree);
-
 PH_DECLARE_IMPORT(SHAutoComplete);
 
 PH_DECLARE_IMPORT(PssCaptureSnapshot);
@@ -284,10 +260,6 @@ PH_DECLARE_IMPORT(DestroyEnvironmentBlock);
 PH_DECLARE_IMPORT(GetAppContainerRegistryLocation);
 PH_DECLARE_IMPORT(GetAppContainerFolderPath);
 
-PH_DECLARE_IMPORT(MessageBoxW);
-PH_DECLARE_IMPORT(MessageBeep);
 PH_DECLARE_IMPORT(SetWindowDisplayAffinity);
-
-PH_DECLARE_IMPORT(WinStationQueryInformationW);
 
 #endif

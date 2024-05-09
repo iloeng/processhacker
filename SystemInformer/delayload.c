@@ -100,7 +100,7 @@ PVOID WINAPI __delayLoadHelper2(
     }
 
     return LdrResolveDelayLoadedAPI(
-        PhInstanceHandle,
+        NtCurrentImageBase(),
         DelayloadDescriptor,
         NULL,
         DelayLoadFailureHook,
@@ -120,22 +120,22 @@ PVOID WINAPI __delayLoadHelper2(
     SIZE_T importDirectorySectionSize;
     PVOID importDirectorySectionAddress;
 
-    importDllName = PTR_ADD_OFFSET(PhInstanceHandle, DelayloadDescriptor->DllNameRVA);
-    importHandle = PTR_ADD_OFFSET(PhInstanceHandle, DelayloadDescriptor->ModuleHandleRVA);
-    importTable = PTR_ADD_OFFSET(PhInstanceHandle, DelayloadDescriptor->ImportAddressTableRVA);
-    importNameTable = PTR_ADD_OFFSET(PhInstanceHandle, DelayloadDescriptor->ImportNameTableRVA);
+    importDllName = PTR_ADD_OFFSET(NtCurrentImageBase(), DelayloadDescriptor->DllNameRVA);
+    importHandle = PTR_ADD_OFFSET(NtCurrentImageBase(), DelayloadDescriptor->ModuleHandleRVA);
+    importTable = PTR_ADD_OFFSET(NtCurrentImageBase(), DelayloadDescriptor->ImportAddressTableRVA);
+    importNameTable = PTR_ADD_OFFSET(NtCurrentImageBase(), DelayloadDescriptor->ImportNameTableRVA);
 
-    if (!(moduleHandle = *importHandle))
+    if (!(moduleHandle = InterlockedCompareExchangePointer(importHandle, NULL, NULL)))
     {
-        PPH_STRING importDllNameString = PhZeroExtendToUtf16(importDllName);
+        WCHAR importDllNameBuffer[DOS_MAX_PATH_LENGTH] = L"";
 
-        if (!(moduleHandle = PhLoadLibrary(importDllNameString->Buffer)))
+        PhZeroExtendToUtf16Buffer(importDllName, strlen(importDllName), importDllNameBuffer);
+
+        if (!(moduleHandle = PhLoadLibrary(importDllNameBuffer)))
         {
-            PhDereferenceObject(importDllNameString);
             return NULL;
         }
 
-        PhDereferenceObject(importDllNameString);
         importNeedsFree = TRUE;
     }
 
@@ -148,7 +148,7 @@ PVOID WINAPI __delayLoadHelper2(
     }
     else
     {
-        PIMAGE_IMPORT_BY_NAME importByName = PTR_ADD_OFFSET(PhInstanceHandle, importEntry->u1.AddressOfData);
+        PIMAGE_IMPORT_BY_NAME importByName = PTR_ADD_OFFSET(NtCurrentImageBase(), importEntry->u1.AddressOfData);
         procedureAddress = PhGetDllBaseProcedureAddressWithHint(moduleHandle, importByName->Name, importByName->Hint);
     }
 
@@ -156,7 +156,7 @@ PVOID WINAPI __delayLoadHelper2(
         return NULL;
 
     if (!NT_SUCCESS(PhGetLoaderEntryImageNtHeaders(
-        PhInstanceHandle,
+        NtCurrentImageBase(),
         &imageNtHeaders
         )))
     {
@@ -164,7 +164,7 @@ PVOID WINAPI __delayLoadHelper2(
     }
 
     if (!NT_SUCCESS(PhGetLoaderEntryImageVaToSection(
-        PhInstanceHandle,
+        NtCurrentImageBase(),
         imageNtHeaders,
         importTable,
         &importDirectorySectionAddress,

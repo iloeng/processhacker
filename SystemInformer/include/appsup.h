@@ -13,12 +13,12 @@
 #ifndef PH_APPSUP_H
 #define PH_APPSUP_H
 
-extern GUID XP_CONTEXT_GUID;
-extern GUID VISTA_CONTEXT_GUID;
-extern GUID WIN7_CONTEXT_GUID;
-extern GUID WIN8_CONTEXT_GUID;
-extern GUID WINBLUE_CONTEXT_GUID;
-extern GUID WIN10_CONTEXT_GUID;
+DEFINE_GUID(XP_CONTEXT_GUID, 0xbeb1b341, 0x6837, 0x4c83, 0x83, 0x66, 0x2b, 0x45, 0x1e, 0x7c, 0xe6, 0x9b);
+DEFINE_GUID(VISTA_CONTEXT_GUID, 0xe2011457, 0x1546, 0x43c5, 0xa5, 0xfe, 0x00, 0x8d, 0xee, 0xe3, 0xd3, 0xf0);
+DEFINE_GUID(WIN7_CONTEXT_GUID, 0x35138b9a, 0x5d96, 0x4fbd, 0x8e, 0x2d, 0xa2, 0x44, 0x02, 0x25, 0xf9, 0x3a);
+DEFINE_GUID(WIN8_CONTEXT_GUID, 0x4a2f28e3, 0x53b9, 0x4441, 0xba, 0x9c, 0xd6, 0x9d, 0x4a, 0x4a, 0x6e, 0x38);
+DEFINE_GUID(WINBLUE_CONTEXT_GUID, 0x1f676c76, 0x80e1, 0x4239, 0x95, 0xbb, 0x83, 0xd0, 0xf6, 0xd0, 0xda, 0x78);
+DEFINE_GUID(WIN10_CONTEXT_GUID, 0x8e0f7a12, 0xbfb3, 0x4fe8, 0xb9, 0xa5, 0x48, 0xfd, 0x50, 0xa1, 0x5a, 0x9a);
 
 // begin_phapppub
 PHAPPAPI
@@ -116,8 +116,8 @@ typedef union _PH_KNOWN_PROCESS_COMMAND_LINE
     } ComSurrogate;
 } PH_KNOWN_PROCESS_COMMAND_LINE, *PPH_KNOWN_PROCESS_COMMAND_LINE;
 
-PHAPPAPI
 _Success_(return)
+PHAPPAPI
 BOOLEAN
 NTAPI
 PhaGetProcessKnownCommandLine(
@@ -253,7 +253,7 @@ PhWritePhTextHeader(
 #define PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY 0x2
 
 PHAPPAPI
-BOOLEAN
+NTSTATUS
 NTAPI
 PhShellProcessHacker(
     _In_opt_ HWND WindowHandle,
@@ -266,7 +266,7 @@ PhShellProcessHacker(
     );
 // end_phapppub
 
-BOOLEAN PhShellProcessHackerEx(
+NTSTATUS PhShellProcessHackerEx(
     _In_opt_ HWND WindowHandle,
     _In_opt_ PWSTR FileName,
     _In_opt_ PWSTR Parameters,
@@ -342,12 +342,10 @@ typedef struct _PH_TN_FILTER_SUPPORT
     PPH_LIST NodeList;
 } PH_TN_FILTER_SUPPORT, *PPH_TN_FILTER_SUPPORT;
 
-_Function_class_(PH_TN_FILTER_FUNCTION)
-typedef BOOLEAN (NTAPI PH_TN_FILTER_FUNCTION)(
+typedef BOOLEAN (NTAPI *PPH_TN_FILTER_FUNCTION)(
     _In_ PPH_TREENEW_NODE Node,
     _In_opt_ PVOID Context
     );
-typedef PH_TN_FILTER_FUNCTION *PPH_TN_FILTER_FUNCTION;
 
 typedef struct _PH_TN_FILTER_ENTRY
 {
@@ -515,7 +513,17 @@ PhSetApplicationWindowIconEx(
 PHAPPAPI
 VOID
 NTAPI
-PhDeleteApplicationWindowIcon(
+PhSetWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_opt_ HICON SmallIcon,
+    _In_opt_ HICON LargeIcon,
+    _In_ BOOLEAN CleanupIcon
+    );
+
+PHAPPAPI
+VOID
+NTAPI
+PhDestroyWindowIcon(
     _In_ HWND WindowHandle
     );
 
@@ -548,6 +556,10 @@ HRESULT PhDeleteAdminTask(
 HRESULT PhCreateAdminTask(
     _In_ PPH_STRINGREF TaskName,
     _In_ PPH_STRINGREF FileName
+    );
+
+NTSTATUS PhRunAsAdminTaskUIAccess(
+    VOID
     );
 
 // begin_phapppub

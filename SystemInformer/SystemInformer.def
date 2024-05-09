@@ -163,6 +163,7 @@ EXPORTS
     PhfWaitForBarrier
     PhfWaitForEvent
     PhfWaitForRundownProtection
+    PhGetLastError
     PhGetPrimeNumber
     PhHashBytes
     PhHashStringRef
@@ -251,6 +252,7 @@ EXPORTS
     PhDeleteFileWin32
     PhDeleteFile
     PhDeleteValueKey
+    PhDestroyWindowRemote
     PhDetermineDosPathNameType
     PhDoesFileExistWin32
     PhDoesFileExist
@@ -263,9 +265,6 @@ EXPORTS
     PhEnumFileStreams
     PhEnumFirmwareEnvironmentValues
     PhEnumGenericModules
-    PhEnumHandles
-    PhEnumHandlesEx
-    PhEnumHandlesEx2
     PhEnumKernelModules
     PhEnumNextProcess
     PhEnumNextThread
@@ -274,14 +273,12 @@ EXPORTS
     PhEnumProcessEnvironmentVariables
     PhEnumProcesses
     PhEnumProcessesEx
-    PhEnumProcessModules
-    PhEnumProcessModules32
-    PhEnumProcessModules32Ex
-    PhEnumProcessModulesEx
     PhEnumReparsePointInformation
     PhFindProcessInformation
     PhFindProcessInformationByImageName
     PhGetActiveProcessorCount
+    PhGetDeviceType
+    PhGetFileFullAttributesInformation
     PhGetFileName
     PhGetFilePosition
     PhGetFileSize
@@ -335,6 +332,7 @@ EXPORTS
     PhOpenThreadProcess
     PhOpenProcessToken
     PhPeekNamedPipe
+    PhQueryEnvironmentVariable
     PhQueryFullAttributesFileWin32
     PhQueryKey
     PhQueryValueKey
@@ -359,6 +357,8 @@ EXPORTS
     PhUpdateDosDevicePrefixes
     PhUpdateMupDevicePrefixes
     PhWaitForNamedPipe
+    PhSetProcessPowerThrottlingState
+    PhSetProcessPriority
     PhSetProcessPriorityBoost
     PhSetThreadBasePriority
     PhSetThreadIoPriority
@@ -368,15 +368,6 @@ EXPORTS
     PhAdjustRectangleToWorkingArea
     PhCenterRectangle
     PhCenterWindow
-    PhGetDpi
-    PhGetMonitorDpi
-    PhGetSystemDpi
-    PhGetTaskbarDpi
-    PhGetWindowDpi
-    PhGetDpiValue
-    PhGetSystemMetrics
-    PhGetSystemParametersInfo
-    PhGetSizeDpiValue
     PhCompareUnicodeStringZIgnoreMenuPrefix
     PhCreateOpenFileDialog
     PhCreateProcess
@@ -386,15 +377,14 @@ EXPORTS
     PhCreateProcessWin32Ex
     PhCreateSaveFileDialog
     PhDeleteImageVersionInfo
+    PhDevGetObjects
+    PhDevFreeObjects
     PhEllipsisString
     PhEllipsisStringPath
     PhEscapeCommandLinePart
     PhEscapeStringForMenuPrefix
     PhExpandEnvironmentStrings
     PhFinalHash
-    PhFindIntegerSiKeyValuePairs
-    PhFindLoaderEntry
-    PhFindStringSiKeyValuePairs
     PhFormatDate
     PhFormatDateTime
     PhFormatDecimal
@@ -421,6 +411,8 @@ EXPORTS
     PhGetBaseName
     PhGetClassObject
     PhGetDllFileName
+    PhGetDpi
+    PhGetDpiValue
     PhGetFileDialogFileName
     PhGetFileDialogFilterIndex
     PhGetFileDialogOptions
@@ -434,10 +426,17 @@ EXPORTS
     PhGetKnownFolderPath
     PhGetKnownLocation
     PhGetMessage
+    PhGetMonitorDpi
     PhGetNtMessage
+    PhGetSizeDpiValue
     PhGetStatusMessage
     PhGetSystemDirectory
+    PhGetSystemDpi
+    PhGetSystemMetrics
+    PhGetSystemParametersInfo
     PhGetSystemRoot
+    PhGetTaskbarDpi
+    PhGetWindowDpi
     PhGetWin32Message
     PhGetTemporaryDirectoryRandomAlphaFileName
     PhInitializeHash
@@ -468,9 +467,18 @@ EXPORTS
     PhShowFileDialog
     PhShowMessage
     PhShowMessage2
+    PhShowMessageOneTime
     PhShowStatus
+    PhSystemTimeToTzSpecificLocalTime
     PhStringToGuid
+    PhSystemTimeToLargeInteger
+    PhTaskbarListCreate
+    PhTaskbarListDestroy
+    PhTaskbarListSetProgressValue
+    PhTaskbarListSetProgressState
+    PhTaskbarListSetOverlayIcon
     PhUpdateHash
+    PhWaitForMultipleObjectsAndPump
 
 ; circbuf
     PhClearCircularBuffer_FLOAT
@@ -497,6 +505,7 @@ EXPORTS
 ; cpysave
     PhGetGenericTreeNewLines
     PhGetListViewItemText
+    PhGetListViewSelectedItemText
     PhGetTreeNewText
 
 ; emenu
@@ -552,7 +561,6 @@ EXPORTS
     PhSetGraphText
 
 ; guisup
-    PhAddComboBoxStrings
     PhAddLayoutItem
     PhAddLayoutItemEx
     PhAddListViewColumn
@@ -604,8 +612,6 @@ EXPORTS
     PhSetDialogItemText
     PhSetGroupBoxText
     PhSetWindowText
-    PhApplicationFont
-    PhTreeWindowFont
     PhRegisterWindowCallback
     PhUnregisterWindowCallback
     PhInitializeWindowTheme
@@ -638,6 +644,7 @@ EXPORTS
     PhCallKphQueryFileInformationWithTimeout
 
 ; lsasup
+    PhEnumeratePrivileges
     PhGetSidFullName
     PhLookupName
     PhLookupPrivilegeDisplayName
@@ -648,16 +655,9 @@ EXPORTS
     PhSidToStringSid
 
 ; mapimg
-    PhGetMappedImageCfg
-    PhGetMappedImageCfgEntry
-    PhGetMappedImageLoadConfig32
-    PhGetMappedImageLoadConfig64
-    PhGetMappedImageExports
-    PhGetMappedImageExportFunction
-    PhMappedImageRvaToVa
-    PhInitializeMappedImage
     PhLoadMappedImage
     PhLoadMappedImageEx
+    PhLoadMappedImageHeaderPageSize
     PhUnloadMappedImage
 
 ; provider
@@ -715,13 +715,16 @@ EXPORTS
     PhStdSetObjectSecurity
 
 ; svcsup
-    PhEnumServices
+    PhChangeServiceConfig2
+    PhCloseServiceHandle
+    PhEnumDependentServices
     PhGetServiceConfig
-    PhGetServiceDelayedAutoStart
+    PhGetServiceConfigFileName
     PhGetServiceDescription
     PhGetServiceDllParameter
     PhGetServiceErrorControlInteger
     PhGetServiceErrorControlString
+    PhGetServiceFileName
     PhGetServiceNameFromTag
     PhGetServiceStartTypeInteger
     PhGetServiceStartTypeString
@@ -730,8 +733,11 @@ EXPORTS
     PhGetServiceTypeString
     PhGetThreadServiceTag
     PhOpenService
+    PhOpenServiceKey
+    PhQueryServiceConfig
+    PhQueryServiceConfig2
+    PhQueryServiceStatus
     PhQueryServiceVariableSize
-    PhSetServiceDelayedAutoStart
 
 ; symprv
     PhCreateSymbolProvider
@@ -844,3 +850,4 @@ EXPORTS
 ; kphuser
     KphLevel
     KphEnumerateProcessHandles2
+    KphQueryHashInformationFile

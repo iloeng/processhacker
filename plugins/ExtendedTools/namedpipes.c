@@ -385,23 +385,28 @@ VOID EtEnumerateNamedPipeHandles(
             for (ULONG i = 0; i < handles->HandleCount; i++)
             {
                 PKPH_PROCESS_HANDLE handle = &handles->Handles[i];
-                PPH_STRING objectName;
+                DEVICE_TYPE deviceType;
 
-                if (!NT_SUCCESS(PhGetHandleInformation(
-                    processHandle,
-                    handle->Handle,
-                    handle->ObjectTypeIndex,
-                    NULL,
-                    NULL,
-                    NULL,
-                    &objectName
-                    )))
-                {
+                if (!NT_SUCCESS(PhGetDeviceType(processHandle, handle->Handle, &deviceType)))
                     continue;
-                }
 
-                if (PhStartsWithString2(objectName, DEVICE_NAMED_PIPE, TRUE))
+                if (deviceType == FILE_DEVICE_NAMED_PIPE)
                 {
+                    PPH_STRING objectName;
+
+                    if (!NT_SUCCESS(PhGetHandleInformation(
+                        processHandle,
+                        handle->Handle,
+                        handle->ObjectTypeIndex,
+                        NULL,
+                        NULL,
+                        NULL,
+                        &objectName
+                        )))
+                    {
+                        continue;
+                    }
+
                     EtAddNamedPipeHandleToListView(
                         Context,
                         process->UniqueProcessId,
@@ -486,7 +491,7 @@ INT_PTR CALLBACK EtPipeEnumDlgProc(
                 PhAddListViewColumn(context->ListViewWndHandle, 13, 13, 13, LVCFMT_LEFT, 80, L"Read mode");
                 PhAddListViewColumn(context->ListViewWndHandle, 14, 14, 14, LVCFMT_LEFT, 80, L"Completion mode");
                 PhSetExtendedListView(context->ListViewWndHandle);
-                PhLoadListViewColumnsFromSetting(SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KPH, context->ListViewWndHandle);
+                PhLoadListViewColumnsFromSetting(SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KSI, context->ListViewWndHandle);
 
                 PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
 
@@ -522,7 +527,7 @@ INT_PTR CALLBACK EtPipeEnumDlgProc(
 
             PhSaveWindowPlacementToSetting(SETTING_NAME_PIPE_ENUM_WINDOW_POSITION, SETTING_NAME_PIPE_ENUM_WINDOW_SIZE, hwndDlg);
             if (context->UseKph)
-                PhSaveListViewColumnsToSetting(SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KPH, context->ListViewWndHandle);
+                PhSaveListViewColumnsToSetting(SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KSI, context->ListViewWndHandle);
             else
                 PhSaveListViewColumnsToSetting(SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS, context->ListViewWndHandle);
 

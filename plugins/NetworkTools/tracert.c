@@ -295,7 +295,7 @@ VOID TracertQueueHostLookup(
     _In_ PVOID SocketAddress
     )
 {
-    PPH_STRING remoteCountryCode;
+    ULONG remoteCountryCode;
     PPH_STRING remoteCountryName;
     ULONG addressStringLength = INET6_ADDRSTRLEN;
     WCHAR addressString[INET6_ADDRSTRLEN] = L"";
@@ -348,7 +348,7 @@ VOID TracertQueueHostLookup(
             &remoteCountryName
             ))
         {
-            PhMoveReference(&Node->RemoteCountryCode, remoteCountryCode);
+            Node->RemoteCountryCode = remoteCountryCode;
             PhMoveReference(&Node->RemoteCountryName, remoteCountryName);
         }
     }
@@ -400,7 +400,7 @@ VOID TracertQueueHostLookup(
             &remoteCountryName
             ))
         {
-            PhMoveReference(&Node->RemoteCountryCode, remoteCountryCode);
+            Node->RemoteCountryCode = remoteCountryCode;
             PhMoveReference(&Node->RemoteCountryName, remoteCountryName);
         }
     }
@@ -440,7 +440,7 @@ NTSTATUS NetworkTracertThreadStart(
 
     if (icmpRandString = PhCreateStringEx(NULL, icmpEchoBufferLength * sizeof(WCHAR) + sizeof(UNICODE_NULL)))
     {
-        PhGenerateRandomAlphaString(icmpRandString->Buffer, (ULONG)icmpRandString->Length / sizeof(WCHAR));
+        PhGenerateRandomAlphaString(icmpRandString->Buffer, icmpRandString->Length / sizeof(WCHAR));
         icmpEchoBuffer = PhConvertUtf16ToMultiByteEx(icmpRandString->Buffer, icmpRandString->Length - sizeof(UNICODE_NULL));
         PhDereferenceObject(icmpRandString);
     }
@@ -893,7 +893,7 @@ INT_PTR CALLBACK TracertDlgProc(
             EnableWindow(GetDlgItem(hwndDlg, IDC_REFRESH), FALSE);
 
             PhReferenceObject(context);
-            PhCreateThread2(NetworkTracertThreadStart, (PVOID)context);
+            PhCreateThread2(NetworkTracertThreadStart, context);
 
             PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
         }
@@ -946,7 +946,7 @@ INT_PTR CALLBACK TracertDlgProc(
                     ClearTracertTree(context);
 
                     PhReferenceObject(context);
-                    PhCreateThread2(NetworkTracertThreadStart, (PVOID)context);
+                    PhCreateThread2(NetworkTracertThreadStart, context);
                 }
                 break;
             case TRACERT_SHOWCONTEXTMENU:

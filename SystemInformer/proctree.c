@@ -239,6 +239,8 @@ VOID PhInitializeProcessTreeList(
     PhAddTreeNewColumn(hwnd, PHPRTLC_GRANTEDACCESS, FALSE, L"Granted access (symbolic)", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(hwnd, PHPRTLC_TLSBITMAPDELTA, FALSE, L"Thread local storage", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
     PhAddTreeNewColumn(hwnd, PHPRTLC_REFERENCEDELTA, FALSE, L"References", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHPRTLC_LXSSPID, FALSE, L"PID (LXSS)", 50, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHPRTLC_START_KEY, FALSE, L"Start key", 120, PH_ALIGN_LEFT, ULONG_MAX, 0);
 
     TreeNew_SetRedraw(hwnd, TRUE);
 
@@ -385,7 +387,7 @@ VOID PhReloadSettingsProcessTreeList(
     PhLoadSettingsProcessTreeUpdateMask();
 }
 
-struct _PH_TN_FILTER_SUPPORT *PhGetFilterSupportProcessTreeList(
+PPH_TN_FILTER_SUPPORT PhGetFilterSupportProcessTreeList(
     VOID
     )
 {
@@ -717,7 +719,7 @@ VOID PhTickProcessNodes(
 
         // The name and PID never change, so we don't invalidate that.
         memset(&node->TextCache[2], 0, sizeof(PH_STRINGREF) * (PHPRTLC_MAXIMUM - 2));
-        node->ValidMask &= PHPN_OSCONTEXT | PHPN_IMAGE | PHPN_DPIAWARENESS | PHPN_APPID | PHPN_DESKTOPINFO | PHPN_CODEPAGE | PHPN_ARCHITECTURE | PHPN_GRANTEDACCESS; // Items that always remain valid
+        node->ValidMask &= PHPN_OSCONTEXT | PHPN_IMAGE | PHPN_DPIAWARENESS | PHPN_APPID | PHPN_DESKTOPINFO | PHPN_CODEPAGE | PHPN_GRANTEDACCESS; // Items that always remain valid
 
         // The DPI awareness defaults to unaware if not set or declared in the manifest in which case
         // it can be changed once, so we can only be sure that it won't be changed again if it is different
@@ -949,12 +951,14 @@ static VOID PhpUpdateProcessNodeGdiUserHandles(
     _Inout_ PPH_PROCESS_NODE ProcessNode
     )
 {
-    if (!(ProcessNode->ValidMask & PHPN_GDIUSERHANDLES))
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_GDIUSERHANDLES))
     {
         if (ProcessNode->ProcessItem->QueryHandle)
         {
-            ProcessNode->GdiHandles = GetGuiResources(ProcessNode->ProcessItem->QueryHandle, GR_GDIOBJECTS);
-            ProcessNode->UserHandles = GetGuiResources(ProcessNode->ProcessItem->QueryHandle, GR_USEROBJECTS);
+            if (!NT_SUCCESS(PhGetProcessGuiResources(ProcessNode->ProcessItem->QueryHandle, GR_GDIOBJECTS, &ProcessNode->GdiHandles)))
+                ProcessNode->GdiHandles = 0;
+            if (!NT_SUCCESS(PhGetProcessGuiResources(ProcessNode->ProcessItem->QueryHandle, GR_USEROBJECTS, &ProcessNode->UserHandles)))
+                ProcessNode->UserHandles = 0;
         }
         else
         {
@@ -962,7 +966,7 @@ static VOID PhpUpdateProcessNodeGdiUserHandles(
             ProcessNode->UserHandles = 0;
         }
 
-        ProcessNode->ValidMask |= PHPN_GDIUSERHANDLES;
+        SetFlag(ProcessNode->ValidMask, PHPN_GDIUSERHANDLES);
     }
 }
 
@@ -1099,11 +1103,7 @@ static VOID PhpUpdateProcessOsContext(
     {
         HANDLE processHandle;
 
-        if (ProcessNode->ProcessItem->IsSubsystemProcess)
-        {
-            NOTHING;
-        }
-        else if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessItem->ProcessId))
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessItem->ProcessId) && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             if (NT_SUCCESS(PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, ProcessNode->ProcessId)))
             {
@@ -1163,6 +1163,8 @@ static VOID PhpUpdateProcessNodeImage(
 {
     if (!(ProcessNode->ValidMask & PHPN_IMAGE))
     {
+        ProcessNode->ImageMachine = IMAGE_FILE_MACHINE_UNKNOWN;
+
         if (ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             ProcessNode->ImageSubsystem = IMAGE_SUBSYSTEM_POSIX_CUI;
@@ -1171,10 +1173,13 @@ static VOID PhpUpdateProcessNodeImage(
         {
             PH_MAPPED_IMAGE mappedImage;
 
+#ifdef _ARM64_
+            if (NT_SUCCESS(PhLoadMappedImageEx(&ProcessNode->ProcessItem->FileName->sr, NULL, &mappedImage)))
+#else
             if (NT_SUCCESS(PhLoadMappedImageHeaderPageSize(&ProcessNode->ProcessItem->FileName->sr, NULL, &mappedImage)))
+#endif
             {
-                if (WindowsVersion < WINDOWS_11)
-                    ProcessNode->ImageReserved = mappedImage.NtHeaders->FileHeader.Machine;
+                ProcessNode->ImageMachine = mappedImage.NtHeaders->FileHeader.Machine;
                 ProcessNode->ImageTimeDateStamp = mappedImage.NtHeaders->FileHeader.TimeDateStamp;
                 ProcessNode->ImageCharacteristics = mappedImage.NtHeaders->FileHeader.Characteristics;
 
@@ -1189,9 +1194,17 @@ static VOID PhpUpdateProcessNodeImage(
                     ProcessNode->ImageDllCharacteristics = ((PIMAGE_OPTIONAL_HEADER64)&mappedImage.NtHeaders->OptionalHeader)->DllCharacteristics;
                 }
 
+#ifdef _ARM64_
+                if (ProcessNode->ImageMachine == IMAGE_FILE_MACHINE_AMD64 || ProcessNode->ImageMachine == IMAGE_FILE_MACHINE_ARM64)
+                    ProcessNode->ImageCHPEVersion = PhGetMappedImageCHPEVersion(&mappedImage);
+#endif
+
                 PhUnloadMappedImage(&mappedImage);
             }
         }
+
+        if (ProcessNode->ImageMachine == IMAGE_FILE_MACHINE_UNKNOWN && ProcessNode->ProcessItem->QueryHandle)
+            PhGetProcessArchitecture(ProcessNode->ProcessItem->QueryHandle, &ProcessNode->ImageMachine);
 
         //if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessItem->ProcessId))
         //{
@@ -1246,7 +1259,10 @@ static VOID PhpUpdateProcessNodeAppId(
         {
             NOTHING;
         }
-        else if (PhAppResolverGetAppIdForProcess(ProcessNode->ProcessId, &applicationUserModelId))
+        else if (HR_SUCCESS(PhAppResolverGetAppIdForProcess(
+            ProcessNode->ProcessId,
+            &applicationUserModelId
+            )))
         {
             ProcessNode->AppIdText = applicationUserModelId;
         }
@@ -1293,7 +1309,7 @@ static VOID PhpUpdateProcessNodeDpiAwareness(
 {
     if (!(ProcessNode->ValidMask & PHPN_DPIAWARENESS))
     {
-        if (ProcessNode->ProcessItem->QueryHandle)
+        if (ProcessNode->ProcessItem->QueryHandle && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             PH_PROCESS_DPI_AWARENESS dpiAwareness;
 
@@ -1323,7 +1339,8 @@ static VOID PhpUpdateProcessNodeFileAttributes(
         }
         else
         {
-            ProcessNode->FileEndOfFile.QuadPart = -1;
+            ProcessNode->FileLastWriteTime.QuadPart = 0;
+            ProcessNode->FileEndOfFile.QuadPart = 0;
         }
 
         ProcessNode->ValidMask |= PHPN_FILEATTRIBUTES;
@@ -1340,7 +1357,7 @@ static VOID PhpUpdateProcessNodeDesktopInfo(
 
         PhClearReference(&ProcessNode->DesktopInfoText);
 
-        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId) && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             if (NT_SUCCESS(PhOpenProcess(
                 &processHandle,
@@ -1371,7 +1388,7 @@ static VOID PhpUpdateProcessBreakOnTermination(
     {
         ProcessNode->BreakOnTerminationEnabled = FALSE;
 
-        if (ProcessNode->ProcessItem->QueryHandle)
+        if (ProcessNode->ProcessItem->QueryHandle && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             BOOLEAN breakOnTermination;
 
@@ -1396,7 +1413,7 @@ static VOID PhpUpdateProcessNodeErrorMode(
     {
         PhClearReference(&ProcessNode->ErrorModeText);
 
-        if (ProcessNode->ProcessItem->QueryHandle)
+        if (ProcessNode->ProcessItem->QueryHandle && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             ULONG errorMode;
 
@@ -1450,7 +1467,7 @@ static VOID PhpUpdateProcessNodeCodePage(
 {
     if (!(ProcessNode->ValidMask & PHPN_CODEPAGE))
     {
-        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId) && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             HANDLE processHandle;
 
@@ -1483,7 +1500,7 @@ static VOID PhpUpdateProcessNodePowerThrottling(
     {
         ProcessNode->PowerThrottling = FALSE;
 
-        if (ProcessNode->ProcessItem->QueryHandle)
+        if (ProcessNode->ProcessItem->QueryHandle && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             POWER_THROTTLING_PROCESS_STATE powerThrottlingState;
 
@@ -1501,37 +1518,15 @@ static VOID PhpUpdateProcessNodePowerThrottling(
     }
 }
 
-static VOID PhpUpdateProcessNodeArchitecture(
-    _Inout_ PPH_PROCESS_NODE ProcessNode
-    )
-{
-    if (!(ProcessNode->ValidMask & PHPN_ARCHITECTURE))
-    {
-        ProcessNode->ImageReserved = IMAGE_FILE_MACHINE_UNKNOWN;
-
-        if (ProcessNode->ProcessItem->QueryHandle)
-        {
-            USHORT processArchitecture;
-
-            if (NT_SUCCESS(PhGetProcessArchitecture(ProcessNode->ProcessItem->QueryHandle, &processArchitecture)))
-            {
-                ProcessNode->ImageReserved = processArchitecture;
-            }
-        }
-
-        ProcessNode->ValidMask |= PHPN_ARCHITECTURE;
-    }
-}
-
 static VOID PhpUpdateProcessNodePriorityBoost(
     _Inout_ PPH_PROCESS_NODE ProcessNode
     )
 {
-    if (!(ProcessNode->ValidMask & PHPN_PRIORITYBOOST))
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_PRIORITYBOOST))
     {
         ProcessNode->PriorityBoost = FALSE;
 
-        if (ProcessNode->ProcessItem->QueryHandle)
+        if (ProcessNode->ProcessItem->QueryHandle && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             BOOLEAN priorityBoostDisabled;
 
@@ -1541,7 +1536,7 @@ static VOID PhpUpdateProcessNodePriorityBoost(
             }
         }
 
-        ProcessNode->ValidMask |= PHPN_PRIORITYBOOST;
+        SetFlag(ProcessNode->ValidMask, PHPN_PRIORITYBOOST);
     }
 }
 
@@ -1549,7 +1544,7 @@ static VOID PhpUpdateProcessNodeGrantedAccess(
     _Inout_ PPH_PROCESS_NODE ProcessNode
     )
 {
-    if (!(ProcessNode->ValidMask & PHPN_GRANTEDACCESS))
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_GRANTEDACCESS))
     {
         PhClearReference(&ProcessNode->GrantedAccessText);
 
@@ -1612,7 +1607,7 @@ static VOID PhpUpdateProcessNodeGrantedAccess(
             }
         }
 
-        ProcessNode->ValidMask |= PHPN_GRANTEDACCESS;
+        SetFlag(ProcessNode->ValidMask, PHPN_GRANTEDACCESS);
     }
 }
 
@@ -1620,9 +1615,9 @@ static VOID PhpUpdateProcessNodeTlsBitmapDelta(
     _Inout_ PPH_PROCESS_NODE ProcessNode
     )
 {
-    if (!(ProcessNode->ValidMask & PHPN_TLSBITMAPDELTA))
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_TLSBITMAPDELTA))
     {
-        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
+        if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId) && !ProcessNode->ProcessItem->IsSubsystemProcess)
         {
             HANDLE processHandle;
 
@@ -1644,7 +1639,7 @@ static VOID PhpUpdateProcessNodeTlsBitmapDelta(
             }
         }
 
-        ProcessNode->ValidMask |= PHPN_TLSBITMAPDELTA;
+        SetFlag(ProcessNode->ValidMask, PHPN_TLSBITMAPDELTA);
     }
 }
 
@@ -1652,7 +1647,7 @@ static VOID PhpUpdateProcessNodeObjectReferences(
     _Inout_ PPH_PROCESS_NODE ProcessNode
     )
 {
-    if (!(ProcessNode->ValidMask & PHPN_REFERENCEDELTA))
+    if (!FlagOn(ProcessNode->ValidMask, PHPN_REFERENCEDELTA))
     {
         if (PH_IS_REAL_PROCESS_ID(ProcessNode->ProcessId))
         {
@@ -1667,12 +1662,11 @@ static VOID PhpUpdateProcessNodeObjectReferences(
             }
         }
 
-        ProcessNode->ValidMask |= PHPN_REFERENCEDELTA;
+        SetFlag(ProcessNode->ValidMask, PHPN_REFERENCEDELTA);
     }
 }
 
 #define SORT_FUNCTION(Column) PhpProcessTreeNewCompare##Column
-
 #define BEGIN_SORT_FUNCTION(Column) static int __cdecl PhpProcessTreeNewCompare##Column( \
     _In_ const void *_elem1, \
     _In_ const void *_elem2 \
@@ -1888,6 +1882,9 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(GdiHandles)
 {
+    PhpUpdateProcessNodeGdiUserHandles(node1);
+    PhpUpdateProcessNodeGdiUserHandles(node2);
+
     sortResult = uintcmp(node1->GdiHandles, node2->GdiHandles);
 }
 END_SORT_FUNCTION
@@ -2343,18 +2340,14 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Architecture)
 {
-    if (WindowsVersion >= WINDOWS_11)
-    {
-        PhpUpdateProcessNodeArchitecture(node1);
-        PhpUpdateProcessNodeArchitecture(node2);
-    }
-    else
-    {
-        PhpUpdateProcessNodeImage(node1);
-        PhpUpdateProcessNodeImage(node2);
-    }
+    PhpUpdateProcessNodeImage(node1);
+    PhpUpdateProcessNodeImage(node2);
 
-    sortResult = uintcmp(node1->ImageReserved, node2->ImageReserved);
+    sortResult = uintcmp(node1->ImageMachine, node2->ImageMachine);
+#ifdef _ARM64_
+    if (sortResult == 0)
+        sortResult = uintcmp(node1->ImageCHPEVersion, node2->ImageCHPEVersion);
+#endif
 }
 END_SORT_FUNCTION
 
@@ -2448,6 +2441,18 @@ BEGIN_SORT_FUNCTION(ReferenceDelta)
     PhpUpdateProcessNodeObjectReferences(node1);
     PhpUpdateProcessNodeObjectReferences(node2);
     sortResult = uintcmp(node1->ReferenceCount, node2->ReferenceCount);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(LxssPid)
+{
+    sortResult = uintcmp(node1->ProcessItem->LxssProcessId, node2->ProcessItem->LxssProcessId);
+}
+END_SORT_FUNCTION
+
+BEGIN_SORT_FUNCTION(StartKey)
+{
+    sortResult = uint64cmp(node1->ProcessItem->ProcessStartKey, node2->ProcessItem->ProcessStartKey);
 }
 END_SORT_FUNCTION
 
@@ -2594,8 +2599,12 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                         SORT_FUNCTION(GrantedAccess),
                         SORT_FUNCTION(TlsBitmapDelta),
                         SORT_FUNCTION(ReferenceDelta),
+                        SORT_FUNCTION(LxssPid),
+                        SORT_FUNCTION(StartKey),
                     };
                     int (__cdecl *sortFunction)(const void *, const void *);
+
+                    static_assert(RTL_NUMBER_OF(sortFunctions) == PHPRTLC_MAXIMUM, "SortFunctions must equal maximum.");
 
                     if (!PhCmForwardSort(
                         (PPH_TREENEW_NODE *)ProcessNodeList->Items,
@@ -2651,11 +2660,18 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 {
                     if (PH_IS_REAL_PROCESS_ID(processItem->ProcessId))
                     {
-                        if (processItem->AlternateProcessIdString)
-                            getCellText->Text = processItem->AlternateProcessIdString->sr;
-                        else
-                            PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
+                        PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessIdString);
                     }
+                }
+                break;
+            case PHPRTLC_LXSSPID:
+                {
+                    PhInitializeStringRefLongHint(&getCellText->Text, processItem->LxssProcessIdString);
+                }
+                break;
+            case PHPRTLC_START_KEY:
+                {
+                    PhInitializeStringRefLongHint(&getCellText->Text, processItem->ProcessStartKeyString);
                 }
                 break;
             case PHPRTLC_CPU:
@@ -2927,14 +2943,30 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                     PhInitializeStringRefLongHint(&getCellText->Text, processItem->IntegrityString);
                 break;
             case PHPRTLC_IOPRIORITY:
-                PhpUpdateProcessNodeIoPagePriority(node);
-                if (node->IoPriority != ULONG_MAX && node->IoPriority >= IoPriorityVeryLow && node->IoPriority < MaxIoPriorityTypes)
-                    PhInitializeStringRefLongHint(&getCellText->Text, PhIoPriorityHintNames[node->IoPriority]);
+                {
+                    PhpUpdateProcessNodeIoPagePriority(node);
+
+                    if (node->IoPriority != ULONG_MAX && node->IoPriority >= IoPriorityVeryLow && node->IoPriority < MaxIoPriorityTypes)
+                    {
+                        const PH_STRINGREF ioPriority = PhIoPriorityHintNames[node->IoPriority];
+
+                        getCellText->Text.Buffer = ioPriority.Buffer;
+                        getCellText->Text.Length = ioPriority.Length;
+                    }
+                }
                 break;
             case PHPRTLC_PAGEPRIORITY:
-                PhpUpdateProcessNodeIoPagePriority(node);
-                if (node->PagePriority != ULONG_MAX && node->PagePriority <= MEMORY_PRIORITY_NORMAL)
-                    PhInitializeStringRefLongHint(&getCellText->Text, PhPagePriorityNames[node->PagePriority]);
+                {
+                    PhpUpdateProcessNodeIoPagePriority(node);
+
+                    if (node->PagePriority != ULONG_MAX && node->PagePriority <= MEMORY_PRIORITY_NORMAL)
+                    {
+                        const PH_STRINGREF pagePriority = PhPagePriorityNames[node->PagePriority];
+
+                        getCellText->Text.Buffer = pagePriority.Buffer;
+                        getCellText->Text.Length = pagePriority.Length;
+                    }
+                }
                 break;
             case PHPRTLC_STARTTIME:
                 if (processItem->CreateTime.QuadPart != 0)
@@ -2998,10 +3030,16 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 }
                 break;
             case PHPRTLC_VERIFICATIONSTATUS:
-                getCellText->Text = PhVerifyResultToStringRef(processItem->VerifyResult);
+                if (PhEnableProcessQueryStage2)
+                    getCellText->Text = PhVerifyResultToStringRef(processItem->VerifyResult);
+                else
+                    PhInitializeStringRef(&getCellText->Text, L"Image digital signature support disabled.");
                 break;
             case PHPRTLC_VERIFIEDSIGNER:
-                getCellText->Text = PhGetStringRef(processItem->VerifySignerName);
+                if (PhEnableProcessQueryStage2)
+                    getCellText->Text = PhGetStringRef(processItem->VerifySignerName);
+                else
+                    PhInitializeStringRef(&getCellText->Text, L"Image digital signature support disabled.");
                 break;
             case PHPRTLC_ASLR:
                 PhpUpdateProcessNodeImage(node);
@@ -3045,7 +3083,19 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
 #endif
                 break;
             case PHPRTLC_ELEVATION:
-                getCellText->Text = PhGetElevationTypeStringRef(!!processItem->IsElevated, processItem->ElevationType);
+                {
+                    PPH_STRINGREF elevationType;
+
+                    if (PhGetElevationTypeString(!!processItem->IsElevated, processItem->ElevationType, &elevationType))
+                    {
+                        getCellText->Text.Buffer = elevationType->Buffer;
+                        getCellText->Text.Length = elevationType->Length;
+                    }
+                    else
+                    {
+                        PhInitializeEmptyStringRef(&getCellText->Text);
+                    }
+                }
                 break;
             case PHPRTLC_WINDOWTITLE:
                 PhpUpdateProcessNodeWindow(node);
@@ -3444,7 +3494,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             case PHPRTLC_FILESIZE:
                 PhpUpdateProcessNodeFileAttributes(node);
 
-                if (node->FileEndOfFile.QuadPart != -1)
+                if (node->FileEndOfFile.QuadPart != 0)
                 {
                     PhMoveReference(&node->FileSizeText, PhFormatSize(node->FileEndOfFile.QuadPart, ULONG_MAX));
                     getCellText->Text = node->FileSizeText->sr;
@@ -3470,7 +3520,7 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 break;
             case PHPRTLC_PROTECTION:
                 {
-                    if (processItem->Protection.Level != 0 && processItem->Protection.Level != UCHAR_MAX)
+                    if ((processItem->Protection.Level != 0 || processItem->IsSecureProcess) && processItem->Protection.Level != UCHAR_MAX)
                     {
                         PhMoveReference(&node->ProtectionText, PhGetProcessItemProtectionText(processItem));
                         getCellText->Text = node->ProtectionText->sr;
@@ -3612,24 +3662,29 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
                 break;
             case PHPRTLC_ARCHITECTURE:
                 {
-                    if (WindowsVersion >= WINDOWS_11)
-                        PhpUpdateProcessNodeArchitecture(node);
-                    else
-                        PhpUpdateProcessNodeImage(node);
+                    PhpUpdateProcessNodeImage(node);
 
-                    switch (node->ImageReserved)
+                    switch (node->ImageMachine)
                     {
                     case IMAGE_FILE_MACHINE_I386:
                         PhInitializeStringRef(&getCellText->Text, L"x86");
                         break;
                     case IMAGE_FILE_MACHINE_AMD64:
+#ifdef _ARM64_
+                        PhInitializeStringRef(&getCellText->Text, node->ImageCHPEVersion ? L"x64 (ARM64X)" : L"x64");
+#else
                         PhInitializeStringRef(&getCellText->Text, L"x64");
+#endif
                         break;
                     case IMAGE_FILE_MACHINE_ARMNT:
                         PhInitializeStringRef(&getCellText->Text, L"ARM");
                         break;
                     case IMAGE_FILE_MACHINE_ARM64:
+#ifdef _ARM64_
+                        PhInitializeStringRef(&getCellText->Text, node->ImageCHPEVersion ? L"ARM64 (ARM64X)" : L"ARM64");
+#else
                         PhInitializeStringRef(&getCellText->Text, L"ARM64");
+#endif
                         break;
                     }
                     break;
@@ -3895,14 +3950,14 @@ BOOLEAN NTAPI PhpProcessTreeNewCallback(
             else if (
                 PhCsUseColorServiceProcesses &&
                 ((processItem->ServiceList && processItem->ServiceList->Count != 0) ||
-                 (processItem->Sid && PhEqualSid(processItem->Sid, &PhSeServiceSid)) ||
-                 (processItem->Sid && PhEqualSid(processItem->Sid, &PhSeLocalServiceSid)) ||
-                 (processItem->Sid && PhEqualSid(processItem->Sid, &PhSeNetworkServiceSid))
+                 (processItem->Sid && PhEqualSid(processItem->Sid, (PSID)&PhSeServiceSid)) ||
+                 (processItem->Sid && PhEqualSid(processItem->Sid, (PSID)&PhSeLocalServiceSid)) ||
+                 (processItem->Sid && PhEqualSid(processItem->Sid, (PSID)&PhSeNetworkServiceSid))
                 ))
                 getNodeColor->BackColor = PhCsColorServiceProcesses;
             else if (
                 PhCsUseColorSystemProcesses &&
-                ((processItem->Sid && PhEqualSid(processItem->Sid, &PhSeLocalSystemSid)) ||
+                ((processItem->Sid && PhEqualSid(processItem->Sid, (PSID)&PhSeLocalSystemSid)) ||
                 PH_IS_FAKE_PROCESS_ID(processItem->ProcessId)))
                 getNodeColor->BackColor = PhCsColorSystemProcesses;
             else if (

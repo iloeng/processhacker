@@ -20,9 +20,8 @@
 EXTERN_C_START
 
 #define KPH_SERVICE_NAME __TEXT("KSystemInformer")
-#define KPH_OBJECT_NAME __TEXT("\\Driver\\KSystemInformer")
-#define KPH_PORT_NAME __TEXT("\\KSystemInformer")
-#define KPH_ALTITUDE_NAME __TEXT("385400")
+#define KPH_OBJECT_NAME  __TEXT("\\Driver\\KSystemInformer")
+#define KPH_PORT_NAME    __TEXT("\\KSystemInformer")
 
 #ifdef DEBUG
 #define KSI_COMMS_INIT_ASSERT() assert(KphCommsIsConnected())
@@ -35,22 +34,13 @@ typedef struct _KPH_CONFIG_PARAMETERS
     _In_ PPH_STRINGREF FileName;
     _In_ PPH_STRINGREF ServiceName;
     _In_ PPH_STRINGREF ObjectName;
-    _In_ PPH_STRINGREF PortName;
-    _In_ PPH_STRINGREF Altitude;
-
-    union
-    {
-        BOOLEAN Flags;
-        struct
-        {
-            BOOLEAN EnableNativeLoad : 1;
-            BOOLEAN EnableFilterLoad : 1;
-            BOOLEAN DisableImageLoadProtection : 1;
-            BOOLEAN Spare : 5;
-        };
-    };
-
+    _In_opt_ PPH_STRINGREF PortName;
+    _In_opt_ PPH_STRINGREF Altitude;
+    _In_ KPH_PARAMETER_FLAGS Flags;
     _In_opt_ PKPH_COMMS_CALLBACK Callback;
+
+    _In_ BOOLEAN EnableNativeLoad;
+    _In_ BOOLEAN EnableFilterLoad;
 } KPH_CONFIG_PARAMETERS, *PKPH_CONFIG_PARAMETERS;
 
 PHLIBAPI
@@ -200,6 +190,10 @@ KphOpenThreadProcess(
     _Out_ PHANDLE ProcessHandle
     );
 
+#define KPH_STACK_BACK_TRACE_USER_MODE   0x00000001ul
+#define KPH_STACK_BACK_TRACE_SKIP_KPH    0x00000002ul
+#define KPH_STACK_BACK_TRACE_NO_SENTINEL 0x00000004ul
+
 PHLIBAPI
 NTSTATUS
 NTAPI
@@ -207,9 +201,9 @@ KphCaptureStackBackTraceThread(
     _In_ HANDLE ThreadHandle,
     _In_ ULONG FramesToSkip,
     _In_ ULONG FramesToCapture,
-    _Out_writes_(FramesToCapture) PVOID *BackTrace,
-    _Inout_opt_ PULONG CapturedFrames,
-    _Inout_opt_ PULONG BackTraceHash,
+    _Out_writes_(FramesToCapture) PVOID* BackTrace,
+    _Out_ PULONG CapturedFrames,
+    _Out_opt_ PULONG BackTraceHash,
     _In_ ULONG Flags
     );
 
@@ -249,7 +243,7 @@ NTAPI
 KphQueryObjectSectionMappingsInfo(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE Handle,
-    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info 
+    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info
     );
 
 PHLIBAPI
@@ -330,7 +324,7 @@ PHLIBAPI
 KPH_LEVEL
 NTAPI
 KphLevelEx(
-    BOOLEAN Cached 
+    _In_ BOOLEAN Cached
     );
 
 PHLIBAPI
@@ -481,7 +475,138 @@ NTSTATUS
 NTAPI
 KphQuerySectionMappingsInfo(
     _In_ HANDLE SectionHandle,
-    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info 
+    _Out_ PKPH_SECTION_MAPPINGS_INFORMATION* Info
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphCompareObjects(
+    _In_ HANDLE ProcessHandle,
+    _In_ HANDLE FirstObjectHandle,
+    _In_ HANDLE SecondObjectHandle
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphGetMessageTimeouts(
+    _Out_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphSetMessageTimeouts(
+    _In_ PKPH_MESSAGE_TIMEOUTS Timeouts
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphAcquireDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount,
+    _Out_opt_ PLONG ClientPreviousCount
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphReleaseDriverUnloadProtection(
+    _Out_opt_ PLONG PreviousCount,
+    _Out_opt_ PLONG ClientPreviousCount
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphGetConnectedClientCount(
+    _Out_ PULONG Count
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphActivateDynData(
+    _In_ PBYTE DynData,
+    _In_ ULONG DynDataLength,
+    _In_ PBYTE Signature,
+    _In_ ULONG SignatureLength
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphRequestSessionAccessToken(
+    _Out_ PKPH_SESSION_ACCESS_TOKEN AccessToken,
+    _In_ PLARGE_INTEGER Expiry,
+    _In_ ULONG Privileges,
+    _In_ LONG Uses
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphAssignProcessSessionToken(
+    _In_ HANDLE ProcessHandle,
+    _In_ PBYTE Signature,
+    _In_ ULONG SignatureLength
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphAssignThreadSessionToken(
+    _In_ HANDLE ThreadHandle,
+    _In_ PBYTE Signature,
+    _In_ ULONG SignatureLength
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphGetInformerProcessFilter(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PKPH_INFORMER_SETTINGS Filter
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphSetInformerProcessFilter(
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ PKPH_INFORMER_SETTINGS Filter
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphStripProtectedProcessMasks(
+    _In_ HANDLE ProcessHandle,
+    _In_ ACCESS_MASK ProcessAllowedMask,
+    _In_ ACCESS_MASK ThreadAllowedMask
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphQueryVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PVOID BaseAddress,
+    _In_ KPH_MEMORY_INFORMATION_CLASS MemoryInformationClass,
+    _Out_writes_bytes_opt_(MemoryInformationLength) PVOID MemoryInformation,
+    _In_ ULONG MemoryInformationLength,
+    _Out_opt_ PULONG ReturnLength
+    );
+
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+KphQueryHashInformationFile(
+    _In_ HANDLE FileHandle,
+    _Inout_ PKPH_HASH_INFORMATION HashInformation,
+    _In_ ULONG HashInformationLength
     );
 
 EXTERN_C_END
