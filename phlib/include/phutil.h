@@ -567,6 +567,19 @@ PhGenerateRandomAlphaString(
     _In_ SIZE_T Count
     );
 
+FORCEINLINE
+VOID
+PhGenerateRandomAlphaStringRef(
+    _Out_writes_z_(Count) PWSTR Buffer,
+    _In_ SIZE_T Count,
+    _Out_ PPH_STRINGREF String
+    )
+{
+    PhGenerateRandomAlphaString(Buffer, Count);
+    String->Buffer = Buffer;
+    String->Length = (Count * sizeof(WCHAR)) - sizeof(UNICODE_NULL);
+}
+
 PHLIBAPI
 ULONG64
 NTAPI
@@ -654,6 +667,19 @@ PhFormatDateTime(
     );
 
 #define PhaFormatDateTime(DateTime) PH_AUTO_T(PH_STRING, PhFormatDateTime(DateTime))
+
+#define PH_DATETIME_STR_LEN 256
+#define PH_DATETIME_STR_LEN_1 (PH_DATETIME_STR_LEN + 1)
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhFormatDateTimeToBuffer(
+    _In_opt_ PSYSTEMTIME DateTime,
+    _Out_writes_bytes_(BufferLength) PWSTR Buffer,
+    _In_ SIZE_T BufferLength,
+    _Out_opt_ PSIZE_T ReturnLength
+    );
 
 PHLIBAPI
 PPH_STRING
@@ -971,6 +997,13 @@ PhGetSystemRoot(
     );
 
 PHLIBAPI
+VOID
+NTAPI
+PhGetNtSystemRoot(
+    _Out_ PPH_STRINGREF NtSystemRoot
+    );
+
+PHLIBAPI
 PPH_STRING
 NTAPI
 PhGetApplicationFileName(
@@ -1082,6 +1115,7 @@ PhGetApplicationDataFileName(
 #define PH_FOLDERID_LocalAppData 1
 #define PH_FOLDERID_RoamingAppData 2
 #define PH_FOLDERID_ProgramFiles 3
+#define PH_FOLDERID_ProgramData 4
 
 PHLIBAPI
 PPH_STRING
@@ -1110,6 +1144,7 @@ PhGetKnownLocationZ(
 DEFINE_GUID(FOLDERID_LocalAppData, 0xF1B32785, 0x6FBA, 0x4FCF, 0x9D, 0x55, 0x7B, 0x8E, 0x7F, 0x15, 0x70, 0x91);
 DEFINE_GUID(FOLDERID_RoamingAppData, 0x3EB685DB, 0x65F9, 0x4CF6, 0xA0, 0x3A, 0xE3, 0xEF, 0x65, 0x72, 0x9F, 0x3D);
 DEFINE_GUID(FOLDERID_ProgramFiles, 0x905e63b6, 0xc1bf, 0x494e, 0xb2, 0x9c, 0x65, 0xb7, 0x32, 0xd3, 0xd2, 0x1a);
+DEFINE_GUID(FOLDERID_ProgramData, 0x62AB5D82, 0xFDC1, 0x4DC3, 0xA9, 0xDD, 0x07, 0x0D, 0x1D, 0x49, 0x5D, 0x97);
 
 #define PH_KF_FLAG_FORCE_PACKAGE_REDIRECTION 0x1
 #define PH_KF_FLAG_FORCE_APPCONTAINER_REDIRECTION 0x2
@@ -1261,6 +1296,7 @@ typedef struct _PH_CREATE_PROCESS_AS_USER_INFO
             _In_ PWSTR UserName;
             _In_ PWSTR Password;
             _In_opt_ ULONG LogonType;
+            _In_opt_ ULONG LogonFlags;
         };
         _In_ HANDLE ProcessIdWithToken; // use PH_CREATE_PROCESS_USE_PROCESS_TOKEN
         _In_ ULONG SessionIdWithToken; // use PH_CREATE_PROCESS_USE_SESSION_TOKEN
@@ -1861,6 +1897,7 @@ PhHungWindowFromGhostWindow(
 
 PHLIBAPI
 NTSTATUS
+NTAPI
 PhGetFileData(
     _In_ HANDLE FileHandle,
     _Out_ PVOID* Buffer,

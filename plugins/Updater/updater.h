@@ -83,8 +83,8 @@ typedef struct _PH_UPDATER_CONTEXT
             BOOLEAN StartupCheck : 1;
             BOOLEAN HaveData : 1;
             BOOLEAN Cancel : 1;
-            BOOLEAN DirectoryElevationRequired : 1;
             BOOLEAN Cleanup : 1;
+            BOOLEAN ElevationRequired : 1;
             BOOLEAN ProgressMarquee : 1;
             BOOLEAN ProgressTimer : 1;
             BOOLEAN PortableMode : 1;
@@ -95,7 +95,6 @@ typedef struct _PH_UPDATER_CONTEXT
     ULONG64 CurrentVersion;
     ULONG64 LatestVersion;
     PPH_STRING SetupFilePath;
-    PPH_STRING CurrentVersionString;
     PPH_STRING Version;
     PPH_STRING RelDate;
     PPH_STRING SetupFileLength;

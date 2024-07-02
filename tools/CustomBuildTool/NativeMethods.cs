@@ -16,9 +16,12 @@ namespace CustomBuildTool
         public const uint HRESULT_S_OK = 0u;
         public const uint HRESULT_S_FALSE = 1u;
 
+        public static readonly UIntPtr CURRENT_PROCESS = new UIntPtr(0xffffffffffffffff);
+        public static readonly IntPtr CURRENT_TOKEN = new IntPtr(-5);
         public static readonly IntPtr HKEY_LOCAL_MACHINE = new IntPtr(unchecked((int)0x80000002));
         public static readonly IntPtr HKEY_CURRENT_USER = new IntPtr(unchecked((int)0x80000001));
         public static readonly uint KEY_READ = 0x20019u;
+        public static readonly uint HIGH_PRIORITY_CLASS = 0x00000080;
 
         public static readonly uint REG_NONE = 0; // No value type
         public static readonly uint REG_SZ = 1; // Unicode nul terminated string
@@ -27,6 +30,14 @@ namespace CustomBuildTool
         public static readonly uint REG_DWORD = 4; // 32-bit number
         public static readonly uint REG_MULTI_SZ = 7; // Multiple Unicode strings
         public static readonly uint REG_QWORD = 11; // 64-bit number
+
+        [LibraryImport("userenv.dll", EntryPoint = "CreateEnvironmentBlock", StringMarshalling = StringMarshalling.Utf16)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool CreateEnvironmentBlock(out IntPtr lpEnvironment, IntPtr hToken, [MarshalAs(UnmanagedType.Bool)] bool bInherit);
+
+        [LibraryImport("userenv.dll", EntryPoint = "DestroyEnvironmentBlock", StringMarshalling = StringMarshalling.Utf16)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
 
         [LibraryImport("advapi32.dll", EntryPoint = "RegOpenKeyExW", StringMarshalling = StringMarshalling.Utf16)]
         public static partial uint RegOpenKeyEx(IntPtr RootKeyHandle, string KeyName, uint Options, uint AccessMask, IntPtr* KeyHandle);
@@ -82,6 +93,9 @@ namespace CustomBuildTool
 
         [LibraryImport("kernel32.dll", EntryPoint = "ExitProcess")]
         public static partial void ExitProcess(int exitCode);
-    }
 
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool SetPriorityClass(UIntPtr handle, uint priorityClass);
+    }
 }

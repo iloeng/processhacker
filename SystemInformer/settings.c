@@ -66,10 +66,11 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableGraphMaxText", L"1");
     PhpAddIntegerSetting(L"EnableServiceNonPoll", L"0");
     PhpAddIntegerSetting(L"EnableServiceNonPollNotify", L"1");
+    PhpAddIntegerSetting(L"EnableServiceStage2", L"0");
+    PhpAddIntegerSetting(L"EnableServiceProgressDialog", L"1");
     PhpAddIntegerSetting(L"EnableShellExecuteSkipIfeoDebugger", L"1");
     PhpAddIntegerSetting(L"EnableStage2", L"1");
     PhpAddIntegerSetting(L"EnableStreamerMode", L"0");
-    PhpAddIntegerSetting(L"EnableServiceStage2", L"0");
     PhpAddIntegerSetting(L"EnableStartAsAdmin", L"0");
     PhpAddIntegerSetting(L"EnableStartAsAdminAlwaysOnTop", L"0");
     PhpAddIntegerSetting(L"EnableDefaultSafePlugins", L"1");
@@ -79,7 +80,7 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"EnableShutdownBootMenu", L"1");
     PhpAddIntegerSetting(L"EnableSilentCrashNotify", L"0");
     PhpAddIntegerSetting(L"EnableThemeSupport", L"0");
-    PhpAddIntegerSetting(L"EnableThemeAcrylicSupport", L"1");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicSupport", L"0");
     PhpAddIntegerSetting(L"EnableThemeAcrylicWindowSupport", L"0");
     PhpAddIntegerSetting(L"EnableThreadStackInlineSymbols", L"1");
     PhpAddIntegerSetting(L"EnableThreadStackLineInformation", L"1");
@@ -361,6 +362,10 @@ VOID PhAddDefaultSettings(
     PhpAddIntegerSetting(L"KsiDynDataNoEmbedded", L"0");
     PhpAddIntegerSetting(L"KsiClientProcessProtectionLevel", L"0");
     PhpAddStringSetting(L"KsiPreviousTemporaryDriverFile", L"");
+    PhpAddIntegerSetting(L"KsiEnableFsFeatureOffloadRead", L"1");  // SUPPORTED_FS_FEATURES_OFFLOAD_READ
+    PhpAddIntegerSetting(L"KsiEnableFsFeatureOffloadWrite", L"1"); // SUPPORTED_FS_FEATURES_OFFLOAD_WRITE
+    PhpAddIntegerSetting(L"KsiEnableFsFeatureQueryOpen", L"1");    // SUPPORTED_FS_FEATURES_QUERY_OPEN
+    PhpAddIntegerSetting(L"KsiEnableFsFeatureBypassIO", L"1");     // SUPPORTED_FS_FEATURES_BYPASS_IO
 }
 
 VOID PhUpdateCachedSettings(

@@ -57,9 +57,9 @@ namespace CustomBuildTool
             }
             else if (ProgramArgs.ContainsKey("-sdk"))
             {
-                Build.SetupBuildEnvironment(false);
+                var flags = BuildFlags.BuildVerbose;
 
-                BuildFlags flags = BuildFlags.BuildVerbose;
+                Build.SetupBuildEnvironment(false);
 
                 if (ProgramArgs.ContainsKey("-Debug"))
                 {
@@ -104,12 +104,10 @@ namespace CustomBuildTool
                 if (!Build.CopyWow64Files(flags))
                     Environment.Exit(1);
             }
-            else if (ProgramArgs.TryGetValue("-sign_plugin", out string SignPluginArg))
+            else if (ProgramArgs.TryGetValue("-kph-sign", out string SignArg))
             {
-                if (!Build.SignPlugin(SignPluginArg))
-                {
+                if (!Verify.CreateSigFile("kph", SignArg, Build.BuildCanary))
                     Environment.Exit(1);
-                }
             }
             else if (ProgramArgs.ContainsKey("-cleansdk"))
             {
@@ -124,17 +122,15 @@ namespace CustomBuildTool
             }
             else if (ProgramArgs.ContainsKey("-bin"))
             {
-                BuildFlags flags =
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi;
-
                 Build.SetupBuildEnvironment(false);
 
-                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
                     Environment.Exit(1);
-                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
                     Environment.Exit(1);
 
+                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                //    Environment.Exit(1);
                 if (!Build.CopyTextFiles(true))
                     Environment.Exit(1);
 
@@ -149,25 +145,21 @@ namespace CustomBuildTool
             }
             else if (ProgramArgs.ContainsKey("-debug"))
             {
-                BuildFlags flags =
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi;
-
                 Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Debug))
                     return;
-                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Debug))
                     return;
+
+                if (!Build.CopyDebugEngineFiles(BuildFlags.Debug))
+                    Environment.Exit(1);
 
                 Build.ShowBuildStats();
             }
             else if (ProgramArgs.ContainsKey("-pipeline-build"))
             {
-                BuildFlags flags =
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
-                    BuildFlags.BuildRelease | BuildFlags.BuildVerbose |
-                    BuildFlags.BuildApi;
+                BuildFlags flags = BuildFlags.Release;
 
                 if (ProgramArgs.ContainsKey("-msix-build"))
                     flags |= BuildFlags.BuildMsix;
@@ -178,7 +170,6 @@ namespace CustomBuildTool
 
                 if (!Build.BuildSolution("SystemInformer.sln", flags))
                     Environment.Exit(1);
-
                 if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
                     Environment.Exit(1);
 
@@ -190,6 +181,8 @@ namespace CustomBuildTool
 
                 if (!Build.ResignFiles())
                     Environment.Exit(1);
+                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                //    Environment.Exit(1);
                 if (!Build.CopyTextFiles(true))
                     Environment.Exit(1);
 
@@ -220,19 +213,17 @@ namespace CustomBuildTool
             }
             else if (ProgramArgs.ContainsKey("-msix-build"))
             {
-                BuildFlags flags =
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
-                    BuildFlags.BuildRelease | BuildFlags.BuildVerbose | BuildFlags.BuildApi |
-                    BuildFlags.BuildMsix;
+                BuildFlags flags = BuildFlags.Release | BuildFlags.BuildMsix;
 
                 Build.SetupBuildEnvironment(true);
 
                 if (!Build.BuildSolution("SystemInformer.sln", flags))
                     Environment.Exit(1);
-
                 if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
                     Environment.Exit(1);
 
+                //if (!Build.CopyDebugEngineFiles(flags))
+                //    Environment.Exit(1);
                 if (!Build.CopyWow64Files(flags)) // required after plugin build (dmex)
                     Environment.Exit(1);
                 if (!Build.CopyTextFiles(true))
@@ -246,21 +237,19 @@ namespace CustomBuildTool
             }
             else
             {
-                BuildFlags flags =
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi;
-
                 Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("SystemInformer.sln", flags))
-                    return;
-                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
-                    return;
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
+                    Environment.Exit(1);
 
-                if (!Build.CopyWow64Files(flags))
-                    return;
+                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                //    Environment.Exit(1);
+                if (!Build.CopyWow64Files(BuildFlags.Release))
+                    Environment.Exit(1);
                 if (!Build.CopyTextFiles(true))
-                    return;
+                    Environment.Exit(1);
 
                 foreach (var (channel, _) in BuildConfig.Build_Channels)
                 {
@@ -289,6 +278,19 @@ namespace CustomBuildTool
                 Console.WriteLine(Message);
             else
                 Console.Write(Message);
+            Console.ResetColor();
+        }
+
+        public static void PrintColorMessage(LogInterpolatedStringHandler builder, ConsoleColor Color, bool Newline = true, BuildFlags Flags = BuildFlags.BuildVerbose)
+        {
+            if ((Flags & BuildFlags.BuildVerbose) != BuildFlags.BuildVerbose)
+                return;
+
+            Console.ForegroundColor = Color;
+            if (Newline)
+                Console.WriteLine(builder.GetFormattedText());
+            else
+                Console.Write(builder.GetFormattedText());
             Console.ResetColor();
         }
     }

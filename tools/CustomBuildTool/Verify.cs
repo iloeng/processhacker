@@ -13,7 +13,7 @@ namespace CustomBuildTool
 {
     public static class Verify
     {
-        public static readonly SortedDictionary<string, string> KeyName_Vars = new SortedDictionary<string, string>()
+        public static readonly SortedDictionary<string, string> KeyName_Vars = new(StringComparer.OrdinalIgnoreCase)
         {
             { "kph",       "KPH_BUILD_KEY" },
             { "release",   "RELEASE_BUILD_KEY" },
@@ -234,14 +234,13 @@ namespace CustomBuildTool
 
         private static string GetPath(string FileName)
         {
-            return $"{Build.BuildWorkingFolder}\\tools\\CustomSignTool\\Resources\\{FileName}";
+            return Path.Join([Build.BuildWorkingFolder, "\\tools\\CustomSignTool\\Resources\\", FileName]);
         }
 
         private static bool GetKeyMaterial(string KeyName, out byte[] KeyMaterial)
         {
-            if (Win32.HasEnvironmentVariable(KeyName_Vars[KeyName]))
+            if (Win32.GetEnvironmentVariable(KeyName_Vars[KeyName], out string secret))
             {
-                string secret = Win32.GetEnvironmentVariable(KeyName_Vars[KeyName]);
                 byte[] bytes = Utils.ReadAllBytes(GetPath($"{KeyName}.s"));
                 KeyMaterial = Decrypt(bytes, secret);
                 return true;

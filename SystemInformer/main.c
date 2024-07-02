@@ -213,7 +213,9 @@ INT WINAPI wWinMain(
         PhLoadPlugins();
     }
 
-    PhInitializeMitigationPolicy();
+    // N.B. Must be called after loading plugins since we set Microsoft signed only.
+    if (!PhInitializeMitigationPolicy())
+        return 1;
 
     if (PhStartupParameters.PhSvc)
     {
@@ -931,6 +933,7 @@ BOOLEAN PhInitializeMitigationPolicy(
     VOID
     )
 {
+#if defined(PH_BUILD_API)
     if (WindowsVersion >= WINDOWS_10)
     {
         PROCESS_MITIGATION_POLICY_INFORMATION policyInfo;
@@ -955,7 +958,7 @@ BOOLEAN PhInitializeMitigationPolicy(
         //policyInfo.RedirectionTrustPolicy.EnforceRedirectionTrust = TRUE;
         //NtSetInformationProcess(NtCurrentProcess(), ProcessMitigationPolicy, &policyInfo, sizeof(PROCESS_MITIGATION_POLICY_INFORMATION));
     }
-
+#endif
     return TRUE;
 }
 
@@ -1191,23 +1194,6 @@ VOID PhpInitializeSettings(
         }
     }
 
-    if (!PhIsNullOrEmptyString(PhStartupParameters.Channel))
-    {
-        static PH_STRINGREF stableChannel = PH_STRINGREF_INIT(L"release");
-        static PH_STRINGREF previewChannel = PH_STRINGREF_INIT(L"preview");
-        static PH_STRINGREF canaryChannel = PH_STRINGREF_INIT(L"canary");
-        static PH_STRINGREF developerChannel = PH_STRINGREF_INIT(L"developer");
-
-        if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &stableChannel, FALSE))
-            PhSetIntegerSetting(L"ReleaseChannel", PhReleaseChannel);
-        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &previewChannel, FALSE))
-            PhSetIntegerSetting(L"ReleaseChannel", PhPreviewChannel);
-        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &canaryChannel, FALSE))
-            PhSetIntegerSetting(L"ReleaseChannel", PhCanaryChannel);
-        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &developerChannel, FALSE))
-            PhSetIntegerSetting(L"ReleaseChannel", PhDeveloperChannel);
-    }
-
     PhUpdateCachedSettings();
 
     // Apply basic global settings.
@@ -1233,6 +1219,23 @@ VOID PhpInitializeSettings(
             sampleCount = 4096;
 
         PhSetIntegerSetting(L"SampleCount", sampleCount);
+    }
+
+    if (!PhIsNullOrEmptyString(PhStartupParameters.Channel))
+    {
+        static PH_STRINGREF stableChannel = PH_STRINGREF_INIT(L"release");
+        static PH_STRINGREF previewChannel = PH_STRINGREF_INIT(L"preview");
+        static PH_STRINGREF canaryChannel = PH_STRINGREF_INIT(L"canary");
+        static PH_STRINGREF developerChannel = PH_STRINGREF_INIT(L"developer");
+
+        if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &stableChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhReleaseChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &previewChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhPreviewChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &canaryChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhCanaryChannel);
+        else if (PhEqualStringRef(&PhStartupParameters.Channel->sr, &developerChannel, FALSE))
+            PhSetIntegerSetting(L"ReleaseChannel", PhDeveloperChannel);
     }
 }
 

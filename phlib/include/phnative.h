@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2009-2016
- *     dmex    2017-2023
+ *     dmex    2017-2024
  *
  */
 
@@ -24,6 +24,7 @@ EXTERN_C_START
 
 #define PhNtPathSeperatorString ((PH_STRINGREF)PH_STRINGREF_INIT(L"\\")) // OBJ_NAME_PATH_SEPARATOR // RtlNtPathSeperatorString
 #define PhNtDosDevicesPrefix ((PH_STRINGREF)PH_STRINGREF_INIT(L"\\??\\")) // RtlDosDevicesPrefix
+#define PhWin32ExtendedPathPrefix ((PH_STRINGREF)PH_STRINGREF_INIT(L"\\\\?\\")) // extended-length paths, disable path normalization
 
 // General object-related function types
 
@@ -1632,7 +1633,7 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhGetKernelFileNameEx(
-    _Out_ PPH_STRING* FileName,
+    _Out_opt_ PPH_STRING* FileName,
     _Out_ PVOID* ImageBase,
     _Out_ ULONG* ImageSize
     );
@@ -2759,6 +2760,15 @@ PhGetNamedPipeServerProcessId(
 PHLIBAPI
 NTSTATUS
 NTAPI
+PhEnumDirectoryNamedPipe(
+    _In_opt_ PUNICODE_STRING SearchPattern,
+    _In_ PPH_ENUM_DIRECTORY_FILE Callback,
+    _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
 PhGetThreadName(
     _In_ HANDLE ThreadHandle,
     _Out_ PPH_STRING *ThreadName
@@ -3211,6 +3221,27 @@ PhThawProcess(
 PHLIBAPI
 BOOLEAN
 NTAPI
+PhIsProcessExecutionRequired(
+    _In_ HANDLE ProcessId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhProcessExecutionRequiredEnable(
+    _In_ HANDLE ProcessId
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhProcessExecutionRequiredDisable(
+    _In_ HANDLE ProcessId
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
 PhIsKnownDllFileName(
     _In_ PPH_STRING FileName
     );
@@ -3542,6 +3573,18 @@ PhIsEcCode(
     _Out_ PBOOLEAN IsEcCode
     );
 #endif
+
+PHLIBAPI
+HANDLE
+NTAPI
+PhGetStdHandle(
+    _In_ ULONG StdHandle
+    );
+
+NTSTATUS PhFlushProcessHeapsRemote(
+    _In_ HANDLE ProcessHandle,
+    _In_opt_ PLARGE_INTEGER Timeout
+    );
 
 EXTERN_C_END
 
