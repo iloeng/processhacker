@@ -6,7 +6,7 @@
  * Authors:
  *
  *     wj32    2010-2016
- *     dmex    2017-2023
+ *     dmex    2017-2024
  *
  */
 
@@ -19,6 +19,7 @@
 #include <modprv.h>
 #include <netprv.h>
 #include <phappres.h>
+#include <phintrnl.h>
 #include <phsettings.h>
 #include <procprv.h>
 #include <settings.h>
@@ -207,6 +208,38 @@ PPH_STRING PhGetDiagnosticsString(
     OBJECT_TYPE_COUNT(PhMemoryItemType);
     OBJECT_TYPE_COUNT(PhImageListItemType);
 
+#ifdef DEBUG
+    PhAppendStringBuilder2(&stringBuilder, L"STATISTIC INFORMATION\r\n");
+
+#define PRINT_STATISTIC(Name) PhAppendFormatStringBuilder(&stringBuilder, \
+    TEXT(#Name) L": %u\r\n", PhLibStatisticsBlock.Name)
+
+    PRINT_STATISTIC(BaseThreadsCreated);
+    PRINT_STATISTIC(BaseThreadsCreateFailed);
+    PRINT_STATISTIC(BaseStringBuildersCreated);
+    PRINT_STATISTIC(BaseStringBuildersResized);
+    PRINT_STATISTIC(RefObjectsCreated);
+    PRINT_STATISTIC(RefObjectsDestroyed);
+    PRINT_STATISTIC(RefObjectsAllocated);
+    PRINT_STATISTIC(RefObjectsFreed);
+    PRINT_STATISTIC(RefObjectsAllocatedFromSmallFreeList);
+    PRINT_STATISTIC(RefObjectsFreedToSmallFreeList);
+    PRINT_STATISTIC(RefObjectsAllocatedFromTypeFreeList);
+    PRINT_STATISTIC(RefObjectsFreedToTypeFreeList);
+    PRINT_STATISTIC(RefObjectsDeleteDeferred);
+    PRINT_STATISTIC(RefAutoPoolsCreated);
+    PRINT_STATISTIC(RefAutoPoolsDestroyed);
+    PRINT_STATISTIC(RefAutoPoolsDynamicAllocated);
+    PRINT_STATISTIC(RefAutoPoolsDynamicResized);
+    PRINT_STATISTIC(QlBlockSpins);
+    PRINT_STATISTIC(QlBlockWaits);
+    PRINT_STATISTIC(QlAcquireExclusiveBlocks);
+    PRINT_STATISTIC(QlAcquireSharedBlocks);
+    PRINT_STATISTIC(WqWorkQueueThreadsCreated);
+    PRINT_STATISTIC(WqWorkQueueThreadsCreateFailed);
+    PRINT_STATISTIC(WqWorkItemsQueued);
+#endif
+
     return PhFinalStringBuilderString(&stringBuilder);
 }
 
@@ -214,59 +247,66 @@ PPH_STRING PhGetApplicationVersionString(
     _In_ BOOLEAN LinkToCommit
     )
 {
-    PCWSTR channelName;
-
-    switch (PhGetIntegerSetting(L"ReleaseChannel"))
-    {
-    case PhReleaseChannel:
-        channelName = L"";
-        break;
-    case PhPreviewChannel:
-        channelName = L" Preview";
-        break;
-    case PhCanaryChannel:
-        channelName = L" Canary";
-        break;
-    case PhDeveloperChannel:
-        channelName = L" Developer";
-        break;
-    default:
-        channelName = L" Unknown";
-        break;
-    }
+    PCWSTR channelName = PhGetPhReleaseChannelString();
 
 #if (PHAPP_VERSION_REVISION != 0)
     if (LinkToCommit)
     {
-        return PhFormatString(
-            L"System Informer %lu.%lu.%lu (<a href=\"https://github.com/winsiderss/systeminformer/commit/%hs\">%hs</a>)%ls",
-            PHAPP_VERSION_MAJOR,
-            PHAPP_VERSION_MINOR,
-            PHAPP_VERSION_REVISION,
-            PHAPP_VERSION_COMMIT,
-            PHAPP_VERSION_COMMIT,
-            channelName
-            );
+        PH_FORMAT format[14];
+
+        // "System Informer %lu.%lu.%lu (<a href=\"https://github.com/winsiderss/systeminformer/commit/%hs\">%hs</a>) %ls"
+        PhInitFormatS(&format[0], L"System Informer ");
+        PhInitFormatU(&format[1], PHAPP_VERSION_MAJOR);
+        PhInitFormatC(&format[2], L'.');
+        PhInitFormatU(&format[3], PHAPP_VERSION_MINOR);
+        PhInitFormatC(&format[4], L'.');
+        PhInitFormatU(&format[5], PHAPP_VERSION_BUILD);
+        PhInitFormatC(&format[6], L'.');
+        PhInitFormatU(&format[7], PHAPP_VERSION_REVISION);
+        PhInitFormatS(&format[8], L" (<a href=\"https://systeminformer.sourceforge.io/fwlink?commit=");
+        PhInitFormatMultiByteS(&format[9], PHAPP_VERSION_COMMIT);
+        PhInitFormatS(&format[10], L"\">");
+        PhInitFormatMultiByteS(&format[11], PHAPP_VERSION_COMMIT);
+        PhInitFormatS(&format[12], L"</a>) ");
+        PhInitFormatS(&format[13], (PWSTR)channelName);
+
+        return PhFormat(format, RTL_NUMBER_OF(format), 0);
     }
     else
     {
-        return PhFormatString(
-            L"System Informer %lu.%lu.%lu (%hs)%ls",
-            PHAPP_VERSION_MAJOR,
-            PHAPP_VERSION_MINOR,
-            PHAPP_VERSION_REVISION,
-            PHAPP_VERSION_COMMIT,
-            channelName
-            );
+        PH_FORMAT format[12];
+
+        // "System Informer %lu.%lu.%lu (%hs) %ls"
+        PhInitFormatS(&format[0], L"System Informer ");
+        PhInitFormatU(&format[1], PHAPP_VERSION_MAJOR);
+        PhInitFormatC(&format[2], L'.');
+        PhInitFormatU(&format[3], PHAPP_VERSION_MINOR);
+        PhInitFormatC(&format[4], L'.');
+        PhInitFormatU(&format[5], PHAPP_VERSION_BUILD);
+        PhInitFormatC(&format[6], L'.');
+        PhInitFormatU(&format[7], PHAPP_VERSION_REVISION);
+        PhInitFormatS(&format[8], L" (");
+        PhInitFormatMultiByteS(&format[9], PHAPP_VERSION_COMMIT);
+        PhInitFormatS(&format[10], L") ");
+        PhInitFormatS(&format[11], (PWSTR)channelName);
+
+        return PhFormat(format, RTL_NUMBER_OF(format), 0);
     }
 #else
-    UNREFERENCED_PARAMETER(LinkToCommit);
+    PH_FORMAT format[10];
 
-    return PhFormatString(
-        L"System Informer %lu.%lu%ls",
-        PHAPP_VERSION_MAJOR,
-        PHAPP_VERSION_MINOR,
-        channelName
-        );
+    // "System Informer %lu.%lu %ls"
+    PhInitFormatS(&format[0], L"System Informer ");
+    PhInitFormatU(&format[1], PHAPP_VERSION_MAJOR);
+    PhInitFormatC(&format[2], L'.');
+    PhInitFormatU(&format[3], PHAPP_VERSION_MINOR);
+    PhInitFormatC(&format[4], L'.');
+    PhInitFormatU(&format[5], PHAPP_VERSION_BUILD);
+    PhInitFormatC(&format[6], L'.');
+    PhInitFormatU(&format[7], PHAPP_VERSION_REVISION);
+    PhInitFormatC(&format[8], L' ');
+    PhInitFormatS(&format[9], (PWSTR)channelName);
+
+    return PhFormat(format, RTL_NUMBER_OF(format), 0);
 #endif
 }

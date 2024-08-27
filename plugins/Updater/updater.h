@@ -18,6 +18,7 @@
 #include <verify.h>
 #include <settings.h>
 #include <workqueue.h>
+#include <mapimg.h>
 
 #include <bcrypt.h>
 
@@ -83,8 +84,8 @@ typedef struct _PH_UPDATER_CONTEXT
             BOOLEAN StartupCheck : 1;
             BOOLEAN HaveData : 1;
             BOOLEAN Cancel : 1;
-            BOOLEAN DirectoryElevationRequired : 1;
             BOOLEAN Cleanup : 1;
+            BOOLEAN ElevationRequired : 1;
             BOOLEAN ProgressMarquee : 1;
             BOOLEAN ProgressTimer : 1;
             BOOLEAN PortableMode : 1;
@@ -95,7 +96,6 @@ typedef struct _PH_UPDATER_CONTEXT
     ULONG64 CurrentVersion;
     ULONG64 LatestVersion;
     PPH_STRING SetupFilePath;
-    PPH_STRING CurrentVersionString;
     PPH_STRING Version;
     PPH_STRING RelDate;
     PPH_STRING SetupFileLength;
@@ -225,16 +225,36 @@ INT_PTR CALLBACK TextDlgProc(
 
 // verify.c
 
-typedef struct _UPDATER_HASH_CONTEXT
+typedef enum _UPDATER_SIGNING_GENERATION
+{
+    UpdaterSigningGenerationCurrent,
+    UpdaterSigningGenerationNext,
+    MaxUpdaterSigningGeneration,
+} UPDATER_SIGNING_GENERATION, *PUPDATER_SIGNING_GENERATION;
+
+typedef struct _UPDATER_SIGNING
 {
     BCRYPT_ALG_HANDLE SignAlgHandle;
-    BCRYPT_ALG_HANDLE HashAlgHandle;
     BCRYPT_KEY_HANDLE KeyHandle;
+    PVOID PaddingInfo;
+    ULONG PaddingFlags;
+    BCRYPT_ALG_HANDLE HashAlgHandle;
     BCRYPT_HASH_HANDLE HashHandle;
     ULONG HashObjectSize;
     ULONG HashSize;
     PVOID HashObject;
     PVOID Hash;
+} UPDATER_SIGNING, *PUPDATER_SIGNING;
+
+typedef struct _UPDATER_HASH_CONTEXT
+{
+    BCRYPT_ALG_HANDLE HashAlgHandle;
+    BCRYPT_HASH_HANDLE HashHandle;
+    ULONG HashObjectSize;
+    ULONG HashSize;
+    PVOID HashObject;
+    PVOID Hash;
+    UPDATER_SIGNING Sign[MaxUpdaterSigningGeneration];
 } UPDATER_HASH_CONTEXT, *PUPDATER_HASH_CONTEXT;
 
 PUPDATER_HASH_CONTEXT UpdaterInitializeHash(

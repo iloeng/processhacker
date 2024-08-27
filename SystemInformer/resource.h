@@ -61,8 +61,8 @@
 #define IDD_LOG                         178
 #define IDD_MEMEDIT                     180
 #define IDD_MEMPROTECT                  182
-#define IDD_MEMRESULTS                  183
-#define IDD_MEMSTRING                   185
+#define IDD_MEMSTRINGS                  183
+#define IDD_MEMSTRINGSMINLEN            185
 #define IDD_OPTGRAPHS                   186
 #define IDD_PLUGINS                     187
 #define IDD_PLUGINMANAGER               187
@@ -404,11 +404,6 @@
 #define IDC_VALUE                       1230
 #define IDC_DELAYEDSTART                1234
 #define IDC_MINIMUMLENGTH               1236
-#define IDC_DETECTUNICODE               1237
-#define IDC_PRIVATE                     1238
-#define IDC_IMAGE                       1239
-#define IDC_MAPPED                      1240
-#define IDC_EXTENDEDUNICODE             1241
 #define IDC_SHOWTEXT                    1245
 #define IDC_ICONPROCESSES               1248
 #define IDC_CLEANUP                     1251
@@ -767,6 +762,7 @@
 #define ID_MISCELLANEOUS_RUNASTHISUSER  40230
 #define ID_MISCELLANEOUS_PAGESMODIFIED  40231
 #define ID_VIEW_HIDEPROCESSESFROMOTHERUSERS 40232
+#define ID_MISCELLANEOUS_FLUSHHEAPS     40233
 #define ID_THREAD_AFFINITY              40233
 #define ID_THREAD_BOOST                 40234
 #define ID_VIEW_HIDESIGNEDPROCESSES     40234
@@ -818,6 +814,7 @@
 #define ID_MINIINFO_REFRESH             40288
 #define ID_MINIINFO_REFRESHAUTOMATICALLY 40289
 #define ID_TOOLS_STARTRESOURCEMONITOR   40290
+#define ID_TOOLS_SHUTDOWNWSLPROCESSES   40291
 #define IDC_MAXSCREEN                   40293
 #define ID_PRIVILEGE_RESET              40296
 #define ID_GROUP_ENABLE                 40297
@@ -837,6 +834,7 @@
 #define ID_NOTIFICATIONS_RESETPERSISTLAYOUT 40310
 #define ID_NOTIFICATIONS_ENABLETRANSPARENTICONS 40311
 #define ID_NOTIFICATIONS_ENABLESINGLECLICKICONS 40312
+#define ID_MISCELLANEOUS_EXECUTIONREQUIRED 40313
 #define IDDYNAMIC                       50000
 #define IDPLUGINS                       55000
 

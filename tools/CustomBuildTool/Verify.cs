@@ -13,7 +13,7 @@ namespace CustomBuildTool
 {
     public static class Verify
     {
-        public static readonly SortedDictionary<string, string> KeyName_Vars = new SortedDictionary<string, string>()
+        public static readonly SortedDictionary<string, string> KeyName_Vars = new(StringComparer.OrdinalIgnoreCase)
         {
             { "kph",       "KPH_BUILD_KEY" },
             { "release",   "RELEASE_BUILD_KEY" },
@@ -101,9 +101,14 @@ namespace CustomBuildTool
                     }
                 }
 
-                var fileBytes = Utils.ReadAllBytes(FileName);
-                var signature = Sign(keyMaterial, fileBytes);
-                Utils.WriteAllBytes(sigFileName, signature);
+                if (File.Exists(FileName))
+                {
+                    using (var fileStream = File.OpenRead(FileName))
+                    {
+                        var signature = Sign(keyMaterial, fileStream);
+                        Utils.WriteAllBytes(sigFileName, signature);
+                    }
+                }
             }
             catch (Exception e)
             {
@@ -122,9 +127,14 @@ namespace CustomBuildTool
             {
                 if (GetKeyMaterial(KeyName, out byte[] keyMaterial))
                 {
-                    var fileBytes = Utils.ReadAllBytes(FileName);
-                    var signature = Sign(keyMaterial, fileBytes);
-                    Signature = Convert.ToHexString(signature);
+                    if (File.Exists(FileName))
+                    {
+                        using (var fileStream = File.OpenRead(FileName))
+                        {
+                            var signature = Sign(keyMaterial, fileStream);
+                            Signature = Convert.ToHexString(signature);
+                        }
+                    }
                 }
             }
             catch (Exception e)
@@ -224,9 +234,54 @@ namespace CustomBuildTool
             byte[] buffer;
 
             using (CngKey cngkey = CngKey.Import(KeyMaterial, CngKeyBlobFormat.GenericPrivateBlob))
-            using (ECDsaCng ecdsa = new ECDsaCng(cngkey))
             {
-                buffer = ecdsa.SignData(Bytes, HashAlgorithmName.SHA256);
+                if (cngkey.Algorithm == CngAlgorithm.ECDsaP256)
+                {
+                    using (ECDsaCng ecdsa = new ECDsaCng(cngkey))
+                    {
+                        buffer = ecdsa.SignData(Bytes, HashAlgorithmName.SHA256);
+                    }
+                }
+                else if (cngkey.Algorithm == CngAlgorithm.Rsa)
+                {
+                    using (RSACng rsa = new RSACng(cngkey))
+                    {
+                        buffer = rsa.SignData(Bytes, HashAlgorithmName.SHA512, RSASignaturePadding.Pss);
+                    }
+                }
+                else
+                {
+                    throw new NotSupportedException($"Unsupported algorithm: {cngkey.Algorithm}");
+                }
+            }
+
+            return buffer;
+        }
+
+        private static byte[] Sign(byte[] KeyMaterial, Stream Stream)
+        {
+            byte[] buffer;
+
+            using (CngKey cngkey = CngKey.Import(KeyMaterial, CngKeyBlobFormat.GenericPrivateBlob))
+            {
+                if (cngkey.Algorithm == CngAlgorithm.ECDsaP256)
+                {
+                    using (ECDsaCng ecdsa = new ECDsaCng(cngkey))
+                    {
+                        buffer = ecdsa.SignData(Stream, HashAlgorithmName.SHA256);
+                    }
+                }
+                else if (cngkey.Algorithm == CngAlgorithm.Rsa)
+                {
+                    using (RSACng rsa = new RSACng(cngkey))
+                    {
+                        buffer = rsa.SignData(Stream, HashAlgorithmName.SHA512, RSASignaturePadding.Pss);
+                    }
+                }
+                else
+                {
+                    throw new NotSupportedException($"Unsupported algorithm: {cngkey.Algorithm}");
+                }
             }
 
             return buffer;
@@ -234,14 +289,13 @@ namespace CustomBuildTool
 
         private static string GetPath(string FileName)
         {
-            return $"{Build.BuildWorkingFolder}\\tools\\CustomSignTool\\Resources\\{FileName}";
+            return Path.Join([Build.BuildWorkingFolder, "\\tools\\CustomSignTool\\Resources\\", FileName]);
         }
 
         private static bool GetKeyMaterial(string KeyName, out byte[] KeyMaterial)
         {
-            if (Win32.HasEnvironmentVariable(KeyName_Vars[KeyName]))
+            if (Win32.GetEnvironmentVariable(KeyName_Vars[KeyName], out string secret))
             {
-                string secret = Win32.GetEnvironmentVariable(KeyName_Vars[KeyName]);
                 byte[] bytes = Utils.ReadAllBytes(GetPath($"{KeyName}.s"));
                 KeyMaterial = Decrypt(bytes, secret);
                 return true;

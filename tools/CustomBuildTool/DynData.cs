@@ -26,44 +26,66 @@ namespace CustomBuildTool
         private const string Includes =
 @"#include <kphlibbase.h>";
 
-        private const UInt32 Version = 12;
+        private const UInt32 Version = 14;
 
         private static readonly byte[] SessionTokenPublicKey = new byte[]
         {
-            0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00,
-            0x04, 0x4d, 0x12, 0x40, 0x1c, 0xa4, 0x1b, 0xfd,
-            0x71, 0xbd, 0x0b, 0x4a, 0x6b, 0x4d, 0xe3, 0xc9,
-            0xac, 0xde, 0x26, 0x73, 0x84, 0xe7, 0xb9, 0xf8,
-            0x19, 0xd5, 0xd9, 0xb8, 0x7d, 0x7b, 0x7d, 0x0e,
-            0x24, 0x4d, 0x69, 0xc6, 0x89, 0xf4, 0x64, 0x4c,
-            0xa2, 0x9d, 0x29, 0xb3, 0x5c, 0x9b, 0x4e, 0xf5,
-            0x35, 0xaa, 0x87, 0xd3, 0xf1, 0xbb, 0x0a, 0xcd,
-            0x0c, 0x6c, 0x55, 0x56, 0x71, 0x8f, 0x79, 0x27,
+            0x52, 0x53, 0x41, 0x31, 0x00, 0x10, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x01, 0xDE, 0x4C, 0x64, 0xCA, 0x4E, 0xEA, 0x1C, 0x06, 0xBD,
+            0x40, 0x42, 0x46, 0x3A, 0x80, 0x2E, 0xB1, 0x13, 0xCE, 0x53, 0x6B, 0x00,
+            0xC0, 0x53, 0x79, 0x54, 0xB2, 0xF3, 0xC2, 0xAD, 0x21, 0xFD, 0xB4, 0x06,
+            0xB2, 0xA7, 0x8F, 0x75, 0xC4, 0xF2, 0xC9, 0x6B, 0x30, 0x7E, 0x46, 0x48,
+            0x70, 0x58, 0x38, 0x26, 0x14, 0x63, 0xC9, 0xB7, 0xB6, 0x28, 0x90, 0xA5,
+            0x3E, 0x03, 0xFC, 0x30, 0xD7, 0xE0, 0xF9, 0x06, 0xC1, 0x08, 0x5A, 0x7A,
+            0x1D, 0x64, 0x2B, 0x2C, 0x21, 0x25, 0x4D, 0x97, 0x22, 0x66, 0xD6, 0x2B,
+            0x16, 0x4B, 0x83, 0xA7, 0x00, 0x40, 0xFF, 0xD4, 0xB3, 0xB9, 0xED, 0x6B,
+            0x11, 0x89, 0x87, 0x7B, 0xAA, 0xFD, 0x27, 0x9D, 0x9C, 0x2C, 0x2C, 0x6D,
+            0xAD, 0x8E, 0xD7, 0xBC, 0xE2, 0x0A, 0xCE, 0x27, 0x08, 0x35, 0xDE, 0x32,
+            0x77, 0xAC, 0xC6, 0x21, 0xBA, 0x06, 0xEB, 0xD2, 0xCE, 0x5B, 0xF2, 0x14,
+            0x8F, 0x7C, 0x20, 0x99, 0x43, 0x25, 0xD4, 0x3F, 0xDD, 0x7E, 0xBB, 0xE4,
+            0xF8, 0x3B, 0x3B, 0xB9, 0x2F, 0x74, 0xA5, 0xAF, 0xA4, 0x47, 0x8A, 0x21,
+            0x83, 0x4D, 0x40, 0x69, 0x55, 0x6F, 0xEF, 0x26, 0x9C, 0x76, 0x80, 0xE0,
+            0x4E, 0x12, 0x95, 0xB6, 0x8C, 0xFA, 0x4B, 0x4D, 0x6D, 0x8A, 0x37, 0xB6,
+            0xDD, 0x21, 0xD7, 0x99, 0x0F, 0xEB, 0x7B, 0x95, 0xE8, 0xC9, 0x39, 0x58,
+            0xBB, 0x56, 0x3B, 0x3C, 0x21, 0x63, 0x29, 0xDB, 0x36, 0xE2, 0x81, 0xF2,
+            0x46, 0x61, 0xB6, 0xEC, 0xDB, 0x19, 0x73, 0xE5, 0x25, 0x12, 0xBE, 0x98,
+            0x99, 0x0F, 0x52, 0x75, 0xFA, 0x8A, 0x12, 0x52, 0xE1, 0x01, 0x82, 0x29,
+            0x79, 0x69, 0x7B, 0x2B, 0xDB, 0xBD, 0x7F, 0x0A, 0x87, 0xAD, 0x9A, 0x1F,
+            0xC0, 0xC1, 0x6C, 0x96, 0x7D, 0x84, 0x86, 0xAD, 0x53, 0x64, 0x7D, 0x88,
+            0x67, 0xE2, 0x56, 0x7F, 0x89, 0x6C, 0x00, 0x30, 0xC7, 0xEB, 0x93, 0xCF,
+            0x58, 0xB0, 0xE3, 0xDC, 0x4D, 0x23, 0xAD, 0x78, 0x8B, 0xAD, 0xFC, 0x1D,
+            0x09, 0x49, 0x92, 0xCB, 0x7A, 0x0C, 0x6E, 0xCA, 0x50, 0xAB, 0xDD, 0x0E,
+            0xBA, 0xE4, 0x8B, 0x87, 0x16, 0x94, 0x66, 0x03, 0x0D, 0x07, 0xDC, 0xB8,
+            0x06, 0xE7, 0x29, 0xC5, 0x57, 0xEE, 0x65, 0xF2, 0x7E, 0x85, 0xC2, 0x49,
+            0x28, 0xA3, 0x4E, 0x69, 0x3E, 0xAD, 0x81, 0x2D, 0x47, 0xC8, 0x31, 0xA4,
+            0xAE, 0x3B, 0x23, 0xF6, 0x33, 0x5F, 0xA3, 0xA2, 0xBF, 0x77, 0xFE, 0x98,
+            0x76, 0xB0, 0x37, 0xD6, 0x08, 0x09, 0x8E, 0x6E, 0x8C, 0xFB, 0x77, 0x87,
+            0xF2, 0x29, 0xC2, 0x00, 0xB9, 0xAD, 0x2A, 0x71, 0x5B, 0x64, 0x1F, 0x06,
+            0x2B, 0x18, 0x17, 0xB7, 0x90, 0xA4, 0xEF, 0xF2, 0x64, 0x26, 0x20, 0xE4,
+            0x15, 0xE0, 0xEC, 0xD6, 0x86, 0xDE, 0x70, 0x8A, 0xCD, 0x57, 0xFE, 0xB2,
+            0xD3, 0x16, 0xBF, 0xD4, 0x72, 0x5B, 0x26, 0xD6, 0x80, 0x84, 0x10, 0xAB,
+            0xD1, 0x12, 0x4D, 0x84, 0xCA, 0x99, 0x22, 0x72, 0x7D, 0x95, 0xDE, 0x31,
+            0x0E, 0x01, 0x80, 0x3F, 0xCE, 0x5D, 0x11, 0xF8, 0xA1, 0x66, 0x2A, 0xDF,
+            0x42, 0x24, 0x69, 0x3E, 0x47, 0x8D, 0xB7, 0x96, 0xB2, 0x36, 0x70, 0x41,
+            0x5F, 0xC8, 0x63, 0x5F, 0xA1, 0x39, 0x2D, 0x2B, 0xDD, 0xE2, 0xF5, 0xB9,
+            0x8D, 0xE0, 0x91, 0x73, 0xA8, 0xCA, 0xBF, 0xA7, 0x77, 0x61, 0x9F, 0xA2,
+            0x30, 0x18, 0x31, 0xDB, 0x79, 0x89, 0xED, 0xE1, 0x89, 0x45, 0x52, 0x05,
+            0x7C, 0xD7, 0x11, 0x15, 0x45, 0xD4, 0x19, 0xE1, 0xF4, 0x23, 0xD9, 0x9D,
+            0xB0, 0x80, 0x19, 0xB8, 0x79, 0x20, 0x8C, 0xCB, 0xA3, 0xE3, 0x53, 0x4E,
+            0x8B, 0x2E, 0xC1, 0x9C, 0x0A, 0x53, 0x1A, 0x14, 0x65, 0x71, 0xC4, 0x66,
+            0x4A, 0x82, 0x8A, 0xF3, 0x67, 0x50, 0xFA, 0xB7, 0x3A, 0x25, 0x61
         };
 
         private static string DynConfigC =
 $@"#define KPH_DYN_CONFIGURATION_VERSION { Version }
 
-#define KPH_DYN_CI_INVALID ((SHORT)-1)
-#define KPH_DYN_CI_V1      ((SHORT)1)
-#define KPH_DYN_CI_V2      ((SHORT)2)
-
-#define KPH_DYN_LX_INVALID ((SHORT)-1)
-#define KPH_DYN_LX_V1      ((SHORT)1)
-
 #define KPH_DYN_SESSION_TOKEN_PUBLIC_KEY_LENGTH { SessionTokenPublicKey.Length }
 
 #include <pshpack1.h>
 
-typedef struct _KPH_DYN_CONFIGURATION
+typedef struct _KPH_DYN_CONFIGURATION_ARCH
 {{
-    USHORT MajorVersion;
-    USHORT MinorVersion;
-    USHORT BuildNumberMin;               // -1 to ignore
-    USHORT RevisionMin;                  // -1 to ignore
-    USHORT BuildNumberMax;               // -1 to ignore
-    USHORT RevisionMax;                  // -1 to ignore
-
     USHORT EgeGuid;                      // dt nt!_ETW_GUID_ENTRY Guid
     USHORT EpObjectTable;                // dt nt!_EPROCESS ObjectTable
     USHORT EreGuidEntry;                 // dt nt!_ETW_REG_ENTRY GuidEntry
@@ -72,7 +94,6 @@ typedef struct _KPH_DYN_CONFIGURATION
     USHORT OtIndex;                      // dt nt!_OBJECT_TYPE Index
     USHORT ObDecodeShift;                // dt nt!_HANDLE_TABLE_ENTRY ObjectPointerBits
     USHORT ObAttributesShift;            // dt nt!_HANDLE_TABLE_ENTRY Attributes
-    USHORT CiVersion;                    // ci.dll exports version
     USHORT AlpcCommunicationInfo;        // dt nt!_ALPC_PORT CommunicationInfo
     USHORT AlpcOwnerProcess;             // dt nt!_ALPC_PORT OwnerProcess
     USHORT AlpcConnectionPort;           // dt nt!_ALPC_COMMUNICATION_INFO ConnectionPort
@@ -92,7 +113,6 @@ typedef struct _KPH_DYN_CONFIGURATION
     USHORT KtReadTransferCount;          // dt nt!_KTHREAD ReadTransferCount
     USHORT KtWriteTransferCount;         // dt nt!_KTHREAD WriteTransferCount
     USHORT KtOtherTransferCount;         // dt nt!_KTHREAD OtherTransferCount
-    USHORT LxVersion;                    // lxcore.sys exports version
     USHORT LxPicoProc;                   // uf lxcore!LxpSyscall_GETPID
     USHORT LxPicoProcInfo;               // uf lxcore!LxpSyscall_GETPID
     USHORT LxPicoProcInfoPID;            // uf lxcore!LxpSyscall_GETPID
@@ -102,6 +122,18 @@ typedef struct _KPH_DYN_CONFIGURATION
     USHORT MmControlAreaListHead;        // dt nt!_CONTROL_AREA ListHead
     USHORT MmControlAreaLock;            // dt nt!_CONTROL_AREA ControlAreaLock
     USHORT EpSectionObject;              // dt nt!_EPROCESS SectionObject
+}} KPH_DYN_CONFIGURATION_ARCH, *PKPH_DYN_CONFIGURATION_ARCH;
+
+typedef struct _KPH_DYN_CONFIGURATION
+{{
+    USHORT MajorVersion;
+    USHORT MinorVersion;
+    USHORT BuildNumberMin;
+    USHORT RevisionMin;
+    USHORT BuildNumberMax;
+    USHORT RevisionMax;
+    KPH_DYN_CONFIGURATION_ARCH ArchAMD64;
+    KPH_DYN_CONFIGURATION_ARCH ArchARM64;
 }} KPH_DYN_CONFIGURATION, *PKPH_DYN_CONFIGURATION;
 
 typedef struct _KPH_DYNDATA
@@ -115,15 +147,8 @@ typedef struct _KPH_DYNDATA
 #include <poppack.h>";
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        public struct DynConfig
+        public struct DynConfigArch
         {
-            public UInt16 MajorVersion;
-            public UInt16 MinorVersion;
-            public UInt16 BuildNumberMin;
-            public UInt16 RevisionMin;
-            public UInt16 BuildNumberMax;
-            public UInt16 RevisionMax;
-
             public UInt16 EgeGuid;
             public UInt16 EpObjectTable;
             public UInt16 EreGuidEntry;
@@ -132,7 +157,6 @@ typedef struct _KPH_DYNDATA
             public UInt16 OtIndex;
             public UInt16 ObDecodeShift;
             public UInt16 ObAttributesShift;
-            public UInt16 CiVersion;
             public UInt16 AlpcCommunicationInfo;
             public UInt16 AlpcOwnerProcess;
             public UInt16 AlpcConnectionPort;
@@ -152,7 +176,6 @@ typedef struct _KPH_DYNDATA
             public UInt16 KtReadTransferCount;
             public UInt16 KtWriteTransferCount;
             public UInt16 KtOtherTransferCount;
-            public UInt16 LxVersion;
             public UInt16 LxPicoProc;
             public UInt16 LxPicoProcInfo;
             public UInt16 LxPicoProcInfoPID;
@@ -163,61 +186,78 @@ typedef struct _KPH_DYNDATA
             public UInt16 MmControlAreaLock;
             public UInt16 EpSectionObject;
 
+            public DynConfigArch()
+            {
+                EgeGuid = UInt16.MaxValue;
+                EpObjectTable = UInt16.MaxValue;
+                EreGuidEntry = UInt16.MaxValue;
+                HtHandleContentionEvent = UInt16.MaxValue;
+                OtName = UInt16.MaxValue;
+                OtIndex = UInt16.MaxValue;
+                ObDecodeShift = UInt16.MaxValue;
+                ObAttributesShift = UInt16.MaxValue;
+                AlpcCommunicationInfo = UInt16.MaxValue;
+                AlpcOwnerProcess = UInt16.MaxValue;
+                AlpcConnectionPort = UInt16.MaxValue;
+                AlpcServerCommunicationPort = UInt16.MaxValue;
+                AlpcClientCommunicationPort = UInt16.MaxValue;
+                AlpcHandleTable = UInt16.MaxValue;
+                AlpcHandleTableLock = UInt16.MaxValue;
+                AlpcAttributes = UInt16.MaxValue;
+                AlpcAttributesFlags = UInt16.MaxValue;
+                AlpcPortContext = UInt16.MaxValue;
+                AlpcPortObjectLock = UInt16.MaxValue;
+                AlpcSequenceNo = UInt16.MaxValue;
+                AlpcState = UInt16.MaxValue;
+                KtReadOperationCount = UInt16.MaxValue;
+                KtWriteOperationCount = UInt16.MaxValue;
+                KtOtherOperationCount = UInt16.MaxValue;
+                KtReadTransferCount = UInt16.MaxValue;
+                KtWriteTransferCount = UInt16.MaxValue;
+                KtOtherTransferCount = UInt16.MaxValue;
+                LxPicoProc = UInt16.MaxValue;
+                LxPicoProcInfo = UInt16.MaxValue;
+                LxPicoProcInfoPID = UInt16.MaxValue;
+                LxPicoThrdInfo = UInt16.MaxValue;
+                LxPicoThrdInfoTID = UInt16.MaxValue;
+                MmSectionControlArea = UInt16.MaxValue;
+                MmControlAreaListHead = UInt16.MaxValue;
+                MmControlAreaLock = UInt16.MaxValue;
+                EpSectionObject = UInt16.MaxValue;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct DynConfig
+        {
+            public UInt16 MajorVersion;
+            public UInt16 MinorVersion;
+            public UInt16 BuildNumberMin;
+            public UInt16 RevisionMin;
+            public UInt16 BuildNumberMax;
+            public UInt16 RevisionMax;
+
+            public DynConfigArch ArchAMD64;
+            public DynConfigArch ArchARM64;
+
             public DynConfig()
             {
-                MajorVersion = ushort.MaxValue;
-                MinorVersion = ushort.MaxValue;
-                BuildNumberMin = ushort.MaxValue;
-                BuildNumberMax = ushort.MaxValue;
-                RevisionMin = ushort.MaxValue;
-                RevisionMax = ushort.MaxValue;
-
-                EgeGuid = ushort.MaxValue;
-                EpObjectTable = ushort.MaxValue;
-                EreGuidEntry = ushort.MaxValue;
-                HtHandleContentionEvent = ushort.MaxValue;
-                OtName = ushort.MaxValue;
-                OtIndex = ushort.MaxValue;
-                ObDecodeShift = ushort.MaxValue;
-                ObAttributesShift = ushort.MaxValue;
-                CiVersion = ushort.MaxValue;
-                AlpcCommunicationInfo = ushort.MaxValue;
-                AlpcOwnerProcess = ushort.MaxValue;
-                AlpcConnectionPort = ushort.MaxValue;
-                AlpcServerCommunicationPort = ushort.MaxValue;
-                AlpcClientCommunicationPort = ushort.MaxValue;
-                AlpcHandleTable = ushort.MaxValue;
-                AlpcHandleTableLock = ushort.MaxValue;
-                AlpcAttributes = ushort.MaxValue;
-                AlpcAttributesFlags = ushort.MaxValue;
-                AlpcPortContext = ushort.MaxValue;
-                AlpcPortObjectLock = ushort.MaxValue;
-                AlpcSequenceNo = ushort.MaxValue;
-                AlpcState = ushort.MaxValue;
-                KtReadOperationCount = ushort.MaxValue;
-                KtWriteOperationCount = ushort.MaxValue;
-                KtOtherOperationCount = ushort.MaxValue;
-                KtReadTransferCount = ushort.MaxValue;
-                KtWriteTransferCount = ushort.MaxValue;
-                KtOtherTransferCount = ushort.MaxValue;
-                LxVersion = ushort.MaxValue;
-                LxPicoProc = ushort.MaxValue;
-                LxPicoProcInfo = ushort.MaxValue;
-                LxPicoProcInfoPID = ushort.MaxValue;
-                LxPicoThrdInfo = ushort.MaxValue;
-                LxPicoThrdInfoTID = ushort.MaxValue;
-                MmSectionControlArea = ushort.MaxValue;
-                MmControlAreaListHead = ushort.MaxValue;
-                MmControlAreaLock = ushort.MaxValue;
-                EpSectionObject = ushort.MinValue;
+                MajorVersion = UInt16.MaxValue;
+                MinorVersion = UInt16.MaxValue;
+                BuildNumberMin = UInt16.MaxValue;
+                RevisionMin = UInt16.MaxValue;
+                BuildNumberMax = UInt16.MaxValue;
+                RevisionMax = UInt16.MaxValue;
+                ArchAMD64 = new DynConfigArch();
+                ArchARM64 = new DynConfigArch();
             }
         }
 
         public static bool Execute(string OutDir, bool StrictChecks)
         {
-            string manifestFile = "kphlib\\kphdyn.xml";
-            string headerFile = "kphlib\\include\\kphdyn.h";
-            string sourceFile = "kphlib\\kphdyn.c";
+            string manifestFile = $"{Build.BuildWorkingFolder}\\kphlib\\kphdyn.xml";
+            string headerFile = $"{Build.BuildWorkingFolder}\\kphlib\\include\\kphdyn.h";
+            string sourceFile = $"{Build.BuildWorkingFolder}\\kphlib\\kphdyn.c";
 
             GenerateConfig(manifestFile, out byte[] config);
 
@@ -226,7 +266,7 @@ typedef struct _KPH_DYNDATA
             Utils.WriteAllText(sourceFile, GenerateSource(BytesToString(config)));
             Program.PrintColorMessage($"Dynamic source -> {sourceFile}", ConsoleColor.Cyan);
 
-            if (OutDir.Length == 0)
+            if (string.IsNullOrWhiteSpace(OutDir))
                 return true;
 
             string configFile = $"{OutDir}\\ksidyn.bin";
@@ -287,34 +327,86 @@ typedef struct _KPH_DYNDATA
             )
         {
             var xml = new XmlDocument();
-            xml.Load(ManifestFile);
-            var dyn = xml.SelectSingleNode("/dyn");
             var configs = new List<DynConfig>(10);
             var configNames = new List<string>(10);
 
-            foreach (XmlNode data in dyn.SelectNodes("data"))
+            xml.Load(ManifestFile);
+
+            var dyn = xml.SelectSingleNode("/dyn");
+            var dataNodes = dyn?.SelectNodes("data");
+
+            foreach (XmlNode data in dataNodes)
             {
                 var config = new DynConfig();
-                var configName = data.Attributes.GetNamedItem("name").Value;
+                var fieldNodes = data.SelectNodes("field");
+                var min = data.Attributes?.GetNamedItem("min")?.Value;
+                var max = data.Attributes?.GetNamedItem("max")?.Value;
+                string configName = $"{min} - {max}";
 
-                //Program.PrintColorMessage(configName, ConsoleColor.Cyan);
+                Program.PrintColorMessage(configName, ConsoleColor.Cyan);
 
-                foreach (XmlNode field in data.SelectNodes("field"))
+                string[] minParts = min.Split('.');
+                string[] maxParts = max.Split('.');
+
+                if (minParts.Length != 4 || maxParts.Length != 4)
                 {
-                    var value = field.Attributes.GetNamedItem("value").Value;
-                    var name = field.Attributes.GetNamedItem("name").Value;
-                    var member = typeof(DynConfig).GetField(name);
+                    throw new Exception("Invalid version format!");
+                }
+
+                config.MajorVersion = UInt16.Parse(minParts[0]);
+                config.MinorVersion = UInt16.Parse(minParts[1]);
+
+                if (config.MajorVersion != UInt16.Parse(maxParts[0]))
+                {
+                    throw new Exception("Major version mismatch!");
+                }
+
+                if (config.MinorVersion != UInt16.Parse(maxParts[1]))
+                {
+                    throw new Exception("Minor version mismatch!");
+                }
+
+                config.BuildNumberMin = UInt16.Parse(minParts[2]);
+                config.RevisionMin = UInt16.Parse(minParts[3]);
+                config.BuildNumberMax = UInt16.Parse(maxParts[2]);
+                config.RevisionMax = UInt16.Parse(maxParts[3]);
+
+                foreach (XmlNode field in fieldNodes)
+                {
+                    var attributes = field.Attributes;
+                    var value = attributes?.GetNamedItem("value")?.Value;
+                    var name = attributes?.GetNamedItem("name")?.Value;
+                    var arch = attributes?.GetNamedItem("arch")?.Value;
 
                     if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                     {
-                        value = Convert.ToUInt64(value, 16).ToString();
+                        var hex = value.AsSpan(2, value.Length - 2); // Remove "0x" prefix
+                        value = ulong.Parse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture).ToString(); // Convert.ToUInt64(value, 16);
                     }
-                    else if (value.Equals("-1", StringComparison.OrdinalIgnoreCase) && member.FieldType == typeof(ushort))
+                    else if (value.Equals("-1", StringComparison.OrdinalIgnoreCase))
                     {
-                        value = ushort.MaxValue.ToString();
+                        value = UInt32.MaxValue.ToString();
                     }
 
-                    member.SetValueDirect(__makeref(config), Convert.ChangeType(value, member.FieldType));
+                    var member = typeof(DynConfigArch).GetField(name);
+
+                    if (arch == null)
+                    {
+                        member.SetValueDirect(__makeref(config.ArchAMD64), Convert.ChangeType(value, member.FieldType));
+                        member.SetValueDirect(__makeref(config.ArchARM64), Convert.ChangeType(value, member.FieldType));
+                    }
+                    else if (arch == "amd64")
+                    {
+                        member.SetValueDirect(__makeref(config.ArchAMD64), Convert.ChangeType(value, member.FieldType));
+                    }
+                    else if (arch == "arm64")
+                    {
+                        member.SetValueDirect(__makeref(config.ArchARM64), Convert.ChangeType(value, member.FieldType));
+                    }
+                    else
+                    {
+                        throw new Exception($"Invalid architecture ({arch}) specified!");
+                    }
                 }
 
                 configs.Add(config);
@@ -325,7 +417,6 @@ typedef struct _KPH_DYNDATA
             {
                 throw new Exception("Dynamic configuration is invalid!");
             }
-
 
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream))
@@ -352,13 +443,13 @@ typedef struct _KPH_DYNDATA
                 var config = Configs[i];
                 var configName = ConfigNames[i];
 
-                if (config.MajorVersion == ushort.MaxValue)
+                if (config.MajorVersion == UInt16.MaxValue)
                 {
                     Program.PrintColorMessage($"{configName} - MajorVersion required", ConsoleColor.Red);
                     valid = false;
                 }
 
-                if (config.MinorVersion == ushort.MaxValue)
+                if (config.MinorVersion == UInt16.MaxValue)
                 {
                     Program.PrintColorMessage($"{configName} - MinorVersion required", ConsoleColor.Red);
                     valid = false;

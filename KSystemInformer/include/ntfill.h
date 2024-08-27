@@ -3,7 +3,7 @@
  *
  * Authors:
  *
- *     jxy-s   2022-2023
+ *     jxy-s   2022-2024
  *
  */
 
@@ -43,6 +43,46 @@ ExfUnblockPushLock(
     _Inout_opt_ PEX_PUSH_LOCK_WAIT_BLOCK WaitBlock
     );
 
+/*
+0:000> dt ntoskrnl!_HANDLE_TABLE_ENTRY
+   +0x000 VolatileLowValue : Int8B
+   +0x000 LowValue         : Int8B
+   +0x000 InfoTable        : Ptr64 _HANDLE_TABLE_ENTRY_INFO
+   +0x008 HighValue        : Int8B
+   +0x008 NextFreeHandleEntry : Ptr64 _HANDLE_TABLE_ENTRY
+   +0x008 LeafHandleValue  : _EXHANDLE
+   +0x000 RefCountField    : Int8B
+   +0x000 Unlocked         : Pos 0, 1 Bit
+   +0x000 RefCnt           : Pos 1, 16 Bits
+   +0x000 Attributes       : Pos 17, 3 Bits
+   +0x000 ObjectPointerBits : Pos 20, 44 Bits
+   +0x008 GrantedAccessBits : Pos 0, 25 Bits
+   +0x008 NoRightsUpgrade  : Pos 25, 1 Bit
+   +0x008 Spare1           : Pos 26, 6 Bits
+   +0x00c Spare2           : Uint4B
+
+0:000> dt ntkrla57!_HANDLE_TABLE_ENTRY
+   +0x000 VolatileLowValue : Int8B
+   +0x000 LowValue         : Int8B
+   +0x000 InfoTable        : Ptr64 _HANDLE_TABLE_ENTRY_INFO
+   +0x008 HighValue        : Int8B
+   +0x008 NextFreeHandleEntry : Ptr64 _HANDLE_TABLE_ENTRY
+   +0x008 LeafHandleValue  : _EXHANDLE
+   +0x000 RefCountField    : Int8B
+   +0x000 Unlocked         : Pos 0, 1 Bit
+   +0x000 RefCnt           : Pos 1, 7 Bits
+   +0x000 Attributes       : Pos 8, 3 Bits
+   +0x000 ObjectPointerBits : Pos 11, 53 Bits
+   +0x008 GrantedAccessBits : Pos 0, 25 Bits
+   +0x008 NoRightsUpgrade  : Pos 25, 1 Bit
+   +0x008 Spare1           : Pos 26, 6 Bits
+   +0x00c Spare2           : Uint4B
+*/
+//
+// N.B. We define HANDLE_TABLE_ENTRY this way to allow for dynamic data to
+// support different kernels (see above). The number of ObjectPointerBits are
+// different for LA57.
+//
 typedef struct _HANDLE_TABLE_ENTRY
 {
     union
@@ -1174,6 +1214,19 @@ MmCreateSection(
     _In_opt_ PFILE_OBJECT FileObject
     );
 
+NTKERNELAPI
+NTSTATUS
+NTAPI
+MmCopyVirtualMemory(
+    _In_ PEPROCESS SourceProcess,
+    _In_reads_bytes_(BufferSize) PVOID SourceAddress,
+    _In_ PEPROCESS TargetProcess,
+    _Out_writes_bytes_(BufferSize) PVOID TargetAddress,
+    _In_ SIZE_T BufferSize,
+    _In_ KPROCESSOR_MODE PreviousMode,
+    _Out_ PSIZE_T ReturnSize
+    );
+
 // CI
 
 #ifndef ALGIDDEF
@@ -1733,6 +1786,31 @@ SeGetCachedSigningLevel(
     _Out_opt_ PULONG ThumbprintAlgorithm
     );
 #endif
+
+typedef
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Function_class_(SE_REGISTER_IMAGE_VERIFICATION_CALLBACK)
+NTKERNELAPI
+NTSTATUS
+SE_REGISTER_IMAGE_VERIFICATION_CALLBACK(
+    _In_ SE_IMAGE_TYPE ImageType,
+    _In_ SE_IMAGE_VERIFICATION_CALLBACK_TYPE CallbackType,
+    _In_ PSE_IMAGE_VERIFICATION_CALLBACK_FUNCTION CallbackFunction,
+    _In_opt_ PVOID CallbackContext,
+    _Reserved_ SE_IMAGE_VERIFICATION_CALLBACK_TOKEN Token,
+    _Out_ PVOID* CallbackHandle
+    );
+typedef SE_REGISTER_IMAGE_VERIFICATION_CALLBACK* PSE_REGISTER_IMAGE_VERIFICATION_CALLBACK;
+
+typedef
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Function_class_(SE_UNREGISTER_IMAGE_VERIFICATION_CALLBACK)
+NTKERNELAPI
+VOID
+SE_UNREGISTER_IMAGE_VERIFICATION_CALLBACK(
+    _In_ PVOID CallbackHandle
+    );
+typedef SE_UNREGISTER_IMAGE_VERIFICATION_CALLBACK* PSE_UNREGISTER_IMAGE_VERIFICATION_CALLBACK;
 
 // schannel.h
 

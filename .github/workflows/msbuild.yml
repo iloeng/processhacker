@@ -16,6 +16,8 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Install Nuget Packages
+      run: nuget restore .\packages.config -PackagesDirectory .\packages\
     - name: Build Solution
       shell: cmd
       working-directory: ${{github.workspace}}
@@ -24,6 +26,8 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Install Nuget Packages
+      run: nuget restore .\packages.config -PackagesDirectory .\packages\
     - name: Build Driver
       shell: cmd
       working-directory: ${{github.workspace}}

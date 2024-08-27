@@ -34,8 +34,6 @@ VOID UpdateContextDeleteProcedure(
         PhDereferenceObject(context->SetupFilePath);
     }
 
-    if (context->CurrentVersionString)
-        PhDereferenceObject(context->CurrentVersionString);
     if (context->Version)
         PhDereferenceObject(context->Version);
     if (context->RelDate)
@@ -65,10 +63,10 @@ PPH_UPDATER_CONTEXT CreateUpdateContext(
     }
 
     context = PhCreateObjectZero(sizeof(PH_UPDATER_CONTEXT), UpdateContextType);
-    context->CurrentVersionString = PhGetPhVersion();
     context->StartupCheck = StartupCheck;
     context->Cleanup = TRUE;
     context->PortableMode = !!ProcessHacker_IsPortableMode();
+    context->Channel = PhGetPhReleaseChannel();
 
     return context;
 }
@@ -98,7 +96,7 @@ NTSTATUS UpdateShellExecute(
         PhGetString(parameters),
         NULL,
         SW_SHOW,
-        Context->DirectoryElevationRequired ? PH_SHELL_EXECUTE_ADMIN : PH_SHELL_EXECUTE_DEFAULT,
+        Context->ElevationRequired ? PH_SHELL_EXECUTE_ADMIN : PH_SHELL_EXECUTE_DEFAULT,
         0,
         NULL
         );
@@ -286,38 +284,52 @@ PPH_STRING UpdateWindowsString(
     )
 {
     PPH_STRING buildString = NULL;
-    PPH_STRING fileName = NULL;
-    PPH_STRING fileVersion = NULL;
+    PPH_STRING fileName;
+    PH_MAPPED_IMAGE mappedImage;
+    USHORT imageMachine = 0;
+    ULONG timeDateStamp = 0;
+    ULONG sizeOfImage = 0;
+    PVOID imageBase;
+    ULONG imageSize;
     PVOID versionInfo;
     VS_FIXEDFILEINFO* rootBlock;
-    PH_FORMAT fileVersionFormat[3];
 
-    fileName = PhGetKernelFileName2();
-    versionInfo = PhGetFileVersionInfoEx(&fileName->sr);
-    PhDereferenceObject(fileName);
-
-    if (versionInfo)
+    if (NT_SUCCESS(PhGetKernelFileNameEx(&fileName, &imageBase, &imageSize)))
     {
-        if (rootBlock = PhGetFileVersionFixedInfo(versionInfo))
+        if (NT_SUCCESS(PhLoadMappedImageHeaderPageSize(&fileName->sr, NULL, &mappedImage)))
         {
-            PhInitFormatU(&fileVersionFormat[0], HIWORD(rootBlock->dwFileVersionLS));
-            PhInitFormatC(&fileVersionFormat[1], '.');
-            PhInitFormatU(&fileVersionFormat[2], LOWORD(rootBlock->dwFileVersionLS));
+            imageMachine = mappedImage.NtHeaders->FileHeader.Machine;
+            timeDateStamp = mappedImage.NtHeaders->FileHeader.TimeDateStamp;
+            sizeOfImage = mappedImage.NtHeaders->OptionalHeader.SizeOfImage;
 
-            fileVersion = PhFormat(fileVersionFormat, 3, 30);
+            PhUnloadMappedImage(&mappedImage);
         }
 
-        PhFree(versionInfo);
-    }
+        if (versionInfo = PhGetFileVersionInfoEx(&fileName->sr))
+        {
+            if (rootBlock = PhGetFileVersionFixedInfo(versionInfo))
+            {
+                PH_FORMAT format[11];
 
-    if (fileVersion)
-    {
-        if (PhIsExecutingInWow64())
-            buildString = PhFormatString(L"%s: %s.%s", L"SystemInformer-OsBuild", fileVersion->Buffer, L"x86fre");
-        else
-            buildString = PhFormatString(L"%s: %s.%s", L"SystemInformer-OsBuild", fileVersion->Buffer, L"amd64fre");
+                PhInitFormatS(&format[0], L"SystemInformer-OsBuild: ");
+                PhInitFormatU(&format[1], HIWORD(rootBlock->dwFileVersionLS));
+                PhInitFormatC(&format[2], '.');
+                PhInitFormatU(&format[3], LOWORD(rootBlock->dwFileVersionLS));
+                PhInitFormatS(&format[4], PhIsExecutingInWow64() ? L"_64\r\n" : L"_32\r\n");
+                PhInitFormatS(&format[5], L"SystemInformer-PlatformSupport: ");
+                PhInitFormatX(&format[6], imageMachine);
+                PhInitFormatC(&format[7], '_');
+                PhInitFormatX(&format[8], timeDateStamp);
+                PhInitFormatC(&format[9], '_');
+                PhInitFormatX(&format[10], sizeOfImage);
 
-        PhDereferenceObject(fileVersion);
+                buildString = PhFormat(format, RTL_NUMBER_OF(format), 0);
+            }
+
+            PhFree(versionInfo);
+        }
+
+        PhDereferenceObject(fileName);
     }
 
     return buildString;
@@ -330,26 +342,44 @@ ULONG64 ParseVersionString(
     PH_STRINGREF remaining;
     PH_STRINGREF majorPart;
     PH_STRINGREF minorPart;
+    PH_STRINGREF buildPart;
     PH_STRINGREF revisionPart;
     ULONG64 majorInteger = 0;
     ULONG64 minorInteger = 0;
+    ULONG64 buildInteger = 0;
     ULONG64 revisionInteger = 0;
 
     remaining = PhGetStringRef(VersionString);
-
     PhSplitStringRefAtChar(&remaining, L'.', &majorPart, &remaining);
     PhSplitStringRefAtChar(&remaining, L'.', &minorPart, &remaining);
     PhSplitStringRefAtChar(&remaining, L'.', &revisionPart, &remaining);
+    PhSplitStringRefAtChar(&remaining, L'.', &buildPart, &remaining);
 
-    PhStringToInteger64(&majorPart, 10, &majorInteger);
-    PhStringToInteger64(&minorPart, 10, &minorInteger);
-    PhStringToInteger64(&revisionPart, 10, &revisionInteger);
+    if (majorPart.Length)
+    {
+        PhStringToInteger64(&majorPart, 10, &majorInteger);
+    }
+
+    if (minorPart.Length)
+    {
+        PhStringToInteger64(&minorPart, 10, &minorInteger);
+    }
+
+    if (revisionPart.Length)
+    {
+        PhStringToInteger64(&revisionPart, 10, &buildInteger);
+    }
+
+    if (buildPart.Length)
+    {
+        PhStringToInteger64(&buildPart, 10, &revisionInteger);
+    }
 
     return MAKE_VERSION_ULONGLONG(
         (ULONG)majorInteger,
         (ULONG)minorInteger,
-        (ULONG)revisionInteger,
-        0
+        (ULONG)buildInteger,
+        (ULONG)revisionInteger
         );
 }
 
@@ -363,6 +393,10 @@ BOOLEAN QueryUpdateData(
     PPH_BYTES jsonString = NULL;
     PVOID jsonObject;
     PWSTR urlPath;
+    ULONG majorVersion;
+    ULONG minorVersion;
+    ULONG buildVersion;
+    ULONG revisionVersion;
 
     if (!PhHttpSocketCreate(&httpContext, NULL))
     {
@@ -381,7 +415,7 @@ BOOLEAN QueryUpdateData(
     }
 
     if (!Context->SwitchingChannel)
-        Context->Channel = PhGetIntegerSetting(L"ReleaseChannel");
+        Context->Channel = PhGetPhReleaseChannel();
 
     switch (Context->Channel)
     {
@@ -460,13 +494,16 @@ BOOLEAN QueryUpdateData(
     Context->SetupFileSignature = PhGetJsonValueAsString(jsonObject, "setup_sig");
 
 #if defined(FORCE_FUTURE_VERSION)
-    Context->CurrentVersion = ParseVersionString(PhCreateString(L"9999.9999.9999.9999"));
-    Context->LatestVersion = ParseVersionString(Context->CurrentVersionString);
+    PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
+    Context->CurrentVersion = MAKE_VERSION_ULONGLONG(USHRT_MAX, USHRT_MAX, USHRT_MAX, USHRT_MAX);
+    Context->LatestVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
 #elif defined(FORCE_LATEST_VERSION)
-    Context->CurrentVersion = ParseVersionString(PhCreateString(L"0.0.0.0"));
-    Context->LatestVersion = ParseVersionString(Context->CurrentVersionString);
+    PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
+    Context->CurrentVersion = MAKE_VERSION_ULONGLONG(0, 0, 0, 0);
+    Context->LatestVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
 #else
-    Context->CurrentVersion = ParseVersionString(Context->CurrentVersionString);
+    PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
+    Context->CurrentVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
     Context->LatestVersion = ParseVersionString(Context->Version);
 #endif
 
@@ -1207,6 +1244,11 @@ VOID ShowStartupUpdateDialog(
 
         if (jsonObject = PhCreateJsonParserEx(jsonString, TRUE))
         {
+            ULONG majorVersion;
+            ULONG minorVersion;
+            ULONG buildVersion;
+            ULONG revisionVersion;
+
             context->Version = PhGetJsonValueAsString(jsonObject, "version");
             context->RelDate = PhGetJsonValueAsString(jsonObject, "updated");
             context->CommitHash = PhGetJsonValueAsString(jsonObject, "commit");
@@ -1214,11 +1256,14 @@ VOID ShowStartupUpdateDialog(
             context->SetupFileLength = PhFormatSize(PhGetJsonValueAsUInt64(jsonObject, "setup_length"), 2);
             context->SetupFileHash = PhGetJsonValueAsString(jsonObject, "setup_hash");
             context->SetupFileSignature = PhGetJsonValueAsString(jsonObject, "setup_sig");
-            context->CurrentVersion = ParseVersionString(context->CurrentVersionString);
+
+            PhGetPhVersionNumbers(&majorVersion, &minorVersion, &buildVersion, &revisionVersion);
 #ifdef FORCE_LATEST_VERSION
-            context->LatestVersion = ParseVersionString(context->CurrentVersionString);
+            context->LatestVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
+            context->CurrentVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
 #else
             context->LatestVersion = ParseVersionString(context->Version);
+            context->CurrentVersion = MAKE_VERSION_ULONGLONG(majorVersion, minorVersion, buildVersion, revisionVersion);
 #endif
             PhFreeJsonObject(jsonObject);
         }
